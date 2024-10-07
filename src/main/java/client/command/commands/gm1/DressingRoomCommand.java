@@ -134,7 +134,7 @@ public class DressingRoomCommand extends Command {
                     int itemId = equip.getItemId();
 
                     output += "#L" + itemId + "#"; // Dialog Selector
-                    output += "#v" + itemId + "#"; // Item Icon
+//                    output += "#v" + itemId + "#"; // Item Icon
                     output += "#z" + itemId + "#"; // Item Name + Stats
                     output += " - #b" + itemId + "\r\n"; // Item ID
                     count++;
