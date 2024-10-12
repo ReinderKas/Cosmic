@@ -48,6 +48,7 @@ import constants.skills.Cleric;
 import constants.skills.Corsair;
 import constants.skills.Crossbowman;
 import constants.skills.Crusader;
+import constants.skills.DarkKnight;
 import constants.skills.DawnWarrior;
 import constants.skills.DragonKnight;
 import constants.skills.Evan;
@@ -743,6 +744,10 @@ public abstract class AbstractDealDamageHandler extends AbstractPacketHandler {
 
             canCrit = true;
             calcDmgMax *= 1.4;
+        }
+
+        if (chr.getSkillLevel(DarkKnight.BERSERK) > 0) {
+            calcDmgMax *= 2;
         }
 
         boolean shadowPartner = chr.getBuffEffect(BuffStat.SHADOWPARTNER) != null;
