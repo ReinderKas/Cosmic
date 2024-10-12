@@ -45,6 +45,7 @@ public enum EquipType {
     Pendant(112),
     Belt(113),
     Medal(114),
+    CASH_WEAPON(170),
     PET_EQUIP(180),
     PET_EQUIP_FIELD(181),
     PET_EQUIP_LABEL(182),

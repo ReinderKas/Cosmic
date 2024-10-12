@@ -34,20 +34,21 @@ import server.ItemInformationProvider;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 
-public class DressingRoomCommand extends Command {
+public class DressingRoomCashCommand extends Command {
+
+    public static final int PAGE_SIZE = 100;
+
     {
-        setDescription("Find equipments with conditions");
+        setDescription("Find cash equipments");
     }
 
     @Override
     public void execute(Client c, String[] params) {
         Character player = c.getPlayer();
         if (params.length < 1) {
-            player.dropMessage(5, "Please do !dress <type> <job> <optional req.level>");
+            player.dropMessage(5, "Please do !dresscash <type> <page>");
             return;
         }
 
@@ -55,7 +56,7 @@ public class DressingRoomCommand extends Command {
         if (equipType == EquipType.UNDEFINED) {
             player.dropMessage(5, "Unknown EquipType");
             player.dropMessage(5, "Possible EquipTypes are:");
-            List<String> unusedTypes = Arrays.asList("UNDEFINED", "FACE", "HAIR", "CASH_WEAPON");
+            List<String> unusedTypes = Arrays.asList("UNDEFINED", "FACE", "HAIR");
 
             for (EquipType type : EquipType.values()) {
                 if (type.name().startsWith("PET") || unusedTypes.contains(type.name())) {
@@ -65,29 +66,14 @@ public class DressingRoomCommand extends Command {
             }
             return;
         }
-        String param1 = "";
-        try {
-            param1 = params[1].toLowerCase();
-        } catch (Exception ignored) {
-        }
 
-        int job = 0; // Default job / Beginner
-        if (param1.equals("1") || param1.startsWith("w")) {
-            job = 1;
-        } else if (param1.equals("2") || param1.startsWith("m")) {
-            job = 2;
-        } else if (param1.equals("3") || param1.startsWith("bo")) {
-            job = 3;
-        } else if (param1.equals("4") || param1.startsWith("t")) {
-            job = 4;
-        } else if (param1.equals("5") || param1.startsWith("p")) {
-            job = 5;
-        }
-
-        int forLevel = 0;
-        try {
-            forLevel = Integer.parseInt(params[2]);
-        } catch (Exception ignored) {
+        int page = 1;
+        if (params.length >= 2) {
+            try {
+                page = Integer.parseInt(params[1]);
+            } catch (Exception ignored) {
+                player.dropMessage(5, "Invalid page, showing page 1");
+            }
         }
 
         if (!c.tryacquireClient()) {
@@ -102,42 +88,24 @@ public class DressingRoomCommand extends Command {
 
             List<EquipStats> result = new ArrayList<>();
             for (EquipStats equip : equips) {
-                if (ii.isCash(equip.getItemId())) {
+                if (!ii.isCash(equip.getItemId())) {
                     continue;
                 }
-                Map<String, Integer> stats = equip.getStats();
-                int reqJob = stats.get("reqJob");
-                // Filter by job
-                if (reqJob == 0 || (reqJob & (1 << (job - 1))) != 0) { // Check if bit at job-th position is 1
-
-                    // Filter by level
-                    int reqLevel = stats.getOrDefault("reqLevel", 0);
-                    if (forLevel == 0 || reqLevel <= forLevel) {
-                        result.add(equip);
-                    }
-                }
+                result.add(equip);
             }
+            int totalFound = result.size();
+            int totalPage = (int) Math.ceil((double) totalFound / PAGE_SIZE);
 
-            result.sort(Comparator.comparingInt((EquipStats equip) ->
-                                equip.getStats().getOrDefault("reqLevel", 0)) // Default to 0 if reqLevel is null
-                        .thenComparingInt(equip ->
-                            equip.getStats().getOrDefault("PAD", 0) * 3
-                                    + equip.getStats().getOrDefault("MAD", 0)
-                                    + equip.getStats().getOrDefault("STR", 0)
-                                    + equip.getStats().getOrDefault("DEX", 0)
-                                    + equip.getStats().getOrDefault("INT", 0)
-                                    + equip.getStats().getOrDefault("LUK", 0)
-                                    + equip.getStats().getOrDefault("tuc", 0) * 5
-                    ).reversed());
+            result = result.subList(Math.clamp((long) (page - 1) * PAGE_SIZE, 0, totalFound), Math.clamp((long) page * PAGE_SIZE, 0, totalFound));
 
             for (EquipStats equip : result) {
-                if (count >= 200) { // limit to reduce spam
+                if (count >= PAGE_SIZE) { // limit to reduce spam
                     break;
                 }
                 int itemId = equip.getItemId();
 
                 output += "#L" + itemId + "#"; // Dialog Selector
-//                    output += "#v" + itemId + "#"; // Item Icon
+                output += "#v" + itemId + "#"; // Item Icon
                 output += "#z" + itemId + "#"; // Item Name + Stats
                 output += " - #b" + itemId + "\r\n"; // Item ID
                 count++;
@@ -147,7 +115,7 @@ public class DressingRoomCommand extends Command {
                 return;
             }
 
-            output = "#kShowing " + count + " / " + result.size() + ":\r\n" + output;
+            output = "\r\nShowing " + count + " results from page " + page + " / " + totalPage + ":\r\n\r\n" + output + "\r\n.";
 
             c.getAbstractPlayerInteraction().npcTalk(NpcId.MAPLE_ADMINISTRATOR, output);
         } finally {
