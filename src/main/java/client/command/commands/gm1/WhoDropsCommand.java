@@ -28,6 +28,7 @@ import client.Client;
 import client.command.Command;
 import constants.id.NpcId;
 import server.ItemInformationProvider;
+import server.life.LifeFactory;
 import server.life.MonsterInformationProvider;
 import tools.DatabaseConnection;
 import tools.Pair;
@@ -81,9 +82,11 @@ public class WhoDropsCommand extends Command {
 
                     try (ResultSet rs = ps.executeQuery()) {
                         while (rs.next()) {
-                            String resultName = MonsterInformationProvider.getInstance().getMobNameFromId(rs.getInt("dropperid"));
+                            int dropperid = rs.getInt("dropperid");
+                            String resultName = MonsterInformationProvider.getInstance().getMobNameFromId(dropperid);
+                            String level = "(" + LifeFactory.getMonsterLevel(dropperid) + ")";
                             if (resultName != null) {
-                                output.append(resultName).append(", ");
+                                output.append(resultName).append(level).append(", ");
                             }
                         }
                     }
