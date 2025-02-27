@@ -33,6 +33,9 @@ import client.inventory.Pet;
 import config.YamlConfig;
 import constants.inventory.ItemConstants;
 import server.ItemInformationProvider;
+import tools.Pair;
+
+import java.util.ArrayList;
 
 import static java.util.concurrent.TimeUnit.DAYS;
 
@@ -50,17 +53,43 @@ public class ItemDropCommand extends Command {
             return;
         }
 
-        int itemId = Integer.parseInt(params[0]);
+        int itemId;
+        short quantity = 1;
+
+        try {
+            itemId = Integer.parseInt(params[0]);
+            if (params.length >= 2) {
+                quantity = Short.parseShort(params[1]);
+            }
+        } catch (Exception e) {
+            int size = params.length;
+
+            String lastParam = params[params.length - 1];
+            if (isNumber(lastParam)) {
+                size--;
+                quantity = Short.parseShort(lastParam);
+            }
+
+            StringBuilder query = new StringBuilder();
+            for (int i = 0; i < size; i++) {
+                query.append(params[i]);
+                if (i < size - 1) {
+                    query.append(" ");
+                }
+            }
+            ArrayList<Pair<Integer, String>> searchResult = ItemInformationProvider.getInstance().getItemDataByName(query.toString());
+            if (searchResult == null || searchResult.isEmpty() || searchResult.getFirst() == null) {
+                player.yellowMessage("Item '" + query + "' does not exist.");
+                return;
+            }
+            itemId = searchResult.getFirst().getLeft();
+        }
+
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
 
         if (ii.getName(itemId) == null) {
             player.yellowMessage("Item id '" + params[0] + "' does not exist.");
             return;
-        }
-
-        short quantity = 1;
-        if (params.length >= 2) {
-            quantity = Short.parseShort(params[1]);
         }
 
         if (YamlConfig.config.server.BLOCK_GENERATE_CASH_ITEM && ii.isCash(itemId)) {
@@ -109,7 +138,7 @@ public class ItemDropCommand extends Command {
             toDrop = new Item(itemId, (short) 0, quantity);
         }
 
-        toDrop.setOwner(player.getName());
+//        toDrop.setOwner(player.getName());
         if (player.gmLevel() < 3) {
             short f = toDrop.getFlag();
             f |= ItemConstants.ACCOUNT_SHARING;
@@ -121,5 +150,9 @@ public class ItemDropCommand extends Command {
         }
 
         c.getPlayer().getMap().spawnItemDrop(c.getPlayer(), c.getPlayer(), toDrop, c.getPlayer().getPosition(), true, true);
+    }
+
+    private static boolean isNumber(String string) {
+        return string != null && string.matches("-?\\d+(\\.\\d+)?");
     }
 }
