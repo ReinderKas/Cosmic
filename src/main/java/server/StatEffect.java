@@ -640,7 +640,7 @@ public class StatEffect {
                     break;
                 case WindArcher.WIND_WALK:
                     statups.add(new Pair<>(BuffStat.WIND_WALK, x));
-                    //break;    thanks Vcoc for noticing WW not showing for other players when changing maps
+                    break;    //thanks Vcoc for noticing WW not showing for other players when changing maps
                 case Rogue.DARK_SIGHT:
                 case NightWalker.DARK_SIGHT:
                     statups.add(new Pair<>(BuffStat.DARKSIGHT, x));
