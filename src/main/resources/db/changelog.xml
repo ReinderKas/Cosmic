@@ -6,7 +6,7 @@
         http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
 
     <changeSet id="1" author="Ponk">
-        <sqlFile path="db/test-liquibase.sql"/>
+        <sqlFile path="db/001-accounts.sql"/>
     </changeSet>
 
 </databaseChangeLog>
