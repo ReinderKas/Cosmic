@@ -25,4 +25,8 @@
         <sqlFile path="db/005-pet.sql"/>
     </changeSet>
 
+    <changeSet id="6" author="Ponk">
+        <sqlFile path="db/006-quest.sql"/>
+    </changeSet>
+
 </databaseChangeLog>
