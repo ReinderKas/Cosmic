@@ -29,4 +29,8 @@
         <sqlFile path="db/006-quest.sql"/>
     </changeSet>
 
+    <changeSet id="7" author="Ponk">
+        <sqlFile path="db/007-guild.sql"/>
+    </changeSet>
+
 </databaseChangeLog>
