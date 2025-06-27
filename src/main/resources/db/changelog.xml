@@ -21,4 +21,8 @@
         <sqlFile path="db/004-skill.sql"/>
     </changeSet>
 
+    <changeSet id="5" author="Ponk">
+        <sqlFile path="db/005-pet.sql"/>
+    </changeSet>
+
 </databaseChangeLog>
