@@ -33,4 +33,8 @@
         <sqlFile path="db/007-guild.sql"/>
     </changeSet>
 
+    <changeSet id="8" author="Ponk">
+        <sqlFile path="db/008-keymap.sql"/>
+    </changeSet>
+
 </databaseChangeLog>
