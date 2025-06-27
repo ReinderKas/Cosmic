@@ -13,4 +13,8 @@
         <sqlFile path="db/002-characters.sql"/>
     </changeSet>
 
+    <changeSet id="3" author="Ponk">
+        <sqlFile path="db/003-inventory.sql"/>
+    </changeSet>
+
 </databaseChangeLog>
