@@ -39,3 +39,30 @@ CREATE TABLE lb_queststatus
     info          TINYINT      NOT NULL DEFAULT '0',
     PRIMARY KEY (queststatusid)
 );
+
+CREATE TABLE lb_area_info
+(
+    id     INT          NOT NULL AUTO_INCREMENT,
+    charid INT          NOT NULL,
+    area   INT          NOT NULL,
+    info   VARCHAR(200) NOT NULL,
+    PRIMARY KEY (id)
+);
+
+CREATE TABLE lb_eventstats
+(
+    characterid INT UNSIGNED NOT NULL,
+    name        VARCHAR(11)  NOT NULL DEFAULT '0' COMMENT '0',
+    info        INT          NOT NULL,
+    PRIMARY KEY (characterid)
+);
+
+CREATE TABLE lb_medalmaps
+(
+    id            INT          NOT NULL AUTO_INCREMENT,
+    characterid   INT          NOT NULL,
+    queststatusid INT UNSIGNED NOT NULL,
+    mapid         INT          NOT NULL,
+    PRIMARY KEY (id),
+    KEY queststatusid (queststatusid)
+);
