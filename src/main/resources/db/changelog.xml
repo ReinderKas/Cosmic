@@ -37,4 +37,8 @@
         <sqlFile path="db/008-keymap.sql"/>
     </changeSet>
 
+    <changeSet id="9" author="Ponk">
+        <sqlFile path="db/009-drops.sql"/>
+    </changeSet>
+
 </databaseChangeLog>
