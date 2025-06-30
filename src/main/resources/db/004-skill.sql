@@ -7,7 +7,8 @@ CREATE TABLE lb_skills
     masterlevel INT    NOT NULL DEFAULT '0',
     expiration  BIGINT NOT NULL DEFAULT '-1',
     PRIMARY KEY (id),
-    UNIQUE INDEX skillpair (skillid, characterid)
+    UNIQUE INDEX skillpair (skillid, characterid),
+    FOREIGN KEY (characterid) REFERENCES lb_characters (id) ON DELETE CASCADE
 );
 
 CREATE TABLE lb_cooldowns
