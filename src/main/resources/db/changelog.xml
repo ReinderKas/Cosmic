@@ -49,4 +49,8 @@
         <sqlFile path="db/011-shop.sql"/>
     </changeSet>
 
+    <changeSet id="12" author="Ponk">
+        <sqlFile path="db/012-character-state.sql"/>
+    </changeSet>
+
 </databaseChangeLog>
