@@ -45,4 +45,8 @@
         <sqlFile path="db/010-storage.sql"/>
     </changeSet>
 
+    <changeSet id="11" author="Ponk">
+        <sqlFile path="db/011-shop.sql"/>
+    </changeSet>
+
 </databaseChangeLog>
