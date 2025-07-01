@@ -195,9 +195,6 @@ USE `cosmic`;
 (6230500, 2048013, 1, 1, 0, 750),
 (7130601, 2048013, 1, 1, 0, 750);
 
-  # delete all inexistent itemids
-  DELETE FROM temp_data WHERE itemid=2290109;
-
   # delete item drops from other mobs named Freezer
   DELETE FROM temp_data WHERE dropperid=9300090;
   DELETE FROM temp_data WHERE dropperid=9420501;
