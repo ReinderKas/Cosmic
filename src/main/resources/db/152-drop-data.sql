@@ -12249,7 +12249,7 @@ VALUES (9400121, 4000138, 1, 1, 0, 600000),
        (9500137, 4031171, 1, 1, 7101, 100000);
 
 #-- copy+paste inside here as many drop data as possible from the spider (drop generator) files --
-INSERT INTO drop_data (dropperid, itemid, minimum_quantity, maximum_quantity, questid, chance)
+INSERT INTO lb_drop_data (dropperid, itemid, minimum_quantity, maximum_quantity, questid, chance)
 VALUES (5100004, 2383034, 1, 1, 0, 10000),
        (2100108, 2381030, 1, 1, 0, 10000),
        (3230300, 2382021, 1, 1, 0, 10000),
