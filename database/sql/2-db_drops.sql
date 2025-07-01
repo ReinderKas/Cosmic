@@ -3,15 +3,6 @@
 
 USE `cosmic`;
 
-  -- missing content for Bob found thanks to drmdsr & Thora
-  # normalize item drops for Bob the Snail
-  INSERT INTO temp_data (`dropperid`, `itemid`, `minimum_quantity`, `maximum_quantity`, `questid`, `chance`)
-  SELECT  9400551, temp_data.itemid, temp_data.minimum_quantity, temp_data.maximum_quantity, temp_data.questid, LEAST(temp_data.chance * 80, 999999)
-  FROM    temp_data
-  WHERE   temp_data.dropperid = 100100;
-
-  UPDATE IGNORE temp_data SET minimum_quantity=1000, maximum_quantity=5000 WHERE dropperid=9400551 AND itemid=0;
-
   # normalize item drops for left-side Pianus
   DELETE FROM temp_data WHERE dropperid=8520000;
 
