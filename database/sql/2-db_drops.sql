@@ -3,10 +3,6 @@
 
 USE `cosmic`;
 
-  # delete/normalize item drops from clones of Pink Bean
-  DELETE FROM temp_data WHERE dropperid=8820000;
-  DELETE FROM temp_data WHERE dropperid>=8820010 AND dropperid<=8820014;
-
   INSERT INTO temp_data (`dropperid`, `itemid`, `minimum_quantity`, `maximum_quantity`, `questid`, `chance`)
   SELECT  8820000, temp_data.itemid, temp_data.minimum_quantity, temp_data.maximum_quantity, temp_data.questid, temp_data.chance
   FROM    temp_data
