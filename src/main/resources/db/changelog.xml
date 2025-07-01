@@ -85,4 +85,8 @@
         <sqlFile path="db/020-maker.sql"/>
     </changeSet>
 
+    <changeSet id="21" author="Ponk">
+        <sqlFile path="db/021-field-objects.sql"/>
+    </changeSet>
+
 </databaseChangeLog>
