@@ -4,11 +4,6 @@
 USE `cosmic`;
 
   INSERT INTO temp_data (`dropperid`, `itemid`, `minimum_quantity`, `maximum_quantity`, `questid`, `chance`)
-  SELECT  8820000, temp_data.itemid, temp_data.minimum_quantity, temp_data.maximum_quantity, temp_data.questid, temp_data.chance
-  FROM    temp_data
-  WHERE   temp_data.dropperid = 8820001;
-
-  INSERT INTO temp_data (`dropperid`, `itemid`, `minimum_quantity`, `maximum_quantity`, `questid`, `chance`)
   SELECT  9300153, temp_data.itemid, temp_data.minimum_quantity, temp_data.maximum_quantity, temp_data.questid, temp_data.chance
   FROM    temp_data
   WHERE   temp_data.dropperid = 5110300;
