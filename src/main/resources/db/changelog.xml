@@ -6,11 +6,11 @@
         http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
 
     <changeSet id="1" author="Ponk">
-        <sqlFile path="db/001-accounts.sql"/>
+        <sqlFile path="db/001-account.sql"/>
     </changeSet>
 
     <changeSet id="2" author="Ponk">
-        <sqlFile path="db/002-characters.sql"/>
+        <sqlFile path="db/002-character.sql"/>
     </changeSet>
 
     <changeSet id="3" author="Ponk">
@@ -38,7 +38,7 @@
     </changeSet>
 
     <changeSet id="9" author="Ponk">
-        <sqlFile path="db/009-drops.sql"/>
+        <sqlFile path="db/009-drop.sql"/>
     </changeSet>
 
     <changeSet id="10" author="Ponk">
@@ -54,7 +54,7 @@
     </changeSet>
 
     <changeSet id="13" author="Ponk">
-        <sqlFile path="db/013-cash-shop.sql"/>
+        <sqlFile path="db/013-cashshop.sql"/>
     </changeSet>
 
     <changeSet id="14" author="Ponk">
@@ -86,7 +86,7 @@
     </changeSet>
 
     <changeSet id="21" author="Ponk">
-        <sqlFile path="db/021-field-objects.sql"/>
+        <sqlFile path="db/021-field-object.sql"/>
     </changeSet>
 
     <changeSet id="22" author="Ponk">
