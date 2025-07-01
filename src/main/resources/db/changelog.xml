@@ -129,4 +129,8 @@
         <sqlFile path="db/131-reactordrops-data.sql"/>
     </changeSet>
 
+    <changeSet id="141" author="Ponk">
+        <sqlFile path="db/141-specialcashitems-data.sql"/>
+    </changeSet>
+
 </databaseChangeLog>

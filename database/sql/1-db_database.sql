@@ -13478,9 +13478,6 @@ CREATE TABLE IF NOT EXISTS `specialcashitems` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
-INSERT INTO `specialcashitems` (`id`, `sn`, `modifier`, `info`) VALUES
-(1, 10000617, 1024, 1);
-
 CREATE TABLE IF NOT EXISTS `storages` (
   `storageid` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `accountid` int(11) NOT NULL DEFAULT '0',
