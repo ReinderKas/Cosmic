@@ -22610,18 +22610,6 @@ DELETE FROM temp_data WHERE dropperid >= 9300315 AND dropperid <= 9300324;
     (9202012, 1372011, 25, -1),
     (9202012, 1442046, 25, -1);
 
-  # updates info for all cards on monster book
-  DROP TABLE `monstercarddata`;
-  CREATE TABLE IF NOT EXISTS `monstercarddata` (
-    `id` int(11) NOT NULL AUTO_INCREMENT,
-    `cardid` int(11) NOT NULL DEFAULT '0',
-    `mobid` int(11) NOT NULL DEFAULT '0',
-    PRIMARY KEY (`id`) USING BTREE,
-    UNIQUE KEY `id` (`id`)
-  ) ENGINE=InnoDB  DEFAULT CHARSET=latin1 AUTO_INCREMENT=1 ;
-
-  INSERT INTO `monstercarddata` (`cardid`, `mobid`) (SELECT itemid, min(dropperid) FROM drop_data where itemid>=2380000 and itemid<2390000 group by itemid);
-
   # delete all unused content on drop data
   DELETE FROM `drop_data` WHERE itemid=400000;
   DELETE FROM `drop_data` WHERE itemid=400001;
