@@ -139,5 +139,8 @@
     <changeSet id="151" author="Ponk">
         <sqlFile path="db/151-global-drop-data.sql"/>
     </changeSet>
+    <changeSet id="152" author="Ponk">
+        <sqlFile path="db/152-drop-data.sql"/>
+    </changeSet>
 
 </databaseChangeLog>
