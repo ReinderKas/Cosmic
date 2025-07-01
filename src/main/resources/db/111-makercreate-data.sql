@@ -1,4 +1,4 @@
-# updated with the SkillMakerFetcher tool
+# generated with the SkillMakerFetcher tool
 INSERT INTO lb_makercreatedata (id, itemid, req_level, req_maker_level, req_meso, req_item, req_equip, catalyst,
                                 quantity, tuc)
 VALUES (0, 4250000, 45, 1, 110000, 0, 0, 0, 1, 0),

@@ -117,5 +117,8 @@
     <changeSet id="113" author="Ponk">
         <sqlFile path="db/113-makerreward-data.sql"/>
     </changeSet>
+    <changeSet id="114" author="Ponk">
+        <sqlFile path="db/114-makerreagent-data.sql"/>
+    </changeSet>
 
 </databaseChangeLog>
