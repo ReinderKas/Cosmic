@@ -132,5 +132,8 @@
     <changeSet id="141" author="Ponk">
         <sqlFile path="db/141-specialcashitems-data.sql"/>
     </changeSet>
+    <changeSet id="142" author="Ponk">
+        <sqlFile path="db/142-nxcoupons-data.sql"/>
+    </changeSet>
 
 </databaseChangeLog>
