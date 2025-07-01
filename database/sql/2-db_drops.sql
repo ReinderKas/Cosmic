@@ -3,11 +3,6 @@
 
 USE `cosmic`;
 
-  INSERT INTO temp_data (`dropperid`, `itemid`, `minimum_quantity`, `maximum_quantity`, `questid`, `chance`)
-  SELECT  9300153, temp_data.itemid, temp_data.minimum_quantity, temp_data.maximum_quantity, temp_data.questid, temp_data.chance
-  FROM    temp_data
-  WHERE   temp_data.dropperid = 5110300;
-
   # zhelms, pink bean customs
   DELETE FROM temp_data WHERE itemid=1002357;
   INSERT IGNORE INTO temp_data (`dropperid`, `itemid`, `minimum_quantity`, `maximum_quantity`, `questid`, `chance`) VALUES
