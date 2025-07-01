@@ -8,7 +8,6 @@ CREATE TABLE lb_drop_data
     questid          INT    NOT NULL DEFAULT '0',
     chance           INT    NOT NULL DEFAULT '0',
     PRIMARY KEY (id),
-    UNIQUE KEY (dropperid, itemid),
     KEY mobid (dropperid),
     INDEX (dropperid, itemid)
 );
