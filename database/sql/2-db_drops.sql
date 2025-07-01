@@ -3,10 +3,6 @@
 
 USE `cosmic`;
 
-  # delete item drops from other mobs named Freezer
-  DELETE FROM temp_data WHERE dropperid=9300090;
-  DELETE FROM temp_data WHERE dropperid=9420501;
-
   -- missing content for Bob found thanks to drmdsr & Thora
   # normalize item drops for Bob the Snail
   INSERT INTO temp_data (`dropperid`, `itemid`, `minimum_quantity`, `maximum_quantity`, `questid`, `chance`)
@@ -14,7 +10,6 @@ USE `cosmic`;
   FROM    temp_data
   WHERE   temp_data.dropperid = 100100;
 
-  DELETE FROM temp_data WHERE dropperid=9400551 AND itemid=4000019;
   UPDATE IGNORE temp_data SET minimum_quantity=1000, maximum_quantity=5000 WHERE dropperid=9400551 AND itemid=0;
 
   # normalize item drops for left-side Pianus
@@ -38,36 +33,6 @@ USE `cosmic`;
   SELECT  9300153, temp_data.itemid, temp_data.minimum_quantity, temp_data.maximum_quantity, temp_data.questid, temp_data.chance
   FROM    temp_data
   WHERE   temp_data.dropperid = 5110300;
-
-  # reinsert other Freezer's data
-  INSERT IGNORE INTO temp_data (`dropperid`, `itemid`, `minimum_quantity`, `maximum_quantity`, `questid`, `chance`) VALUES
-(9420501, 0, 92, 138, 0, 400000),
-(9420501, 4000372, 1, 1, 0, 300000),
-(9420501, 400003, 1, 1, 0, 10000),
-(9420501, 400002, 1, 1, 0, 10000),
-(9420501, 404000, 1, 1, 0, 300),
-(9420501, 4010005, 1, 1, 0, 300),
-(9420501, 2043301, 1, 1, 0, 1000),
-(9420501, 1072103, 1, 1, 0, 2000),
-(9420501, 1032008, 1, 1, 0, 1800),
-(9420501, 1050011, 1, 1, 0, 1800),
-(9420501, 1040044, 1, 1, 0, 2000),
-(9420501, 1060033, 1, 1, 0, 2000),
-(9420501, 1302017, 1, 1, 0, 1800),
-(9420501, 2048005, 1, 1, 0, 1000),
-(9420501, 2020028, 1, 1, 0, 20000),
-(9420501, 1050051, 1, 1, 0, 1800),
-(9420501, 1040099, 1, 1, 0, 2000),
-(9420501, 1060088, 1, 1, 0, 2000),
-(9420501, 1050058, 1, 1, 0, 1800),
-(9420501, 1332020, 1, 1, 0, 1500),
-(9420501, 4006001, 1, 1, 0, 5000),
-(9420501, 4030012, 1, 1, 0, 125000),
-(9420501, 1072297, 1, 1, 0, 2000),
-(9420501, 1482001, 1, 1, 0, 2000),
-(9420501, 1482005, 1, 1, 0, 2000),
-(9420501, 1492005, 1, 1, 0, 2000),
-(8820001, 2388043, 1, 1, 0, 24000);
 
   # zhelms, pink bean customs
   DELETE FROM temp_data WHERE itemid=1002357;
