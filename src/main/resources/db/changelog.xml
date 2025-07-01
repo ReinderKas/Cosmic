@@ -73,4 +73,8 @@
         <sqlFile path="db/017-family.sql"/>
     </changeSet>
 
+    <changeSet id="18" author="Ponk">
+        <sqlFile path="db/018-transfer.sql"/>
+    </changeSet>
+
 </databaseChangeLog>
