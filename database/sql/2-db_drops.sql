@@ -6,9 +6,7 @@ USE `cosmic`;
 
   #--------------------------------------------------------------------------------------------
 
-  #reinsert Kerning Square loot
-  DELETE FROM temp_data WHERE dropperid>=4300006 AND dropperid<=4300013;
-
+  #insert Kerning Square loot
   INSERT IGNORE INTO temp_data (`dropperid`, `itemid`, `minimum_quantity`, `maximum_quantity`, `questid`, `chance`) VALUES
 (3400000,1002098,1,1,0,1500),
 (3400000,1002154,1,1,0,1500),
