@@ -270,18 +270,6 @@ USE `cosmic`;
 (8820001, 1002971, 3, 5, 0, 80000),
 (8820001, 1052202, 3, 5, 0, 80000);
 
-  # delete item drops from bosses in inactive form
-  DELETE FROM temp_data WHERE dropperid=4220001;
-  DELETE FROM temp_data WHERE dropperid=5220001;
-
-  # delete item drops from summoned mobs
-  DELETE FROM temp_data WHERE dropperid=9500100;
-  DELETE FROM temp_data WHERE dropperid=9300103;
-  DELETE FROM temp_data WHERE dropperid=9300104;
-
-  # delete item drops from Dojo summoned mobs
-  DELETE FROM temp_data WHERE dropperid>=9300217 AND dropperid<=9300270;
-
   UPDATE IGNORE temp_data SET chance=700 WHERE itemid=1302056;
 
   UPDATE IGNORE temp_data SET dropperid=9000002 WHERE dropperid=9000000;
