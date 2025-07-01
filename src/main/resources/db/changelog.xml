@@ -69,4 +69,8 @@
         <sqlFile path="db/016-monsterbook.sql"/>
     </changeSet>
 
+    <changeSet id="17" author="Ponk">
+        <sqlFile path="db/017-family.sql"/>
+    </changeSet>
+
 </databaseChangeLog>
