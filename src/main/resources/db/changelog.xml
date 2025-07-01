@@ -81,4 +81,8 @@
         <sqlFile path="db/019-mts.sql"/>
     </changeSet>
 
+    <changeSet id="20" author="Ponk">
+        <sqlFile path="db/020-maker.sql"/>
+    </changeSet>
+
 </databaseChangeLog>
