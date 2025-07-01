@@ -101,4 +101,12 @@
         <sqlFile path="db/024-duey.sql"/>
     </changeSet>
 
+    <changeSet id="101" author="Ponk">
+        <sqlFile path="db/101-shops-data.sql"/>
+    </changeSet>
+
+    <changeSet id="102" author="Ponk">
+        <sqlFile path="db/102-shopitems-data.sql"/>
+    </changeSet>
+
 </databaseChangeLog>
