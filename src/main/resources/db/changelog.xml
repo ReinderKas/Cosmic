@@ -104,7 +104,6 @@
     <changeSet id="101" author="Ponk">
         <sqlFile path="db/101-shops-data.sql"/>
     </changeSet>
-
     <changeSet id="102" author="Ponk">
         <sqlFile path="db/102-shopitems-data.sql"/>
     </changeSet>
@@ -112,9 +111,11 @@
     <changeSet id="111" author="Ponk">
         <sqlFile path="db/111-makercreate-data.sql"/>
     </changeSet>
-
     <changeSet id="112" author="Ponk">
         <sqlFile path="db/112-makerrecipe-data.sql"/>
+    </changeSet>
+    <changeSet id="113" author="Ponk">
+        <sqlFile path="db/113-makerreward-data.sql"/>
     </changeSet>
 
 </databaseChangeLog>
