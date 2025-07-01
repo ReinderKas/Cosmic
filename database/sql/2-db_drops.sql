@@ -3,7 +3,6 @@
 
 USE `cosmic`;
 
-  UPDATE IGNORE temp_data SET dropperid=9000002 WHERE dropperid=9000000;
   UPDATE IGNORE temp_data SET chance=600000 WHERE itemid=4000058;
 
   # update USE drops that were supposed to be ETC
