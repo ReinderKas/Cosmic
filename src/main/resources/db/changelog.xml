@@ -89,4 +89,8 @@
         <sqlFile path="db/021-field-objects.sql"/>
     </changeSet>
 
+    <changeSet id="22" author="Ponk">
+        <sqlFile path="db/022-ban.sql"/>
+    </changeSet>
+
 </databaseChangeLog>
