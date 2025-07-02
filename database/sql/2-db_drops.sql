@@ -25,9 +25,6 @@ USE `cosmic`;
   );
   DROP TABLE temp_data;
 
-  # make Sword Earrings not drop by normal means, just like Shield Earrings
-  DELETE FROM drop_data WHERE itemid=1032030;
-
   # remove every non-card drop from bosses out of their natural habitat
   DELETE FROM drop_data WHERE dropperid >= 9300184 AND dropperid < 9300215 AND (itemid < 2380000 OR itemid >= 2390000);
   DELETE FROM drop_data WHERE dropperid >= 9500337 AND dropperid < 9500364 AND (itemid < 2380000 OR itemid >= 2390000);
