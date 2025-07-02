@@ -25,9 +25,6 @@ USE `cosmic`;
   );
   DROP TABLE temp_data;
 
-  UPDATE drop_data SET chance=70000 WHERE itemid=4001356;
-  UPDATE drop_data SET chance=7000 WHERE itemid=4001006;
-
   UPDATE drop_data SET chance=600000 WHERE itemid=4000058;
   UPDATE drop_data SET chance=3000 WHERE itemid=4005004;
 
