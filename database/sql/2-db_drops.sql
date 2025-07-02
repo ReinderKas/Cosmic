@@ -25,9 +25,6 @@ USE `cosmic`;
   );
   DROP TABLE temp_data;
 
-  # remove belts dropping from mobs
-  DELETE FROM drop_data WHERE itemid>=1132000 AND itemid<=1132004;
-
   # remove Liar Tree Sap (unusable)
   DELETE FROM drop_data WHERE itemid=2049101;
 
