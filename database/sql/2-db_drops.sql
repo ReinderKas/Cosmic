@@ -25,10 +25,6 @@ USE `cosmic`;
   );
   DROP TABLE temp_data;
 
-  #update card rates
-  UPDATE drop_data SET chance=24000 WHERE (itemid >= 2388000 AND itemid < 2390000);
-  UPDATE drop_data SET chance=24000 WHERE itemid = 2388046;
-
   #update quest mob items
   UPDATE drop_data SET questid=3232 WHERE itemid=4031098;
   UPDATE drop_data SET questid=3452 WHERE itemid=4001125;
