@@ -25,23 +25,6 @@ USE `cosmic`;
   );
   DROP TABLE temp_data;
 
-  #update quest mob items
-  UPDATE drop_data SET questid=3232 WHERE itemid=4031098;
-  UPDATE drop_data SET questid=3452 WHERE itemid=4001125;
-  UPDATE drop_data SET questid=28248 WHERE itemid=4001360;
-  UPDATE drop_data SET questid=20707 WHERE itemid=4032130;
-  UPDATE drop_data SET questid=28170 WHERE itemid=4001345;
-  UPDATE drop_data SET questid=7301 WHERE itemid=4001077;
-  UPDATE drop_data SET chance=100000, questid=3250 WHERE itemid=4031992;
-  UPDATE drop_data SET questid=6191 WHERE itemid=4001107;
-  UPDATE drop_data SET questid=28344 WHERE itemid=4032475;
-  UPDATE drop_data SET questid=28248 WHERE itemid=4001358;
-  UPDATE drop_data SET questid=28248 WHERE itemid=4001359;
-  UPDATE drop_data SET questid=28175 WHERE itemid=4001342;
-  UPDATE drop_data SET questid=7777 WHERE itemid=4031905;	#id 7777 for ALL "quest items" with no v83 quest.
-  UPDATE drop_data SET questid=6191 WHERE itemid=4031477;
-  UPDATE drop_data SET questid=6190 WHERE itemid=4001111;
-
   # patch Masteria drops being very rare
   UPDATE drop_data SET chance=200000 WHERE itemid>=4032003 AND itemid<=4032033 AND chance=10000;
 
