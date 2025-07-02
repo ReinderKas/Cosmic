@@ -25,10 +25,6 @@ USE `cosmic`;
   );
   DROP TABLE temp_data;
 
-  # remove items being dropped from mobs in HPQ
-  DELETE FROM drop_data WHERE dropperid >= 9300061 AND dropperid <= 9300064;
-  DELETE FROM drop_data WHERE dropperid >= 9300081 AND dropperid <= 9300083;
-
   # remove items being dropped from summoned mobs in PQs
   DELETE FROM drop_data WHERE dropperid >= 9300015 AND dropperid <= 9300017;
   DELETE FROM drop_data WHERE dropperid >= 9300054 AND dropperid <= 9300056;
