@@ -25,9 +25,6 @@ USE `cosmic`;
   );
   DROP TABLE temp_data;
 
-  # remove Liar Tree Sap (unusable)
-  DELETE FROM drop_data WHERE itemid=2049101;
-
   # remove items being dropped from mobs in HPQ
   DELETE FROM drop_data WHERE dropperid >= 9300061 AND dropperid <= 9300064;
   DELETE FROM drop_data WHERE dropperid >= 9300081 AND dropperid <= 9300083;
