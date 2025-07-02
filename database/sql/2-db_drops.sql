@@ -25,9 +25,6 @@ USE `cosmic`;
   );
   DROP TABLE temp_data;
 
-  # patch Masteria drops being very rare
-  UPDATE drop_data SET chance=200000 WHERE itemid>=4032003 AND itemid<=4032033 AND chance=10000;
-
   # remove belts dropping from mobs
   DELETE FROM drop_data WHERE itemid>=1132000 AND itemid<=1132004;
 
