@@ -298,7 +298,6 @@ SET minimum_quantity = CASE
                        WHEN dropperid = 5400000 AND itemid = 2061001 THEN 22
                        WHEN dropperid = 6220000 AND itemid = 2060000 THEN 118
                        WHEN dropperid = 6220000 AND itemid = 2061000 THEN 118
-                       WHEN dropperid = 7120103 AND itemid = 2060003 THEN 22
                        WHEN dropperid = 7220000 AND itemid = 2060001 THEN 64
                        WHEN dropperid = 7220000 AND itemid = 2061001 THEN 64
                        WHEN dropperid = 7220001 AND itemid = 2060001 THEN 63
@@ -341,9 +340,6 @@ SET minimum_quantity = CASE
                        WHEN dropperid = 9400000 AND itemid = 2060001 THEN 16
                        WHEN dropperid = 9400009 AND itemid = 2060001 THEN 130
                        WHEN dropperid = 9400011 AND itemid = 2060002 THEN 17
-                       WHEN dropperid = 9400100 AND itemid = 2060003 THEN 14
-                       WHEN dropperid = 9400101 AND itemid = 2061003 THEN 15
-                       WHEN dropperid = 9400204 AND itemid = 2060003 THEN 17
                        WHEN dropperid = 9400239 AND itemid = 2060000 THEN 31
                        WHEN dropperid = 9400239 AND itemid = 2061000 THEN 31
                        WHEN dropperid = 9400244 AND itemid = 2060000 THEN 77
@@ -667,7 +663,6 @@ SET minimum_quantity = CASE
                        WHEN dropperid = 5400000 AND itemid = 2061001 THEN 28
                        WHEN dropperid = 6220000 AND itemid = 2060000 THEN 148
                        WHEN dropperid = 6220000 AND itemid = 2061000 THEN 148
-                       WHEN dropperid = 7120103 AND itemid = 2060003 THEN 28
                        WHEN dropperid = 7220000 AND itemid = 2060001 THEN 81
                        WHEN dropperid = 7220000 AND itemid = 2061001 THEN 81
                        WHEN dropperid = 7220001 AND itemid = 2060001 THEN 79
@@ -710,9 +705,6 @@ SET minimum_quantity = CASE
                        WHEN dropperid = 9400000 AND itemid = 2060001 THEN 20
                        WHEN dropperid = 9400009 AND itemid = 2060001 THEN 163
                        WHEN dropperid = 9400011 AND itemid = 2060002 THEN 21
-                       WHEN dropperid = 9400100 AND itemid = 2060003 THEN 18
-                       WHEN dropperid = 9400101 AND itemid = 2061003 THEN 19
-                       WHEN dropperid = 9400204 AND itemid = 2060003 THEN 22
                        WHEN dropperid = 9400239 AND itemid = 2060000 THEN 39
                        WHEN dropperid = 9400239 AND itemid = 2061000 THEN 39
                        WHEN dropperid = 9400244 AND itemid = 2060000 THEN 97
