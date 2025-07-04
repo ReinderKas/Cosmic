@@ -152,7 +152,6 @@ SET minimum_quantity = CASE
                        WHEN dropperid = 3110302 AND itemid = 2061000 THEN 45
                        WHEN dropperid = 3110303 AND itemid = 2060000 THEN 49
                        WHEN dropperid = 3110303 AND itemid = 2061000 THEN 49
-                       WHEN dropperid = 3210100 AND itemid = 2060005 THEN 6
                        WHEN dropperid = 3210203 AND itemid = 2060000 THEN 47
                        WHEN dropperid = 3210203 AND itemid = 2061000 THEN 47
                        WHEN dropperid = 3210204 AND itemid = 2060000 THEN 44
@@ -162,13 +161,11 @@ SET minimum_quantity = CASE
                        WHEN dropperid = 3210206 AND itemid = 2060000 THEN 47
                        WHEN dropperid = 3210206 AND itemid = 2061000 THEN 47
                        WHEN dropperid = 3210207 AND itemid = 2060000 THEN 44
-                       WHEN dropperid = 3210207 AND itemid = 2060005 THEN 7
                        WHEN dropperid = 3210207 AND itemid = 2061000 THEN 44
                        WHEN dropperid = 3210208 AND itemid = 2060000 THEN 47
                        WHEN dropperid = 3210208 AND itemid = 2061000 THEN 47
                        WHEN dropperid = 3210450 AND itemid = 2060000 THEN 47
                        WHEN dropperid = 3210450 AND itemid = 2061000 THEN 47
-                       WHEN dropperid = 3210800 AND itemid = 2060005 THEN 8
                        WHEN dropperid = 3220000 AND itemid = 2060000 THEN 63
                        WHEN dropperid = 3220000 AND itemid = 2061000 THEN 63
                        WHEN dropperid = 3230100 AND itemid = 2060000 THEN 45
@@ -532,7 +529,6 @@ SET minimum_quantity = CASE
                        WHEN dropperid = 3110302 AND itemid = 2061000 THEN 57
                        WHEN dropperid = 3110303 AND itemid = 2060000 THEN 62
                        WHEN dropperid = 3110303 AND itemid = 2061000 THEN 62
-                       WHEN dropperid = 3210100 AND itemid = 2060005 THEN 8
                        WHEN dropperid = 3210203 AND itemid = 2060000 THEN 59
                        WHEN dropperid = 3210203 AND itemid = 2061000 THEN 59
                        WHEN dropperid = 3210204 AND itemid = 2060000 THEN 55
@@ -542,13 +538,11 @@ SET minimum_quantity = CASE
                        WHEN dropperid = 3210206 AND itemid = 2060000 THEN 59
                        WHEN dropperid = 3210206 AND itemid = 2061000 THEN 59
                        WHEN dropperid = 3210207 AND itemid = 2060000 THEN 55
-                       WHEN dropperid = 3210207 AND itemid = 2060005 THEN 9
                        WHEN dropperid = 3210207 AND itemid = 2061000 THEN 55
                        WHEN dropperid = 3210208 AND itemid = 2060000 THEN 59
                        WHEN dropperid = 3210208 AND itemid = 2061000 THEN 59
                        WHEN dropperid = 3210450 AND itemid = 2060000 THEN 59
                        WHEN dropperid = 3210450 AND itemid = 2061000 THEN 59
-                       WHEN dropperid = 3210800 AND itemid = 2060005 THEN 10
                        WHEN dropperid = 3220000 AND itemid = 2060000 THEN 79
                        WHEN dropperid = 3220000 AND itemid = 2061000 THEN 79
                        WHEN dropperid = 3230100 AND itemid = 2060000 THEN 57
