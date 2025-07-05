@@ -25,8 +25,6 @@ USE `cosmic`;
   );
   DROP TABLE temp_data;
 
-  UPDATE drop_data SET `chance`=1287 WHERE `chance`=1500;
-
   # MapleSkillbookChanceFetcher! Tuning up some skillbook drop chances in order to fit their dropper's availability (whether's a boss or not) and level.
   # thanks unnqca for reporting some skillbooks having unusually high drop chances.
   REPLACE INTO drop_data (`dropperid`, `itemid`, `minimum_quantity`, `maximum_quantity`, `questid`, `chance`) VALUES
