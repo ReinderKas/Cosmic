@@ -28,7 +28,6 @@ USE `cosmic`;
   # MapleSkillbookChanceFetcher! Tuning up some skillbook drop chances in order to fit their dropper's availability (whether's a boss or not) and level.
   # thanks unnqca for reporting some skillbooks having unusually high drop chances.
   REPLACE INTO drop_data (`dropperid`, `itemid`, `minimum_quantity`, `maximum_quantity`, `questid`, `chance`) VALUES
-(851000, 2290132, 1, 1, 0, 3861),
 (7090000, 2290087, 1, 1, 0, 10000),
 (8090000, 2290045, 1, 1, 0, 10000),
 (8140103, 2290044, 1, 1, 0, 500),
