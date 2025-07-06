@@ -1,13 +1,13 @@
-CREATE TABLE lb_monsterbook
+CREATE TABLE monsterbook
 (
     charid INT NOT NULL,
     cardid INT NOT NULL,
     level  INT NOT NULL DEFAULT '1',
     PRIMARY KEY (charid, cardid),
-    FOREIGN KEY (charid) REFERENCES lb_characters (id) ON UPDATE CASCADE ON DELETE CASCADE
+    FOREIGN KEY (charid) REFERENCES characters (id) ON UPDATE CASCADE ON DELETE CASCADE
 );
 
-CREATE TABLE lb_monstercarddata
+CREATE TABLE monstercarddata
 (
     id     INT NOT NULL AUTO_INCREMENT,
     cardid INT NOT NULL DEFAULT '0',

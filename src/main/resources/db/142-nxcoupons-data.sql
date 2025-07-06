@@ -1,4 +1,4 @@
-INSERT INTO lb_nxcoupons (couponid, rate, activeday, starthour, endhour)
+INSERT INTO nxcoupons (couponid, rate, activeday, starthour, endhour)
 VALUES (211000, 2, 254, 18, 20),
        (211004, 2, 124, 7, 11),
        (211005, 2, 124, 10, 14),

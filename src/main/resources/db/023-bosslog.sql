@@ -1,4 +1,4 @@
-CREATE TABLE lb_bosslog_daily
+CREATE TABLE bosslog_daily
 (
     id          INT                                                       NOT NULL AUTO_INCREMENT,
     characterid INT                                                       NOT NULL,
@@ -7,7 +7,7 @@ CREATE TABLE lb_bosslog_daily
     PRIMARY KEY (id)
 );
 
-CREATE TABLE lb_bosslog_weekly
+CREATE TABLE bosslog_weekly
 (
     id          INT                                                       NOT NULL AUTO_INCREMENT,
     characterid INT                                                       NOT NULL,

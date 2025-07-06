@@ -1,4 +1,4 @@
-CREATE TABLE lb_characters
+CREATE TABLE characters
 (
     id                   INT              NOT NULL AUTO_INCREMENT,
     accountid            INT              NOT NULL DEFAULT '0',

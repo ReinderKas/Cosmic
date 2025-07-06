@@ -1,11 +1,11 @@
-CREATE TABLE lb_shops
+CREATE TABLE shops
 (
     shopid INT UNSIGNED NOT NULL AUTO_INCREMENT,
     npcid  INT          NOT NULL DEFAULT '0',
     PRIMARY KEY (shopid)
 );
 
-CREATE TABLE lb_shopitems
+CREATE TABLE shopitems
 (
     shopitemid INT UNSIGNED NOT NULL AUTO_INCREMENT,
     shopid     INT UNSIGNED NOT NULL,

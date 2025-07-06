@@ -1,4 +1,4 @@
-INSERT INTO lb_reactordrops (reactorid, itemid, chance, questid)
+INSERT INTO reactordrops (reactorid, itemid, chance, questid)
 VALUES (2001, 4031161, 1, 1008),
        (2001, 4031162, 1, 1008),
        (2001, 2010009, 2, -1),
@@ -1049,7 +1049,7 @@ VALUES (2001, 4031161, 1, 1008),
        (6742014, 1132009, 50, -1);
 
 # adding wish tickets on APQ boxes
-INSERT INTO lb_reactordrops (reactorid, itemid, chance, questid)
+INSERT INTO reactordrops (reactorid, itemid, chance, questid)
 VALUES (6702003, 4031543, 1, -1),
        (6702003, 4031544, 2, -1),
        (6702004, 4031544, 1, -1),

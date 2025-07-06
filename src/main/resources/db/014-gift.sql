@@ -1,4 +1,4 @@
-CREATE TABLE lb_gifts
+CREATE TABLE gifts
 (
     id      INT UNSIGNED NOT NULL AUTO_INCREMENT,
     `to`    INT          NOT NULL,
@@ -9,7 +9,7 @@ CREATE TABLE lb_gifts
     PRIMARY KEY (id)
 );
 
-CREATE TABLE lb_notes
+CREATE TABLE notes
 (
     id        INT             NOT NULL AUTO_INCREMENT,
     `to`      VARCHAR(13)     NOT NULL DEFAULT '',
@@ -21,7 +21,7 @@ CREATE TABLE lb_notes
     PRIMARY KEY (id)
 );
 
-CREATE TABLE lb_newyear
+CREATE TABLE newyear
 (
     id              INT UNSIGNED    NOT NULL AUTO_INCREMENT,
     senderid        INT             NOT NULL DEFAULT '-1',

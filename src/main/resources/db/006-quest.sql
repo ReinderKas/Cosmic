@@ -1,4 +1,4 @@
-CREATE TABLE lb_questactions
+CREATE TABLE questactions
 (
     questactionid INT UNSIGNED NOT NULL AUTO_INCREMENT,
     questid       INT          NOT NULL DEFAULT '0',
@@ -7,7 +7,7 @@ CREATE TABLE lb_questactions
     PRIMARY KEY (questactionid)
 );
 
-CREATE TABLE lb_questprogress
+CREATE TABLE questprogress
 (
     id            INT UNSIGNED                                               NOT NULL AUTO_INCREMENT,
     characterid   INT                                                        NOT NULL,
@@ -17,7 +17,7 @@ CREATE TABLE lb_questprogress
     PRIMARY KEY (id)
 );
 
-CREATE TABLE lb_questrequirements
+CREATE TABLE questrequirements
 (
     questrequirementid INT UNSIGNED NOT NULL AUTO_INCREMENT,
     questid            INT          NOT NULL DEFAULT '0',
@@ -26,7 +26,7 @@ CREATE TABLE lb_questrequirements
     PRIMARY KEY (questrequirementid)
 );
 
-CREATE TABLE lb_queststatus
+CREATE TABLE queststatus
 (
     queststatusid INT UNSIGNED NOT NULL AUTO_INCREMENT,
     characterid   INT          NOT NULL DEFAULT '0',
@@ -40,7 +40,7 @@ CREATE TABLE lb_queststatus
     PRIMARY KEY (queststatusid)
 );
 
-CREATE TABLE lb_area_info
+CREATE TABLE area_info
 (
     id     INT          NOT NULL AUTO_INCREMENT,
     charid INT          NOT NULL,
@@ -49,7 +49,7 @@ CREATE TABLE lb_area_info
     PRIMARY KEY (id)
 );
 
-CREATE TABLE lb_eventstats
+CREATE TABLE eventstats
 (
     characterid INT UNSIGNED NOT NULL,
     name        VARCHAR(11)  NOT NULL DEFAULT '0' COMMENT '0',
@@ -57,7 +57,7 @@ CREATE TABLE lb_eventstats
     PRIMARY KEY (characterid)
 );
 
-CREATE TABLE lb_medalmaps
+CREATE TABLE medalmaps
 (
     id            INT          NOT NULL AUTO_INCREMENT,
     characterid   INT          NOT NULL,

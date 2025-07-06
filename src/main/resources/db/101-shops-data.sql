@@ -1,4 +1,4 @@
-INSERT INTO lb_shops (shopid, npcid)
+INSERT INTO shops (shopid, npcid)
 VALUES (11000, 11000),
        (11100, 11100),
        (21000, 21000),

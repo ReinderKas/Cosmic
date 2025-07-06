@@ -1,4 +1,4 @@
-CREATE TABLE lb_accounts
+CREATE TABLE accounts
 (
     id             INT          NOT NULL AUTO_INCREMENT,
     `name`         VARCHAR(13)  NOT NULL DEFAULT '',

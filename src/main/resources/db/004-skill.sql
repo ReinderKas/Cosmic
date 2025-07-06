@@ -1,4 +1,4 @@
-CREATE TABLE lb_skills
+CREATE TABLE skills
 (
     id          INT    NOT NULL AUTO_INCREMENT,
     skillid     INT    NOT NULL DEFAULT '0',
@@ -8,10 +8,10 @@ CREATE TABLE lb_skills
     expiration  BIGINT NOT NULL DEFAULT '-1',
     PRIMARY KEY (id),
     UNIQUE INDEX skillpair (skillid, characterid),
-    FOREIGN KEY (characterid) REFERENCES lb_characters (id) ON DELETE CASCADE
+    FOREIGN KEY (characterid) REFERENCES characters (id) ON DELETE CASCADE
 );
 
-CREATE TABLE lb_cooldowns
+CREATE TABLE cooldowns
 (
     id        INT             NOT NULL AUTO_INCREMENT,
     charid    INT             NOT NULL,
@@ -21,7 +21,7 @@ CREATE TABLE lb_cooldowns
     PRIMARY KEY (id)
 );
 
-CREATE TABLE lb_skillmacros
+CREATE TABLE skillmacros
 (
     id          INT     NOT NULL AUTO_INCREMENT,
     characterid INT     NOT NULL DEFAULT '0',

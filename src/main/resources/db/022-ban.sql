@@ -1,4 +1,4 @@
-CREATE TABLE lb_hwidaccounts
+CREATE TABLE hwidaccounts
 (
     accountid INT         NOT NULL DEFAULT '0',
     hwid      VARCHAR(40) NOT NULL DEFAULT '',
@@ -7,7 +7,7 @@ CREATE TABLE lb_hwidaccounts
     PRIMARY KEY (accountid, hwid)
 );
 
-CREATE TABLE lb_hwidbans
+CREATE TABLE hwidbans
 (
     hwidbanid INT UNSIGNED NOT NULL AUTO_INCREMENT,
     hwid      VARCHAR(30)  NOT NULL,
@@ -15,7 +15,7 @@ CREATE TABLE lb_hwidbans
     UNIQUE KEY hwid_2 (hwid)
 );
 
-CREATE TABLE lb_ipbans
+CREATE TABLE ipbans
 (
     ipbanid INT UNSIGNED NOT NULL AUTO_INCREMENT,
     ip      VARCHAR(40)  NOT NULL DEFAULT '',
@@ -23,7 +23,7 @@ CREATE TABLE lb_ipbans
     PRIMARY KEY (ipbanid)
 );
 
-CREATE TABLE lb_macbans
+CREATE TABLE macbans
 (
     macbanid INT UNSIGNED NOT NULL AUTO_INCREMENT,
     mac      VARCHAR(30)  NOT NULL,
@@ -32,14 +32,14 @@ CREATE TABLE lb_macbans
     UNIQUE KEY mac_2 (mac)
 );
 
-CREATE TABLE lb_macfilters
+CREATE TABLE macfilters
 (
     macfilterid INT UNSIGNED NOT NULL AUTO_INCREMENT,
     filter      VARCHAR(30)  NOT NULL,
     PRIMARY KEY (macfilterid)
 );
 
-CREATE TABLE lb_reports
+CREATE TABLE reports
 (
     id          INT UNSIGNED NOT NULL AUTO_INCREMENT,
     reporttime  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

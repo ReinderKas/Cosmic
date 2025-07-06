@@ -1,4 +1,4 @@
-INSERT INTO lb_makerrecipedata (itemid, req_item, count)
+INSERT INTO makerrecipedata (itemid, req_item, count)
 VALUES (4250000, 4021007, 1),
        (4250100, 4021005, 1),
        (4250200, 4021000, 1),

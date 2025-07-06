@@ -1,4 +1,4 @@
-CREATE TABLE lb_family_character
+CREATE TABLE family_character
 (
     cid             INT    NOT NULL,
     familyid        INT    NOT NULL,
@@ -11,10 +11,10 @@ CREATE TABLE lb_family_character
     lastresettime   BIGINT NOT NULL DEFAULT '0',
     PRIMARY KEY (cid),
     INDEX (cid, familyid),
-    FOREIGN KEY (cid) REFERENCES lb_characters (`id`) ON DELETE CASCADE
+    FOREIGN KEY (cid) REFERENCES characters (`id`) ON DELETE CASCADE
 );
 
-CREATE TABLE lb_family_entitlement
+CREATE TABLE family_entitlement
 (
     id            INT    NOT NULL AUTO_INCREMENT,
     charid        INT    NOT NULL,

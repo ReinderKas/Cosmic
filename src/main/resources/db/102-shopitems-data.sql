@@ -1,4 +1,4 @@
-INSERT INTO lb_shopitems (shopid, itemid, price, pitch, position)
+INSERT INTO shopitems (shopid, itemid, price, pitch, position)
 VALUES (11000, 1332005, 500, 0, 104),
        (11000, 1322005, 50, 0, 108),
        (11000, 1312004, 50, 0, 112),

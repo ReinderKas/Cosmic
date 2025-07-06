@@ -1,4 +1,4 @@
-CREATE TABLE lb_makercreatedata
+CREATE TABLE makercreatedata
 (
     id              TINYINT UNSIGNED NOT NULL,
     itemid          INT              NOT NULL,
@@ -13,7 +13,7 @@ CREATE TABLE lb_makercreatedata
     PRIMARY KEY (id, itemid)
 );
 
-CREATE TABLE lb_makerrecipedata
+CREATE TABLE makerrecipedata
 (
     itemid   INT      NOT NULL,
     req_item INT      NOT NULL,
@@ -21,7 +21,7 @@ CREATE TABLE lb_makerrecipedata
     PRIMARY KEY (itemid, req_item)
 );
 
-CREATE TABLE lb_makerrewarddata
+CREATE TABLE makerrewarddata
 (
     itemid   INT              NOT NULL,
     rewardid INT              NOT NULL,
@@ -30,7 +30,7 @@ CREATE TABLE lb_makerrewarddata
     PRIMARY KEY (itemid, rewardid)
 );
 
-CREATE TABLE lb_makerreagentdata
+CREATE TABLE makerreagentdata
 (
     itemid INT         NOT NULL,
     stat   VARCHAR(20) NOT NULL,

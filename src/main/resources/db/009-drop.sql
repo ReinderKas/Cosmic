@@ -1,4 +1,4 @@
-CREATE TABLE lb_drop_data
+CREATE TABLE drop_data
 (
     id               BIGINT NOT NULL AUTO_INCREMENT,
     dropperid        INT    NOT NULL,
@@ -12,7 +12,7 @@ CREATE TABLE lb_drop_data
     INDEX (dropperid, itemid)
 );
 
-CREATE TABLE lb_drop_data_global
+CREATE TABLE drop_data_global
 (
     id               BIGINT  NOT NULL AUTO_INCREMENT,
     continent        TINYINT NOT NULL DEFAULT '-1',
@@ -26,7 +26,7 @@ CREATE TABLE lb_drop_data_global
     KEY mobid (continent) USING BTREE
 );
 
-CREATE TABLE lb_reactordrops
+CREATE TABLE reactordrops
 (
     reactordropid INT UNSIGNED NOT NULL AUTO_INCREMENT,
     reactorid     INT          NOT NULL,

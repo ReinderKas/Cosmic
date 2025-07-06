@@ -1,4 +1,4 @@
-CREATE TABLE lb_guilds
+CREATE TABLE guilds
 (
     guildid     INT UNSIGNED      NOT NULL AUTO_INCREMENT,
     leader      INT UNSIGNED      NOT NULL DEFAULT '0',
@@ -21,7 +21,7 @@ CREATE TABLE lb_guilds
     INDEX (guildid, name)
 );
 
-CREATE TABLE lb_bbs_replies
+CREATE TABLE bbs_replies
 (
     replyid   INT UNSIGNED    NOT NULL AUTO_INCREMENT,
     threadid  INT UNSIGNED    NOT NULL,
@@ -31,7 +31,7 @@ CREATE TABLE lb_bbs_replies
     PRIMARY KEY (replyid)
 );
 
-CREATE TABLE lb_bbs_threads
+CREATE TABLE bbs_threads
 (
     threadid      INT UNSIGNED      NOT NULL AUTO_INCREMENT,
     postercid     INT UNSIGNED      NOT NULL,
@@ -45,7 +45,7 @@ CREATE TABLE lb_bbs_threads
     PRIMARY KEY (threadid)
 );
 
-CREATE TABLE lb_alliance
+CREATE TABLE alliance
 (
     id       INT UNSIGNED NOT NULL AUTO_INCREMENT,
     name     VARCHAR(13)  NOT NULL,
@@ -60,7 +60,7 @@ CREATE TABLE lb_alliance
     INDEX (name)
 );
 
-CREATE TABLE lb_allianceguilds
+CREATE TABLE allianceguilds
 (
     id         INT UNSIGNED NOT NULL AUTO_INCREMENT,
     allianceid INT          NOT NULL DEFAULT '-1',

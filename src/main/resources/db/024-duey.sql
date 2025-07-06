@@ -1,4 +1,4 @@
-CREATE TABLE lb_dueypackages
+CREATE TABLE dueypackages
 (
     PackageId  INT UNSIGNED NOT NULL AUTO_INCREMENT,
     ReceiverId INT UNSIGNED NOT NULL,
@@ -11,7 +11,7 @@ CREATE TABLE lb_dueypackages
     PRIMARY KEY (PackageId)
 );
 
-CREATE TABLE lb_dueyitems
+CREATE TABLE dueyitems
 (
     id              INT UNSIGNED NOT NULL AUTO_INCREMENT,
     PackageId       INT UNSIGNED NOT NULL DEFAULT '0',
@@ -19,5 +19,5 @@ CREATE TABLE lb_dueyitems
     PRIMARY KEY (id),
     KEY INVENTORYITEMID (inventoryitemid),
     KEY PackageId (PackageId),
-    FOREIGN KEY (PackageId) REFERENCES lb_dueypackages (PackageId) ON DELETE CASCADE
+    FOREIGN KEY (PackageId) REFERENCES dueypackages (PackageId) ON DELETE CASCADE
 );

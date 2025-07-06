@@ -1,4 +1,4 @@
-INSERT INTO lb_monstercarddata (cardid, mobid)
+INSERT INTO monstercarddata (cardid, mobid)
 VALUES (2380000, 100100),
        (2380001, 100101),
        (2380015, 100130),

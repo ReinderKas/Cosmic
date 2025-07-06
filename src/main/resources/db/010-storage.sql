@@ -1,4 +1,4 @@
-CREATE TABLE lb_storages
+CREATE TABLE storages
 (
     storageid INT UNSIGNED NOT NULL AUTO_INCREMENT,
     accountid INT          NOT NULL DEFAULT '0',
@@ -8,7 +8,7 @@ CREATE TABLE lb_storages
     PRIMARY KEY (storageid)
 );
 
-CREATE TABLE lb_fredstorage
+CREATE TABLE fredstorage
 (
     id        INT UNSIGNED NOT NULL AUTO_INCREMENT,
     cid       INT UNSIGNED NOT NULL,

@@ -1,4 +1,4 @@
-CREATE TABLE lb_inventoryitems
+CREATE TABLE inventoryitems
 (
     inventoryitemid INT UNSIGNED     NOT NULL AUTO_INCREMENT,
     type            TINYINT UNSIGNED NOT NULL,
@@ -17,7 +17,7 @@ CREATE TABLE lb_inventoryitems
     KEY CHARID (characterid)
 );
 
-CREATE TABLE lb_inventoryequipment
+CREATE TABLE inventoryequipment
 (
     inventoryequipmentid INT UNSIGNED NOT NULL AUTO_INCREMENT,
     inventoryitemid      INT UNSIGNED NOT NULL DEFAULT '0',
@@ -47,7 +47,7 @@ CREATE TABLE lb_inventoryequipment
     KEY INVENTORYITEMID (inventoryitemid)
 );
 
-CREATE TABLE lb_inventorymerchant
+CREATE TABLE inventorymerchant
 (
     inventorymerchantid INT UNSIGNED NOT NULL AUTO_INCREMENT,
     inventoryitemid     INT UNSIGNED NOT NULL DEFAULT '0',

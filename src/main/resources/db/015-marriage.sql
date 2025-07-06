@@ -1,4 +1,4 @@
-CREATE TABLE lb_marriages
+CREATE TABLE marriages
 (
     marriageid INT UNSIGNED NOT NULL AUTO_INCREMENT,
     husbandid  INT UNSIGNED NOT NULL DEFAULT '0',
@@ -6,7 +6,7 @@ CREATE TABLE lb_marriages
     PRIMARY KEY (marriageid)
 );
 
-CREATE TABLE lb_rings
+CREATE TABLE rings
 (
     id            INT          NOT NULL AUTO_INCREMENT,
     partnerRingId INT          NOT NULL DEFAULT '0',

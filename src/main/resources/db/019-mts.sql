@@ -1,4 +1,4 @@
-CREATE TABLE lb_mts_cart
+CREATE TABLE mts_cart
 (
     id     INT NOT NULL AUTO_INCREMENT,
     cid    INT NOT NULL,
@@ -6,7 +6,7 @@ CREATE TABLE lb_mts_cart
     PRIMARY KEY (id)
 );
 
-CREATE TABLE lb_mts_items
+CREATE TABLE mts_items
 (
     id           INT UNSIGNED NOT NULL AUTO_INCREMENT,
     tab          INT          NOT NULL DEFAULT '0',

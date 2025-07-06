@@ -1,4 +1,4 @@
-INSERT INTO lb_makerrewarddata (itemid, rewardid, quantity, prob)
+INSERT INTO makerrewarddata (itemid, rewardid, quantity, prob)
 VALUES (4250000, 4250000, 1, 14),
        (4250000, 4250001, 1, 5),
        (4250000, 4250002, 1, 1),

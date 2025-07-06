@@ -1,4 +1,4 @@
-CREATE TABLE lb_playerdiseases
+CREATE TABLE playerdiseases
 (
     id         INT NOT NULL AUTO_INCREMENT,
     charid     INT NOT NULL,
@@ -9,7 +9,7 @@ CREATE TABLE lb_playerdiseases
     PRIMARY KEY (id)
 );
 
-CREATE TABLE lb_buddies
+CREATE TABLE buddies
 (
     id          INT     NOT NULL AUTO_INCREMENT,
     characterid INT     NOT NULL,
@@ -19,7 +19,7 @@ CREATE TABLE lb_buddies
     PRIMARY KEY (id)
 );
 
-CREATE TABLE lb_savedlocations
+CREATE TABLE savedlocations
 (
     id           INT                                                                                                                                      NOT NULL AUTO_INCREMENT,
     characterid  INT                                                                                                                                      NOT NULL,
@@ -29,7 +29,7 @@ CREATE TABLE lb_savedlocations
     PRIMARY KEY (id)
 );
 
-CREATE TABLE lb_famelog
+CREATE TABLE famelog
 (
     famelogid      INT       NOT NULL AUTO_INCREMENT,
     characterid    INT       NOT NULL DEFAULT '0',
@@ -37,10 +37,10 @@ CREATE TABLE lb_famelog
     `when`         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (famelogid),
     KEY characterid (characterid),
-    FOREIGN KEY (characterid) REFERENCES lb_characters (id) ON DELETE CASCADE
+    FOREIGN KEY (characterid) REFERENCES characters (id) ON DELETE CASCADE
 );
 
-CREATE TABLE lb_trocklocations
+CREATE TABLE trocklocations
 (
     trockid     INT NOT NULL AUTO_INCREMENT,
     characterid INT NOT NULL,
@@ -49,7 +49,7 @@ CREATE TABLE lb_trocklocations
     PRIMARY KEY (trockid)
 );
 
-CREATE TABLE lb_characterexplogs
+CREATE TABLE characterexplogs
 (
     id             BIGINT NOT NULL AUTO_INCREMENT,
     world_exp_rate INT,
@@ -59,5 +59,5 @@ CREATE TABLE lb_characterexplogs
     exp_gain_time  DATETIME,
     charid         INT    NOT NULL,
     PRIMARY KEY (id),
-    FOREIGN KEY (charid) REFERENCES lb_characters (id) ON DELETE CASCADE
+    FOREIGN KEY (charid) REFERENCES characters (id) ON DELETE CASCADE
 )

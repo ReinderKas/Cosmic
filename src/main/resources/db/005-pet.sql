@@ -1,4 +1,4 @@
-CREATE TABLE lb_pets
+CREATE TABLE pets
 (
     petid     INT UNSIGNED NOT NULL AUTO_INCREMENT,
     name      VARCHAR(13)           DEFAULT NULL,
@@ -10,11 +10,11 @@ CREATE TABLE lb_pets
     PRIMARY KEY (petid)
 );
 
-CREATE TABLE lb_petignores
+CREATE TABLE petignores
 (
     id     INT UNSIGNED NOT NULL AUTO_INCREMENT,
     petid  INT UNSIGNED NOT NULL,
     itemid INT UNSIGNED NOT NULL,
     PRIMARY KEY (id),
-    CONSTRAINT lb_fk_petignorepetid FOREIGN KEY (petid) REFERENCES lb_pets (petid) ON DELETE CASCADE # thanks Optimist for noticing queries over petid taking too long, shavit for pointing out an improvement using foreign key
+    CONSTRAINT fk_petignorepetid FOREIGN KEY (petid) REFERENCES pets (petid) ON DELETE CASCADE # thanks Optimist for noticing queries over petid taking too long, shavit for pointing out an improvement using foreign key
 );

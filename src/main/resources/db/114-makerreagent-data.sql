@@ -1,5 +1,5 @@
 # generated with the SkillMakerReagentIndexer tool
-INSERT INTO lb_makerreagentdata (itemid, stat, value)
+INSERT INTO makerreagentdata (itemid, stat, value)
 VALUES (4250000, "incPAD", 1),
        (4250001, "incPAD", 2),
        (4250002, "incPAD", 3),

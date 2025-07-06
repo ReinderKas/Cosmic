@@ -1,4 +1,4 @@
-CREATE TABLE lb_playernpcs
+CREATE TABLE playernpcs
 (
     id           INT          NOT NULL AUTO_INCREMENT,
     name         VARCHAR(13)  NOT NULL,
@@ -22,7 +22,7 @@ CREATE TABLE lb_playernpcs
     PRIMARY KEY (id) USING BTREE
 );
 
-CREATE TABLE lb_playernpcs_equip
+CREATE TABLE playernpcs_equip
 (
     id       INT NOT NULL AUTO_INCREMENT,
     npcid    INT NOT NULL DEFAULT '0',
@@ -32,7 +32,7 @@ CREATE TABLE lb_playernpcs_equip
     PRIMARY KEY (id)
 );
 
-CREATE TABLE lb_playernpcs_field
+CREATE TABLE playernpcs_field
 (
     id     INT      NOT NULL AUTO_INCREMENT,
     world  INT      NOT NULL,
@@ -42,7 +42,7 @@ CREATE TABLE lb_playernpcs_field
     PRIMARY KEY (id)
 );
 
-CREATE TABLE lb_plife
+CREATE TABLE plife
 (
     id      INT UNSIGNED NOT NULL AUTO_INCREMENT,
     world   INT          NOT NULL DEFAULT '-1',

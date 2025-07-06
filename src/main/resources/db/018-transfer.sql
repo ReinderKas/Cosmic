@@ -1,4 +1,4 @@
-CREATE TABLE lb_namechanges
+CREATE TABLE namechanges
 (
     id             INT         NOT NULL AUTO_INCREMENT,
     characterid    INT         NOT NULL,
@@ -10,7 +10,7 @@ CREATE TABLE lb_namechanges
     INDEX (characterid)
 );
 
-CREATE TABLE lb_worldtransfers
+CREATE TABLE worldtransfers
 (
     id             INT       NOT NULL AUTO_INCREMENT,
     characterid    INT       NOT NULL,

@@ -1,4 +1,4 @@
-CREATE TABLE lb_wishlists
+CREATE TABLE wishlists
 (
     id     INT NOT NULL AUTO_INCREMENT,
     charid INT NOT NULL,
@@ -6,7 +6,7 @@ CREATE TABLE lb_wishlists
     PRIMARY KEY (id)
 );
 
-CREATE TABLE lb_specialcashitems
+CREATE TABLE specialcashitems
 (
     id       INT NOT NULL,
     sn       INT NOT NULL,
@@ -15,7 +15,7 @@ CREATE TABLE lb_specialcashitems
     PRIMARY KEY (id)
 );
 
-CREATE TABLE lb_nxcode
+CREATE TABLE nxcode
 (
     id         INT             NOT NULL AUTO_INCREMENT,
     code       VARCHAR(17)     NOT NULL UNIQUE,
@@ -24,7 +24,7 @@ CREATE TABLE lb_nxcode
     PRIMARY KEY (id)
 );
 
-CREATE TABLE lb_nxcode_items
+CREATE TABLE nxcode_items
 (
     id       INT NOT NULL AUTO_INCREMENT,
     codeid   INT NOT NULL,
@@ -34,7 +34,7 @@ CREATE TABLE lb_nxcode_items
     PRIMARY KEY (id)
 );
 
-CREATE TABLE lb_nxcoupons
+CREATE TABLE nxcoupons
 (
     id        INT NOT NULL AUTO_INCREMENT,
     couponid  INT NOT NULL DEFAULT '0',

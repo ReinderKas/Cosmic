@@ -1,4 +1,4 @@
-CREATE TABLE lb_keymap
+CREATE TABLE keymap
 (
     id          INT NOT NULL AUTO_INCREMENT,
     characterid INT NOT NULL DEFAULT '0',
@@ -8,10 +8,10 @@ CREATE TABLE lb_keymap
     PRIMARY KEY (id)
 );
 
-CREATE TABLE lb_quickslotkeymapped
+CREATE TABLE quickslotkeymapped
 (
     accountid INT    NOT NULL,
     keymap    BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (accountid),
-    FOREIGN KEY (accountid) REFERENCES lb_accounts (id) ON DELETE CASCADE
+    FOREIGN KEY (accountid) REFERENCES accounts (id) ON DELETE CASCADE
 );
