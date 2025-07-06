@@ -142,8 +142,5 @@
     <changeSet id="152" author="Ponk">
         <sqlFile path="db/152-drop-data.sql"/>
     </changeSet>
-    <changeSet id="153" author="Ponk">
-        <sqlFile path="db/153-temp-drop-data.sql"/>
-    </changeSet>
 
 </databaseChangeLog>
