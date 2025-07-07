@@ -25,7 +25,8 @@ public class DatabaseMigrations {
     private static void runLiquibaseUpdate() {
         try (Connection connection = DatabaseConnection.getConnection()) {
             liquibase.database.DatabaseConnection databaseConnection = new JdbcConnection(connection);
-            Liquibase liquibase = new Liquibase("db/changelog.xml", new ClassLoaderResourceAccessor(), databaseConnection);
+            Liquibase liquibase = new Liquibase("db/changelog-root.xml", new ClassLoaderResourceAccessor(),
+                    databaseConnection);
             liquibase.setShowSummaryOutput(UpdateSummaryOutputEnum.LOG);
             liquibase.update();
         } catch (SQLException | LiquibaseException e) {
