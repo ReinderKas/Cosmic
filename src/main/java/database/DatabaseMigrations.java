@@ -9,8 +9,16 @@ import tools.DatabaseConnection;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
+/**
+ * Apply changes to the database so that the server and database work in harmony.
+ *
+ * @author Ponk
+ */
 public class DatabaseMigrations {
+    private static final String ROOT_CHANGELOG_FILE = "db/changelog-root.xml";
 
     public static void runDatabaseMigrations() {
         suppressLiquibaseLogs();
@@ -18,14 +26,14 @@ public class DatabaseMigrations {
     }
 
     private static void suppressLiquibaseLogs() {
-        java.util.logging.Logger liquibaseLogger = java.util.logging.Logger.getLogger("liquibase");
-        liquibaseLogger.setLevel(java.util.logging.Level.WARNING);
+        Logger liquibaseLogger = Logger.getLogger("liquibase");
+        liquibaseLogger.setLevel(Level.WARNING);
     }
 
     private static void runLiquibaseUpdate() {
         try (Connection connection = DatabaseConnection.getConnection()) {
             liquibase.database.DatabaseConnection databaseConnection = new JdbcConnection(connection);
-            Liquibase liquibase = new Liquibase("db/changelog-root.xml", new ClassLoaderResourceAccessor(),
+            Liquibase liquibase = new Liquibase(ROOT_CHANGELOG_FILE, new ClassLoaderResourceAccessor(),
                     databaseConnection);
             liquibase.setShowSummaryOutput(UpdateSummaryOutputEnum.LOG);
             liquibase.update();
