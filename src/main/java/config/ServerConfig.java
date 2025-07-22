@@ -133,7 +133,6 @@ public class ServerConfig {
 
     //Custom Configuration
     public boolean USE_ENABLE_CUSTOM_NPC_SCRIPT;
-    public boolean USE_STARTER_MERGE;
 
     //Commands Configuration
     public boolean BLOCK_GENERATE_CASH_ITEM;
