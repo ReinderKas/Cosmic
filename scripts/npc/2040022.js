@@ -199,13 +199,11 @@ function action(mode, type, selection) {
             if (mats instanceof Array) {
                 for (var i = 0; complete && i < mats.length; i++) {
                     if (!cm.haveItem(mats[i], matQty[i])) {
-                        complete = false;
+                            complete = false;
                     }
                 }
             } else {
-                if (!cm.haveItem(mats, matQty)) {
-                    complete = false;
-                }
+                complete = false;
             }
         }
 

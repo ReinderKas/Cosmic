@@ -57,15 +57,20 @@ We will set up the following:
 - Client - the client is the application used to _play the game_, i.e. MapleStory.exe.
 
 ### 1 - Database 
-You will start by installing the database server and client, and then run some scripts to prepare it for the server.
+You will start by installing the database server and database client. Then you will connect to the server with the client to create a new database schema.
 
 #### Steps
 
-1. Download and install [MySQL Community Server 8+](https://dev.mysql.com/downloads/mysql/). You will have to set a root password, make sure you don't lose it because you will need it later.
+1. Download and install [MySQL Community Server 8+](https://dev.mysql.com/downloads/mysql/). You will have to set a root password. Make sure you don't lose it because you will need it later.
 2. Download and install [HeidiSQL](https://www.heidisql.com/download.php).
-3. Open HeidiSQL and connect to the database ("New" -> "Session in root folder" -> fill in password -> "Open").
-4. Run all four scripts located in database/sql in order. Starting with ``1-db_database.sql`` and ending with ``4-db-admin.sql``. In HeidiSQL: "File" -> "Run SQL File...".
-5. The database is ready!
+3. Connect to the database: 
+   1. Open HeidiSQL
+   2. Create a new Session: "New" -> fill in your password -> "Save"
+   3. Connect to the database: click on your saved session -> "Open"
+4. Create a new database schema:
+   1. In the opened session, right-click on the session name in the menu on the left
+   2. "Create new" -> "Database" -> database name should be "cosmic" -> "OK"
+5. Done. The database is now ready. Once the Cosmic server starts, it will create tables and populate some of them with initial data.
 
 ### 2 - Server
 You will start by cloning the repository, then configure the database properties and lastly start the server.
@@ -88,39 +93,22 @@ Support for Docker is also provided out of the box, as an alternative to running
 
 Making changes becomes a bit more tedious though as you have to rebuild the server image via `docker compose up --build`.
 
-On the first launch, the database container will run the scripts which may take so long that the server fails to start. In that case, just wait until the database is done running the scripts and then retry (Ctrl+C and re-run the command).
-
 #### Jar
-Another option is to start the server from a terminal by running a jar file. You first need to build the jar file from source which requires [Maven](https://maven.apache.org/).
+Another option is to start the server from a terminal by running a jar file. You first need to build the jar file from source which requires [Maven](https://maven.apache.org/). Fortunately, [Maven Wrapper](https://maven.apache.org/wrapper/) is provided so you don't have to install Maven separately.
 
-Building the jar file is as easy as running ``mvn clean package``. The project is configured to produce a "fat" jar which contains all dependencies (by utilizing the _maven-assembly-plugin_). Note that the WZ XML files are __not__ included in the jar.
+Building the jar file is as easy as running ``./mvnw.cmd clean package``. The project is configured to produce a "fat" jar which contains all dependencies (by utilizing the _maven-assembly-plugin_). Note that the WZ XML files are __not__ included in the jar.
 
 To run the jar, a ``launch.bat`` file is provided for convenience. Simply double-click it and the server will start in a new terminal window. 
 
 Alternatively, run the jar file from the terminal. Just remember to provide the `wz-path` system property pointing to your wz directory.
 
 ### 3 - Client
-You will start by installing the game with the old installer, then overwrite some WZ files with our custom ones, and lastly get the localhost executable in place.
+The client files are located in a separate repository: https://github.com/P0nk/Cosmic-client
 
-#### Steps
-
-1. Download _MapleGlobal-v83-setup.exe_ from my [Google Drive](https://drive.google.com/drive/folders/1hgnb92MGL6xqEp9szEMBh0K9pSJcJ6IT). This is the official installer from back then.
-2. Install it in a directory of your choice.
-3. Delete the following files from the installation directory: _HShield_ (entire directory), _ASPLnchr.exe_, _MapleStory.exe_, and _Patcher.exe_.
-4. Download _CosmicWZ-2024-07-17-v0.14.0.zip_ from my [Google Drive](https://drive.google.com/drive/folders/1hgnb92MGL6xqEp9szEMBh0K9pSJcJ6IT).
-5. Unzip it and copy all .wz-files into the installation directory. Replace the existing ones.
-6. Download _HeavenMS-localhost-WINDOW.exe_ from [hostr.co](https://hostr.co/amuX5SLeeVZx). This is a client modified to connect to your localhost instead of Nexon's server (along with some fixes and custom changes). 
-   - Your antivirus will likely detect the file as a trojan or similar and automatically delete it. To prevent this from happening, add your _Downloads_ directory and the installation directory as exclusions in your antivirus software. On W11, this is under "Virus & threat protection settings" -> "Add or remove exclusions". 
-7. Move _HeavenMS-localhost-WINDOW.exe_ into the installation directory.
-8. Done! Double-click the exe and the game should start.
-   - The client may be a bit fiddly. Sometimes it won't start, but if you see "Client connected" in the server console it's a good indication. Try spam-clicking it like 10+ times, that usually works for me.
-
-**Important note about localhost clients**: these executables are red-flagged by antivirus tools as potentially malicious software.
-This happens due to the reverse engineering methods that were applied onto these software artifacts. 
-The one provided here has been in use for years already and posed no harm so far, so it is assumed to be safe.
+Follow the installation guide in the README.
 
 ### 4 - Getting into the game
-The client has started, and you're looking at the login screen. 
+You have successfully started the client, and you're looking at the login screen. 
 
 #### Logging in
 At this point, you can log in to the admin account using the following credentials:
@@ -129,7 +117,7 @@ At this point, you can log in to the admin account using the following credentia
 * Pin: "0000"
 * Pic: "000000"
 
-Or create a regular account by typing in your desired username & password and attempting to log in. This "automatic registration" feature lets you create new accounts to play around with. It is enabled by default (see _config.yaml_).
+You can also create a new regular account by typing in your desired username & password and attempting to log in. This "automatic registration" feature lets you create new accounts to play around with. It is enabled by default (see _config.yaml_).
 
 #### Entering the game
 Create a new character as you normally would, and then select it to enter the game. Hooray, finally we're in!
@@ -144,21 +132,14 @@ That's it, have fun playing around in game!
 Some slightly more advanced concepts that might be useful once you're up and running.
 
 ### Host on remote server
-You don't have to host the server on your local machine to play. It's possible to host on a remote server such as a VPS or even a dedicated server.
+You don't have to host the server on your local machine to play. It's possible to host on a remote server such as a VPS or a dedicated server.
 
-I leave it to you to figure out the server hosting part, but once you have that running you'll need to edit the client exe to point to your remote server ip.
-
-#### Edit client ip
-1. Download and install a hex editor: [HxD](https://mh-nexus.de/en/hxd/)
-2. Start HxD and open your client exe (I recommend making a copy of it first). At this point you should see a bunch of hex codes and a "Decoded text" column to the right of it.
-3. Ctrl+f and search for Text-string "127.0.0.1". You should find three occurrences right above each other.
-4. Place your cursor before the first "127" and start typing the desired ip, overwriting what is already there. Do the same on the other two and click on Save.
-5. Done! Now the client will attempt to connect to that ip address instead when you launch it.
+I leave it to you to figure out the server hosting part, but once you have that running you'll need to edit the client ip to point to your remote server ip.
 
 ### WZ files
-WZ files are the asset/data files required by the client and server. Typically, [HaRepacker-resurrected](https://github.com/lastbattle/Harepacker-resurrected) is used to handle (view, edit, export) the .wz files.
+WZ files are the asset/data files required by the client and server. Typically, the [HaRepacker-resurrected](https://github.com/lastbattle/Harepacker-resurrected) tool is used to manage (view, edit, export) the .wz files.
 
-The client can read the .wz files directly, but the server requires them in XML format. The server also does not make use of the sprites, which is the motivation for different kinds of exporting. 
+The client can read the .wz files directly, but the server requires them to be in XML format. The server does not make use of the sprites, which is the motivation for different kinds of exporting. 
 HaRepacker allows you to export to "Private server", which is the .img files packaged in the .wz stripped of sprites and converted to XML. This takes much less disk space.
 
 This server requires custom .wz files (unfortunately), as you may have noted during installation of the client. The intention is for these to be removed eventually and to solely run on vanilla .wz files.
@@ -172,10 +153,3 @@ This server requires custom .wz files (unfortunately), as you may have noted dur
 Make sure to always export from the client .wz files to the server XML, and not the other way around. 
 
 Editing the client .wz without exporting to the server may lead to strange behavior.
-
-### Client features
-For more information about the client and its features, see [HeavenMS on GitHub](https://github.com/ronancpl/HeavenMS#download-items).
-
-Some notable features:
-* Opens in window mode by default
-* Uncapped max speed
