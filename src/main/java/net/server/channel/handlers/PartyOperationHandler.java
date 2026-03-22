@@ -21,6 +21,7 @@
 */
 package net.server.channel.handlers;
 
+import client.BotClient;
 import client.Character;
 import client.Client;
 import config.YamlConfig;
@@ -97,6 +98,10 @@ public final class PartyOperationHandler extends AbstractPacketHandler {
                         if (party.getMembers().size() < 6) {
                             if (InviteCoordinator.createInvite(InviteType.PARTY, player, party.getId(), invited.getId())) {
                                 invited.sendPacket(PacketCreator.partyInvite(player));
+                                if (invited.getClient() instanceof BotClient) {
+                                    InviteCoordinator.answerInvite(InviteType.PARTY, invited.getId(), party.getId(), true);
+                                    Party.joinParty(invited, party.getId(), false);
+                                }
                             } else {
                                 c.sendPacket(PacketCreator.partyStatusMessage(22, invited.getName()));
                             }
