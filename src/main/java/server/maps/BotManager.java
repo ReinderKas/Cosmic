@@ -44,6 +44,7 @@ public class BotManager {
         // Jump control
         public int   JUMP_Y_THRESH = 30;   // jump when target is this many px higher
         public int   JUMP_COOLDOWN = 10;   // ticks between jump attempts (~1s at 100ms)
+        public int   ARC_LEAD_STEPS = 3;  // extra arc checks from 1–N steps ahead (widens jump detection)
         public int   MAX_SNAP_DROP = 16;   // px downward before going airborne (covers 45° with STEP=13)
         public int   MAX_SLOPE_UP  = 26;   // px of upward rise per step considered a walkable slope
 
@@ -288,6 +289,21 @@ public class BotManager {
             return;
         }
 
+        // Owner is near the rope X — they're likely on the same rope (stopped mid-rope).
+        // Track their Y instead of jumping off (avoids jump→catch→jump loop).
+        if (Math.abs(ownerPos.x - entry.climbX) < cfg.ROPE_GRAB_X * 2) {
+            if (Math.abs(dy) < cfg.CLIMB_SPEED) {
+                bot.setStance(16);
+                broadcastMovement(bot, 0, 0);
+            } else {
+                int newY = Math.max(entry.climbTopY, botPos.y + (dy > 0 ? cfg.CLIMB_SPEED : -cfg.CLIMB_SPEED));
+                bot.setPosition(new Point(entry.climbX, newY));
+                bot.setStance(16);
+                broadcastMovement(bot, 0, 0);
+            }
+            return;
+        }
+
         // Reached top of rope — try to snap to the foothold, then stop climbing
         if (botPos.y <= entry.climbTopY) {
             entry.climbing = false;
@@ -433,22 +449,44 @@ public class BotManager {
 
         // Down-jump: owner is clearly below AND primarily below (not just diagonal separation)
         if (dy > cfg.JUMP_Y_THRESH * 3 && dy > Math.abs(dx) && entry.jumpCooldown == 0) {
-            // Prefer walking off a nearby foothold edge — cleaner than prone-jumping through the floor
-            int edgeDist = dx > 0 ? currentFh.getX2() - botPos.x
-                         : dx < 0 ? botPos.x - currentFh.getX1()
-                         : Math.min(currentFh.getX2() - botPos.x, botPos.x - currentFh.getX1());
-            if (edgeDist > cfg.LEDGE_SEEK_X) {
-                // No ledge nearby in owner direction — use down-jump
-                entry.downJumpPending = true;
-                bot.setStance(cfg.PRONE_STANCE);
-                broadcastMovement(bot, 0, 0);
-                return;
+            // Prefer walking off a natural terrain drop — sample position-only, no foothold connectivity
+            if (dx != 0) {
+                int sampleDir = dx > 0 ? cfg.STEP : -cfg.STEP;
+                int dropStepX = 0;
+                for (int i = 1; i * cfg.STEP <= cfg.LEDGE_SEEK_X; i++) {
+                    Point sp = bot.getMap().getPointBelow(
+                            new Point(botPos.x + sampleDir * i, botPos.y - cfg.MAX_SLOPE_UP));
+                    if (sp == null || sp.y > botPos.y + cfg.MAX_SNAP_DROP) {
+                        dropStepX = sampleDir;
+                        break;
+                    }
+                }
+                if (dropStepX != 0) {
+                    // Walk one step toward the drop (or fall off if already at the edge)
+                    int walkX = botPos.x + dropStepX;
+                    Point walkSnapped = bot.getMap().getPointBelow(
+                            new Point(walkX, botPos.y - cfg.MAX_SLOPE_UP));
+                    if (walkSnapped != null && walkSnapped.y <= botPos.y + cfg.MAX_SNAP_DROP) {
+                        bot.setPosition(new Point(walkX, walkSnapped.y));
+                        bot.setStance(dropStepX > 0 ? 2 : 3);
+                        broadcastMovement(bot, dropStepX > 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, 0);
+                    } else {
+                        entry.inAir   = true;
+                        entry.airVelX = dropStepX;
+                        entry.velY    = 0f;
+                    }
+                    return;
+                }
             }
-            // Ledge is close — fall through to normal walking; walk code will drop off the edge naturally
+            // No nearby drop (or owner directly below) — use prone down-jump
+            entry.downJumpPending = true;
+            bot.setStance(cfg.PRONE_STANCE);
+            broadcastMovement(bot, 0, 0);
+            return;
         }
 
-        // Rope check — take any rope that goes above the bot (not just ones reaching owner Y)
-        if (dy < -cfg.JUMP_Y_THRESH * 2) {
+        // Rope check — only when owner is primarily above, not just sideways (mirrors down-jump guard)
+        if (dy < -cfg.JUMP_Y_THRESH * 2 && Math.abs(dy) >= Math.abs(dx)) {
             Rope rope = findNearbyRope(bot, botPos);
             if (rope != null) {
                 int rdx = rope.x() - botPos.x;
@@ -491,10 +529,23 @@ public class BotManager {
             if (blocked || farAbove) {
                 int arcStep  = stepX != 0 ? stepX : (dx >= 0 ? cfg.STEP : -cfg.STEP);
                 int maxJumpH = (int) (cfg.JUMP_FORCE * cfg.JUMP_FORCE / (2 * cfg.GRAVITY));
-                if (-dy <= maxJumpH
+                boolean canJump = -dy <= maxJumpH
                         || arcCheckJump(bot, botPos, arcStep, ownerPos.y)
-                        || arcCheckJump(bot, botPos, 0, ownerPos.y)) {
-                    // Reachable directly, diagonally, or via vertical arc
+                        || arcCheckJump(bot, botPos, 0, ownerPos.y);
+                // Widen search: also try arcs from 1..ARC_LEAD_STEPS steps ahead — covers the case
+                // where the bot needs to walk slightly before the optimal jump point
+                if (!canJump && farAbove) {
+                    for (int lead = 1; lead <= cfg.ARC_LEAD_STEPS && !canJump; lead++) {
+                        int leadX = botPos.x + arcStep * lead;
+                        Point leadGround = bot.getMap().getPointBelow(
+                                new Point(leadX, botPos.y - cfg.MAX_SLOPE_UP));
+                        if (leadGround != null && leadGround.y <= botPos.y + cfg.MAX_SNAP_DROP) {
+                            canJump = arcCheckJump(bot, new Point(leadX, leadGround.y), arcStep, ownerPos.y);
+                        }
+                    }
+                }
+                if (canJump) {
+                    // Reachable directly, diagonally, vertically, or from a step ahead
                     entry.jumpCooldown = cfg.JUMP_COOLDOWN;
                     initiateJump(entry, bot, dx);
                     return;
@@ -524,35 +575,6 @@ public class BotManager {
 
         int stepX = calcStepX(entry, botPos.x, ownerPos.x);
         int newX  = botPos.x + stepX;
-
-        // Foothold edge detection
-        boolean towardRightEdge = stepX > 0 && newX >= currentFh.getX2();
-        boolean towardLeftEdge  = stepX < 0 && newX <= currentFh.getX1();
-
-        if (towardRightEdge || towardLeftEdge) {
-            int neighborId  = towardRightEdge ? currentFh.getNext() : currentFh.getPrev();
-            Foothold neighbor = entry.fhIndex.get(neighborId);
-
-            if (neighbor != null && !neighbor.isWall()) {
-                int yDiff = neighbor.getY1() - currentFh.getY1();
-                if (yDiff < -cfg.JUMP_Y_THRESH && entry.jumpCooldown == 0) {
-                    initiateJump(entry, bot, dx);
-                    return;
-                }
-                // Same level or gradual slope — walk naturally
-            } else {
-                // No connected neighbor — only proceed if arc would land somewhere useful
-                if (entry.jumpCooldown == 0 && stepX != 0
-                        && arcCheckJump(bot, botPos, stepX, ownerPos.y)) {
-                    initiateJump(entry, bot, dx);
-                    return;
-                }
-                // Arc check failed — stop at edge, don't fall off
-                bot.setStance(5);
-                broadcastMovement(bot, 0, 0);
-                return;
-            }
-        }
 
         // Normal ground walk — snap Y to terrain at newX
         // Search from MAX_SLOPE_UP above current Y to handle uphill slopes
