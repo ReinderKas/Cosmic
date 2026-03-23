@@ -284,6 +284,7 @@ public final class Channel {
     }
 
     public int getChannelCapacity() {
+        if (players == null) return 0;
         return (int) (Math.ceil(((float) players.getAllCharacters().size() / YamlConfig.config.server.CHANNEL_LOAD) * 800));
     }
 

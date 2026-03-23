@@ -22,6 +22,7 @@
 package server.maps;
 
 import java.awt.*;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
@@ -207,6 +208,22 @@ public class FootholdTree {
 
     public int getY2() {
         return p2.y;
+    }
+
+    public List<Foothold> getAllFootholds() {
+        List<Foothold> result = new ArrayList<>();
+        collectAll(result);
+        return result;
+    }
+
+    private void collectAll(List<Foothold> result) {
+        result.addAll(footholds);
+        if (nw != null) {
+            nw.collectAll(result);
+            ne.collectAll(result);
+            sw.collectAll(result);
+            se.collectAll(result);
+        }
     }
 
     public int getMaxDropX() {
