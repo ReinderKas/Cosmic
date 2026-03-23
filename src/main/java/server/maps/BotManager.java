@@ -532,7 +532,7 @@ public class BotManager {
                 // Track the winning jump direction so initiateJump uses the correct airVelX
                 int winDir = Integer.MIN_VALUE; // sentinel: no winner yet
                 if (-dy <= maxJumpH) {
-                    winDir = dx;                            // owner within single-jump height
+                    winDir = Math.abs(dx) < cfg.STOP_DIST ? 0 : dx; // 0 = vertical when nearly above
                 } else if (arcCheckJump(bot, botPos, arcStep, ownerPos.y)) {
                     winDir = arcStep;                       // diagonal arc found a platform
                 } else if (arcCheckJump(bot, botPos, 0, ownerPos.y)) {
@@ -660,8 +660,8 @@ public class BotManager {
         entry.inAir       = true;
         entry.seekingRope = false;
         int jumpVelY = -(int) ((cfg.JUMP_FORCE - cfg.GRAVITY) * (1000f / cfg.TICK_MS));
-        if (Math.abs(dx) < cfg.STOP_DIST) {
-            // Owner directly above — jump straight up (no horizontal drift)
+        if (dx == 0) {
+            // Vertical jump — only when explicitly 0 (winDir=0 or owner directly above)
             entry.airVelX = 0;
             bot.setStance(6);
             broadcastMovement(bot, 0, jumpVelY);
