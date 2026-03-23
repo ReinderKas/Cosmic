@@ -54,6 +54,7 @@ public class BotManager {
         public int   ROPE_GRAB_X   = 22;    // max X distance to grab/start climbing a rope
         public int   TELEPORT_DIST = 2000; // Manhattan distance before bot teleports to owner
         public int   PRONE_STANCE  = 10;   // stance before down-jump: confirmed state=10 = down-held/crouch on ground
+        public int   LEDGE_SEEK_X  = 150; // px; if foothold edge is within this radius, walk off it instead of down-jumping
 
         // Stuck recovery
         public int   STUCK_CHECK_INTERVAL = 30;  // ticks between stuck-position checks
@@ -432,10 +433,18 @@ public class BotManager {
 
         // Down-jump: owner is clearly below AND primarily below (not just diagonal separation)
         if (dy > cfg.JUMP_Y_THRESH * 3 && dy > Math.abs(dx) && entry.jumpCooldown == 0) {
-            entry.downJumpPending = true;
-            bot.setStance(cfg.PRONE_STANCE);
-            broadcastMovement(bot, 0, 0);
-            return;
+            // Prefer walking off a nearby foothold edge — cleaner than prone-jumping through the floor
+            int edgeDist = dx > 0 ? currentFh.getX2() - botPos.x
+                         : dx < 0 ? botPos.x - currentFh.getX1()
+                         : Math.min(currentFh.getX2() - botPos.x, botPos.x - currentFh.getX1());
+            if (edgeDist > cfg.LEDGE_SEEK_X) {
+                // No ledge nearby in owner direction — use down-jump
+                entry.downJumpPending = true;
+                bot.setStance(cfg.PRONE_STANCE);
+                broadcastMovement(bot, 0, 0);
+                return;
+            }
+            // Ledge is close — fall through to normal walking; walk code will drop off the edge naturally
         }
 
         // Rope check — take any rope that goes above the bot (not just ones reaching owner Y)
