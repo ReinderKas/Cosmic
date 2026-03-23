@@ -132,6 +132,17 @@ public class BotManager {
         if (entry != null) entry.task.cancel(false);
     }
 
+    /** Cancel and remove a bot by the bot character's own ID (used during shutdown). */
+    public void removeBotByCharId(int botCharId) {
+        bots.entrySet().removeIf(e -> {
+            if (e.getValue().bot.getId() == botCharId) {
+                e.getValue().task.cancel(false);
+                return true;
+            }
+            return false;
+        });
+    }
+
     public Character getBot(int ownerCharId) {
         BotEntry entry = bots.get(ownerCharId);
         return entry != null ? entry.bot : null;

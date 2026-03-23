@@ -28,4 +28,8 @@ public class BotClient extends Client {
         // skip DB write and SessionCoordinator registration for bot clients
     }
 
+    @Override
+    public void disconnectSession() {
+        // no-op: bot has no ioChannel — calling ioChannel.disconnect() would NPE
+    }
 }

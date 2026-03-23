@@ -87,6 +87,7 @@ public class LoginBypassCoordinator {
             long timeNow = Server.getInstance().getCurrentTime();
 
             for (World w : Server.getInstance().getWorlds()) {
+                if (w.getPlayerStorage() == null) continue;
                 for (Character chr : w.getPlayerStorage().getAllCharacters()) {
                     Client c = chr.getClient();
                     if (c != null) {
