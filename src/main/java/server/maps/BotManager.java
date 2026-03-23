@@ -529,33 +529,36 @@ public class BotManager {
             if (blocked || farAbove) {
                 int arcStep  = stepX != 0 ? stepX : (dx >= 0 ? cfg.STEP : -cfg.STEP);
                 int maxJumpH = (int) (cfg.JUMP_FORCE * cfg.JUMP_FORCE / (2 * cfg.GRAVITY));
-                boolean canJump = -dy <= maxJumpH
-                        || arcCheckJump(bot, botPos, arcStep, ownerPos.y)
-                        || arcCheckJump(bot, botPos, 0, ownerPos.y);
-                // Widen search: retry arc from 1..ARC_LEAD_STEPS steps forward AND backward —
-                // covers platforms reachable after a short walk in either direction
-                if (!canJump && farAbove) {
+                // Track the winning jump direction so initiateJump uses the correct airVelX
+                int winDir = Integer.MIN_VALUE; // sentinel: no winner yet
+                if (-dy <= maxJumpH) {
+                    winDir = dx;                            // owner within single-jump height
+                } else if (arcCheckJump(bot, botPos, arcStep, ownerPos.y)) {
+                    winDir = arcStep;                       // diagonal arc found a platform
+                } else if (arcCheckJump(bot, botPos, 0, ownerPos.y)) {
+                    winDir = 0;                             // vertical arc found a platform
+                } else if (farAbove) {
+                    // Widen search: walk 1..ARC_LEAD_STEPS in either direction then check both jump dirs
                     outer:
                     for (int lead = 1; lead <= cfg.ARC_LEAD_STEPS; lead++) {
-                        for (int walkDir : new int[]{1, -1}) {         // walk forward or backward first
+                        for (int walkDir : new int[]{1, -1}) {
                             int leadX = botPos.x + arcStep * lead * walkDir;
                             Point leadGround = bot.getMap().getPointBelow(
                                     new Point(leadX, botPos.y - cfg.MAX_SLOPE_UP));
                             if (leadGround == null || leadGround.y > botPos.y + cfg.MAX_SNAP_DROP) continue;
                             Point leadPt = new Point(leadX, leadGround.y);
-                            for (int jumpDir : new int[]{1, -1}) {     // then jump forward or backward
-                                if (arcCheckJump(bot, leadPt, arcStep * jumpDir, ownerPos.y)) {
-                                    canJump = true;
+                            for (int jDir : new int[]{1, -1}) {
+                                if (arcCheckJump(bot, leadPt, arcStep * jDir, ownerPos.y)) {
+                                    winDir = arcStep * jDir;
                                     break outer;
                                 }
                             }
                         }
                     }
                 }
-                if (canJump) {
-                    // Reachable directly, diagonally, vertically, or from a step ahead
+                if (winDir != Integer.MIN_VALUE) {
                     entry.jumpCooldown = cfg.JUMP_COOLDOWN;
-                    initiateJump(entry, bot, dx);
+                    initiateJump(entry, bot, winDir);
                     return;
                 }
                 // Stuck recovery: try jumping backward if there's a platform behind us that's higher
