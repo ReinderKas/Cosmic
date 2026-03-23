@@ -532,15 +532,20 @@ public class BotManager {
                 boolean canJump = -dy <= maxJumpH
                         || arcCheckJump(bot, botPos, arcStep, ownerPos.y)
                         || arcCheckJump(bot, botPos, 0, ownerPos.y);
-                // Widen search: also try arcs from 1..ARC_LEAD_STEPS steps ahead — covers the case
-                // where the bot needs to walk slightly before the optimal jump point
+                // Widen search: retry arc from 1..ARC_LEAD_STEPS steps forward AND backward —
+                // covers platforms reachable after a short walk in either direction
                 if (!canJump && farAbove) {
-                    for (int lead = 1; lead <= cfg.ARC_LEAD_STEPS && !canJump; lead++) {
-                        int leadX = botPos.x + arcStep * lead;
-                        Point leadGround = bot.getMap().getPointBelow(
-                                new Point(leadX, botPos.y - cfg.MAX_SLOPE_UP));
-                        if (leadGround != null && leadGround.y <= botPos.y + cfg.MAX_SNAP_DROP) {
-                            canJump = arcCheckJump(bot, new Point(leadX, leadGround.y), arcStep, ownerPos.y);
+                    outer:
+                    for (int lead = 1; lead <= cfg.ARC_LEAD_STEPS; lead++) {
+                        for (int dir : new int[]{1, -1}) {
+                            int leadX = botPos.x + arcStep * lead * dir;
+                            Point leadGround = bot.getMap().getPointBelow(
+                                    new Point(leadX, botPos.y - cfg.MAX_SLOPE_UP));
+                            if (leadGround != null && leadGround.y <= botPos.y + cfg.MAX_SNAP_DROP
+                                    && arcCheckJump(bot, new Point(leadX, leadGround.y), arcStep, ownerPos.y)) {
+                                canJump = true;
+                                break outer;
+                            }
                         }
                     }
                 }
