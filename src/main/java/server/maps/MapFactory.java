@@ -225,6 +225,14 @@ public class MapFactory {
             fTree.insert(fh);
         }
         map.setFootholds(fTree);
+        if (mapData.getChildByPath("ladderRope") != null) {
+            for (Data ropeData : mapData.getChildByPath("ladderRope")) {
+                int rx = DataTool.getInt(ropeData.getChildByPath("x"));
+                int ry1 = DataTool.getInt(ropeData.getChildByPath("y1"));
+                int ry2 = DataTool.getInt(ropeData.getChildByPath("y2"));
+                map.addRope(new Rope(rx, ry1, ry2));
+            }
+        }
         if (mapData.getChildByPath("area") != null) {
             for (Data area : mapData.getChildByPath("area")) {
                 int x1 = DataTool.getInt(area.getChildByPath("x1"));

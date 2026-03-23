@@ -123,6 +123,7 @@ public class MapleMap {
     private final List<Runnable> statUpdateRunnables = new ArrayList(50);
     private final List<Rectangle> areas = new ArrayList<>();
     private FootholdTree footholds = null;
+    private final List<Rope> ropes = new ArrayList<>();
     private Pair<Integer, Integer> xLimits;  // caches the min and max x's with available footholds
     private final Rectangle mapArea = new Rectangle();
     private final int mapid;
@@ -2997,6 +2998,9 @@ public class MapleMap {
     public void setFootholds(FootholdTree footholds) {
         this.footholds = footholds;
     }
+
+    public void addRope(Rope rope) { ropes.add(rope); }
+    public List<Rope> getRopes() { return ropes; }
 
     public FootholdTree getFootholds() {
         return footholds;
