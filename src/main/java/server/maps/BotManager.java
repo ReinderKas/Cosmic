@@ -52,6 +52,8 @@ public class BotManager {
     //  check for existing data before trying to create new data/dummy data
     //  make bot chat message about their owner logging in as soon as account login, dont wait for character login, "disconnect"/save the bot gracefully after 2 seconds delay or so
     // TODO: rework autoAssignSp/getSpPriority/related, implement per level build order, should be backward compatible format(hasn't assigned in many levels), sp should have prompts if multiple options are available (see Hero.java)
+    // TODO: fix bug bot dead but become alive with 0 hp, invulnerable to mobs, check how this can happens and fix, some state should persist on save/disconnect
+    // TODO: Option to ask bot to logoff/disconnect + save/relog, this should take an additional confirmation prompt (remember human like response and delay between actions)
     // TODO: Option to ask bot for their current stats/damage range/current buid/inventory
     // TODO: Option to respec bot ap/sp
     // TODO: Option to ask bot to change ap/sp build
@@ -114,6 +116,7 @@ public class BotManager {
         public int   ATTACK_COOLDOWN    = 10;    // ticks between attacks (~800ms at 100ms/tick)
         public int   GRIND_SEEK_RANGE   = 800;   // px; monster search radius
         public int   AOE_MOB_THRESHOLD  = 2;     // nearby mobs needed to prefer AoE skill over single-target
+        // TODO: Aoe range/area/hitbox for attack and skill should be read from actual game data
         public long  AOE_RANGE_SQ       = 90000L; // px² AoE sweep radius (~300px)
 
         // Mob damage taken
@@ -1040,6 +1043,7 @@ public class BotManager {
         int minDmg = Math.max(1, bot.calculateMinBaseDamage(watk));
 
         // --- skill selection ---
+        // TODO: have a dynamic sized list of available skills in case of cooldown heavy class with many skills
         int chosenSkill = 0;
         int chosenLevel = 0;
         int numDmg      = 1;
@@ -1330,14 +1334,6 @@ public class BotManager {
         bot.getMap().broadcastMessage(bot, pkt, false);
     }
 
-    /**
-     * Simulates the jump arc from {@code from} stepping {@code stepX} per tick.
-     * Returns true if the bot would land on a foothold meaningfully higher than
-     * its current position (gaining at least JUMP_Y_THRESH px of height).
-     *
-     * Uses the same prevY→newY crossing pattern as tickAirborne's landing check
-     * so platforms are never missed due to arc position quantisation.
-     */
     /** Finds the nearest rope whose top is above the bot, within WAYPOINT_SEEK_X radius. */
     private Rope findWaypointRope(Character bot, Point botPos) {
         Rope best    = null;
@@ -1352,6 +1348,14 @@ public class BotManager {
         return best;
     }
 
+    /**
+     * Simulates the jump arc from {@code from} stepping {@code stepX} per tick.
+     * Returns true if the bot would land on a foothold meaningfully higher than
+     * its current position (gaining at least JUMP_Y_THRESH px of height).
+     *
+     * Uses the same prevY→newY crossing pattern as tickAirborne's landing check
+     * so platforms are never missed due to arc position quantisation.
+     */
     private boolean arcCheckJump(Character bot, Point from, int stepX, int targetX, int targetY) {
         float vy = -cfg.JUMP_FORCE;
         int x = from.x, y = from.y;
