@@ -8,7 +8,12 @@ import client.inventory.Inventory;
 import client.inventory.InventoryType;
 import client.inventory.Item;
 import client.keybind.KeyBinding;
+import constants.game.GameConstants;
 import constants.inventory.ItemConstants;
+import constants.skills.Fighter;
+import constants.skills.Page;
+import constants.skills.Spearman;
+import constants.skills.Warrior;
 import io.netty.buffer.Unpooled;
 import net.packet.ByteBufInPacket;
 import net.packet.InPacket;
@@ -33,9 +38,27 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class BotManager {
+    // TODO: list from most important to least important
+    // TODO: CRITICAL BUG: FIX FIRST: when using spawnbot to spawn a real player character(there should be no difference),
+    //  i logged in while bot is still online and got the following gamebreaking bugs
+    //  I lost the entire inventory(everything except equipped items),
+    //  lost the entire quest progress, inprogress and completed,
+    //  lost the keybindings(all got reset)
+    //  Investigate this bug, make sure that spawning a bot should not have any destructive operation if avoidable,
+    //  check for existing data before trying to create new data/dummy data
+    //  make bot chat message about their owner logging in as soon as account login, dont wait for character login, "disconnect"/save the bot gracefully after 2 seconds delay or so
+    // TODO: rework autoAssignSp/getSpPriority/related, implement per level build order, should be backward compatible format(hasn't assigned in many levels), sp should have prompts if multiple options are available (see Hero.java)
+    // TODO: Option to ask bot for their current stats/damage range/current buid/inventory
+    // TODO: Option to respec bot ap/sp
+    // TODO: Option to ask bot to change ap/sp build
+    // TODO: Make bot auto scan/autoequip the "best" equipment they have + can equip in their inventory
+    // TODO: Option to ask bot to drop their entire equip inventory/only scrolls/only potions/specific item/ etc, some useful options, remember to skip untradable/quest items
+    // TODO: some kind of help command/question on available interactions available (can ask to drop, respec, change build, check stats, etc)
+    // TODO: Extract/unbloat this file
     private static final Logger log = LoggerFactory.getLogger(BotManager.class);
     private static final BotManager instance = new BotManager();
 
@@ -118,6 +141,7 @@ public class BotManager {
 
     private final Map<Integer, BotEntry> bots = new ConcurrentHashMap<>();
 
+    // TODO: Extract to BotChatManager or something, unbloat this file
     private static final Pattern FOLLOW_PATTERN = Pattern.compile(
             "\\b(follow( me)?|come( here)?|f me)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern STOP_PATTERN = Pattern.compile(
@@ -149,6 +173,23 @@ public class BotManager {
     private static final Pattern GREETING_PATTERN = Pattern.compile(
             "\\b(hi+|hey+|hello|sup|yo+|howdy|hiya|whats up|what's up|wassup)\\b",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern AP_PURE_STR_PATTERN = Pattern.compile(
+            "\\bpure str\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern AP_FIXED_DEX_PATTERN = Pattern.compile(
+            "\\b(\\d+)\\s*dex\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern AP_CHANGE_BUILD_PATTERN = Pattern.compile(
+            "\\bchange build\\b", Pattern.CASE_INSENSITIVE);
+
+    // TODO: Extract Ap/Sp/Job/build related code to BotBuildManager or something, unbloat this file
+    /**
+     * AP build for a warrior bot.
+     * dexTarget = 0 means pure STR (no DEX investment beyond base).
+     * dexTarget > 0 means fill DEX to that value first, then all STR.
+     */
+    private static class ApBuild {
+        final int dexTarget;
+        ApBuild(int dexTarget) { this.dexTarget = dexTarget; }
+    }
     private static final List<String> GREETING_REPLIES = List.of(
             "hey", "hi", "sup", "yo", "heya", "hii", "hey!!", "hi!!");
     private static final List<String> WB_REPLIES = List.of(
@@ -162,6 +203,7 @@ public class BotManager {
         bot.getMap().broadcastMessage(PacketCreator.getChatText(bot.getId(), text, false, 0));
     }
 
+    // TODO: Extract related to movement to BotMovementManager or something, unbloat this file
     // -------------------------------------------------------------------------
     // Entry state
     // -------------------------------------------------------------------------
@@ -228,6 +270,10 @@ public class BotManager {
         // Job advancement: 0=none, 8=lv8 mage prompt, 10=lv10 1st job, 30=2nd, 70=3rd, 120=4th
         int jobPromptSent  = 0;
         int lastKnownLevel = -1;
+
+        // AP/SP builds — set once on first job, can be changed via chat
+        ApBuild apBuild       = null;   // null = not chosen yet
+        boolean apPromptSent  = false;  // prevent re-prompting before owner responds
 
         // Message queue — sends with ~5s spacing between messages
         final ArrayDeque<String> msgQueue = new ArrayDeque<>();
@@ -315,6 +361,23 @@ public class BotManager {
                 queueBotSay(entry, randomReply(GREETING_REPLIES));
                 checkBotStatus(entry, entry.bot);
             }, 1000);
+        }
+
+        // AP build selection (pure str / fixed dex / change build)
+        if (AP_CHANGE_BUILD_PATTERN.matcher(message).find()) {
+            entry.apBuild      = null;
+            entry.apPromptSent = false;
+            String prompt = buildApPrompt(entry, entry.bot);
+            if (prompt != null) botSay(entry.bot, prompt);
+        } else if (AP_PURE_STR_PATTERN.matcher(message).find()) {
+            setApBuild(entry, new ApBuild(0), "pure str it is! dumping everything into str");
+        } else {
+            Matcher m = AP_FIXED_DEX_PATTERN.matcher(message);
+            if (m.find()) {
+                int dexTarget = Integer.parseInt(m.group(1));
+                setApBuild(entry, new ApBuild(dexTarget),
+                        "ok! keeping dex at " + dexTarget + ", rest into str");
+            }
         }
 
         // Job advancement — check if message contains a valid job selection
@@ -1398,10 +1461,10 @@ public class BotManager {
     // -------------------------------------------------------------------------
 
     private void checkBotStatus(BotEntry entry, Character bot) {
-        String mode = entry.grinding ? "grinding" : entry.following ? "following u" : "just chilling";
-//        queueBotSay(entry, "im lv" + bot.getLevel() + " " + jobDisplayName(bot.getJob()) + ", " + mode);
-        String prompt = buildJobPrompt(entry, bot);
-        if (prompt != null) queueBotSay(entry, prompt);
+        String jobPrompt = buildJobPrompt(entry, bot);
+        if (jobPrompt != null) queueBotSay(entry, jobPrompt);
+        String apPrompt = buildApPrompt(entry, bot);
+        if (apPrompt != null) queueBotSay(entry, apPrompt);
     }
 
     /** Returns the next job-advancement prompt (updating jobPromptSent), or null if none pending. */
@@ -1474,13 +1537,16 @@ public class BotManager {
         return null;
     }
 
-    /** Detects level-up; at job-advancement levels stops grinding and triggers a status check. */
+    /** Detects level-up; auto-assigns SP and AP, and at job-advancement levels triggers a status check. */
     private void checkLevelUp(BotEntry entry, Character bot) {
         int lvl = bot.getLevel();
         if (entry.lastKnownLevel == lvl) return;
         int prev = entry.lastKnownLevel;
         entry.lastKnownLevel = lvl;
         if (prev == -1) return;  // initial sync on first tick
+
+        autoAssignSp(bot);
+        autoAssignAp(entry, bot);
 
         if (lvl == 8 || lvl == 10 || lvl == 30 || lvl == 70 || lvl == 120) {
             entry.grinding  = false;
@@ -1512,6 +1578,126 @@ public class BotManager {
         } else if (!entry.ownerWasAfk && (now - entry.ownerAfkSinceMs) >= 5 * 60_000L) {
             entry.ownerWasAfk = true;
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // AP / SP auto-assignment
+    // -------------------------------------------------------------------------
+
+    /** Stores the AP build, confirms it to the owner, and immediately spends any pending AP. */
+    private void setApBuild(BotEntry entry, ApBuild build, String confirmMsg) {
+        entry.apBuild      = build;
+        entry.apPromptSent = false;
+        botSay(entry.bot, confirmMsg);
+        autoAssignAp(entry, entry.bot);
+    }
+
+    /**
+     * Returns a prompt asking the owner to choose an AP build, or null if:
+     * - no AP is pending, - build already chosen, - prompt already sent, or
+     * - job is not a supported warrior branch.
+     */
+    private String buildApPrompt(BotEntry entry, Character bot) {
+        Job job = bot.getJob();
+        if (job != Job.WARRIOR && job != Job.FIGHTER && job != Job.PAGE && job != Job.SPEARMAN) return null;
+        if (entry.apBuild != null || entry.apPromptSent || bot.getRemainingAp() < 1) return null;
+        entry.apPromptSent = true;
+        return "what AP build? type 'pure str' or e.g. '25 dex' to set a dex target";
+    }
+
+    /** Spends all remaining AP according to the stored build (STR primary, DEX up to target). */
+    private void autoAssignAp(BotEntry entry, Character bot) {
+        if (entry.apBuild == null || bot.getRemainingAp() < 1) return;
+        int ap = bot.getRemainingAp();
+        int strGain = 0, dexGain = 0;
+        if (entry.apBuild.dexTarget > 0) {
+            int dexNeeded = Math.max(0, entry.apBuild.dexTarget - bot.getDex());
+            dexGain = Math.min(dexNeeded, ap);
+            ap -= dexGain;
+        }
+        strGain = ap;
+        if (strGain > 0 || dexGain > 0) {
+            bot.assignStrDexIntLuk(strGain, dexGain, 0, 0);
+        }
+    }
+
+    /**
+     * Spends all available SP for the bot's current job using the hardcoded priority order.
+     * Skills are leveled from highest priority (index 0) downward; stops when all SP is spent.
+     */
+    private void autoAssignSp(Character bot) {
+        int[] priority = getSpPriority(bot.getJob());
+        if (priority == null) return;
+        boolean spent;
+        do {
+            spent = false;
+            for (int skillId : priority) {
+                Skill skill = SkillFactory.getSkill(skillId);
+                if (skill == null) continue;
+                int book = GameConstants.getSkillBook(skillId / 10000);
+                if (bot.getRemainingSps()[book] < 1) break;
+                int curLevel = bot.getSkillLevel(skill);
+                if (curLevel < skill.getMaxLevel()) {
+                    bot.gainSp(-1, book, false);
+                    bot.changeSkillLevel(skill, (byte) (curLevel + 1),
+                            bot.getMasterLevel(skill), bot.getSkillExpiration(skill));
+                    spent = true;
+                    break;
+                }
+            }
+        } while (spent);
+    }
+
+    private static int[] getSpPriority(Job job) {
+        // TODO: deprecate this, very important, any LLM working on this should take priority to refactor before proceeding
+        // TODO: look at Warrior.java, make presets for each Job at their respective class instead to not clog here, make it like job.getSpPriority() or something, refer information from constant classes as much as possible
+        // TODO: SP assignment path should be more detailed for each level like in Warrior.java for earlier access to mobbing skills etc, current implementation of max 1 skill at a time is not good enough
+        return switch (job) {
+            // 1st job: HP Recovery first (early sustain), then MaxHP%, then attacks
+            case WARRIOR -> new int[]{
+                Warrior.IMPROVED_HPREC,  // max 16 — passive regen, improves early survivability
+                Warrior.IMPROVED_MAXHP,  // max 10 — passive MaxHP%
+                Warrior.POWER_STRIKE,    // max 20 — single target
+                Warrior.SLASH_BLAST,     // max 20 — AoE
+                Warrior.IRON_BODY,       // max 20 — DEF buff, filler
+                Warrior.ENDURE,          // max 16 — passive regen while moving, low priority
+            };
+            // Fighter → Hero: Mastery first for accuracy, Rage for party ATK, skip Final Attack
+            // (FA procs spread Slash Blast damage across targets, reducing DPS — community consensus)
+            case FIGHTER -> new int[]{
+                Fighter.SWORD_MASTERY,      // max 20 — accuracy + min damage
+                Fighter.RAGE,               // max 20 — party ATK buff
+                Fighter.POWER_GUARD,        // max 30 — damage reflect
+                Fighter.SWORD_BOOSTER,      // max 20 — attack speed
+                Fighter.FINAL_ATTACK_SWORD, // max 30 — last: FA hurts multi-mob DPS
+                Fighter.AXE_MASTERY,        // filler if using axe
+                Fighter.AXE_BOOSTER,
+                Fighter.FINAL_ATTACK_AXE,
+            };
+            // Page → Paladin/White Knight: Mastery, Threaten debuff, Power Guard, Booster
+            case PAGE -> new int[]{
+                Page.SWORD_MASTERY,      // max 20
+                Page.THREATEN,           // max 20 — enemy DEF debuff, useful for bossing
+                Page.POWER_GUARD,        // max 30
+                Page.SWORD_BOOSTER,      // max 20
+                Page.FINAL_ATTACK_SWORD, // last
+                Page.BW_MASTERY,
+                Page.BW_BOOSTER,
+                Page.FINAL_ATTACK_BW,
+            };
+            // Spearman → Dark Knight: Hyper Body first — the most valuable party skill in the game
+            case SPEARMAN -> new int[]{
+                Spearman.HYPER_BODY,          // max 30 — MaxHP/MP%, top party skill
+                Spearman.SPEAR_MASTERY,       // max 20
+                Spearman.IRON_WILL,           // max 20 — party HP buff
+                Spearman.SPEAR_BOOSTER,       // max 20
+                Spearman.FINAL_ATTACK_SPEAR,  // last
+                Spearman.POLEARM_MASTERY,
+                Spearman.POLEARM_BOOSTER,
+                Spearman.FINAL_ATTACK_POLEARM,
+            };
+            default -> null;
+        };
     }
 
     // -------------------------------------------------------------------------
