@@ -68,6 +68,8 @@ public class BotManager {
         public int   ROPE_SEEK_X  = 150;   // horizontal search radius for ropes
         public int   ROPE_GRAB_X   = 22;    // max X distance to grab/start climbing a rope
         public int   TELEPORT_DIST = 2000; // Manhattan distance before bot teleports to owner
+        public int   DEAD_STANCE   = 0;    // stance for tombstone (death) state
+        public int   STAND_STANCE  = 5;    // default standing stance
         public int   PRONE_STANCE  = 10;   // stance before down-jump: confirmed state=10 = down-held/crouch on ground
         public int   LEDGE_SEEK_X  = 150; // px; if foothold edge is within this radius, walk off it instead of down-jumping
 
@@ -372,7 +374,7 @@ public class BotManager {
         if (entry.following) {
             if (bot.getMapId() != owner.getMapId()) {
                 Point spawn = new Point(owner.getPosition().x, owner.getPosition().y - 10);
-                bot.setStance(5); // ensure spawn packet shows stand stance, not walk
+                bot.setStance(cfg.STAND_STANCE); // ensure spawn packet shows stand stance, not walk
                 bot.changeMap(owner.getMap(), spawn);
                 resetEntryState(entry);
                 return;
@@ -1032,8 +1034,7 @@ public class BotManager {
         entry.mobHitCooldown = cfg.MOB_HIT_COOLDOWN;
 
         if (bot.getHp() <= 0) {
-            // Show tombstone: stance 0 = dead, broadcast so nearby clients see it
-            bot.setStance(0);
+            bot.setStance(cfg.DEAD_STANCE);
             broadcastMovement(bot, 0, 0);
             botSay(bot, randomReply(DEATH_REPLIES));
             entry.deadUntil = System.currentTimeMillis() + cfg.BOT_DEAD_MS;
@@ -1052,7 +1053,7 @@ public class BotManager {
         Point spawnPos = bot.getMap().getPointBelow(new Point(ownerPos.x, ownerPos.y - 1));
         bot.setPosition(spawnPos != null ? spawnPos : ownerPos);
         resetEntryState(entry);
-        bot.setStance(5); // standing — clears the tombstone (stance 0) for nearby clients
+        bot.setStance(cfg.STAND_STANCE); // clears tombstone for nearby clients
         broadcastMovement(bot, 0, 0);
         botSay(bot, "back!");
     }
