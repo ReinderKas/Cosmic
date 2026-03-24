@@ -580,7 +580,7 @@ public class BotManager {
             int stepX    = calcStepX(entry, botPos.x, targetPos.x);
             boolean blocked  = stepX == 0 || !isPathWalkable(bot, botPos, stepX);
             boolean farAbove = dy < -cfg.JUMP_Y_THRESH * 2; // owner is clearly on a higher platform
-            if (blocked || farAbove) {
+            if (blocked) {
                 int arcStep  = stepX != 0 ? stepX : (dx >= 0 ? cfg.STEP : -cfg.STEP);
                 int maxJumpH = (int) calculateMaxJumpHeight();
                 // Track the winning jump direction so initiateJump uses the correct airVelX
@@ -817,7 +817,7 @@ public class BotManager {
     private boolean arcCheckJump(Character bot, Point from, int stepX, int targetY) {
         float vy = -cfg.JUMP_FORCE;
         int x = from.x, y = from.y;
-        for (int t = 0; t < 25; t++) {
+        for (int t = 0; t < 40; t++) {
             int prevY = y;
             vy = Math.min(vy + cfg.GRAVITY, cfg.MAX_FALL);
             x += stepX;
@@ -825,8 +825,11 @@ public class BotManager {
             if (vy > 0) { // descending — use prevY as search origin (mirrors tickAirborne)
                 Point floor = bot.getMap().getPointBelow(new Point(x, prevY));
                 if (floor != null && floor.y <= y) {
-                    // Would land here — useful if we gain meaningful height toward target
-                    return floor.y < from.y - cfg.JUMP_Y_THRESH;
+                    return true;
+                    // Useful if we gain height OR land near target's platform (same-level gap jump)
+//                    boolean usefulHorizontalJump = stepX != 0 && Math.abs(floor.y - from.y) <= cfg.JUMP_Y_THRESH;
+//                    boolean hasYGains = floor.y < from.y - cfg.JUMP_Y_THRESH;
+//                    return hasYGains || usefulHorizontalJump;
                 }
             }
         }
