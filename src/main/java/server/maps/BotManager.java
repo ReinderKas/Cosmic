@@ -379,8 +379,8 @@ public class BotManager {
             return;
         }
 
-        // Close enough to owner — hold position on rope
-        if (Math.abs(dy) < cfg.FOLLOW_DIST && Math.abs(dxOwner) < cfg.FOLLOW_DIST * 2) {
+        // Close enough to owner — hold position on rope (follow mode only; grind always climbs to top)
+        if (!entry.grinding && Math.abs(dy) < cfg.FOLLOW_DIST && Math.abs(dxOwner) < cfg.FOLLOW_DIST * 2) {
             bot.setStance(entry.climbRope.isLadder() ? 17 : 16);
             broadcastMovement(bot, 0, 0);
             return;
