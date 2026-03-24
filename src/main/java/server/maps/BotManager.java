@@ -2,6 +2,8 @@ package server.maps;
 
 import client.Character;
 import client.Job;
+import client.Skill;
+import client.SkillFactory;
 import client.inventory.Inventory;
 import client.inventory.InventoryType;
 import client.inventory.Item;
@@ -24,6 +26,7 @@ import tools.PacketCreator;
 
 import java.awt.*;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -84,9 +87,11 @@ public class BotManager {
         public int   WAYPOINT_TIMEOUT = 80;   // ticks before an unreached waypoint expires (~8s)
 
         // Grind mode
-        public int   ATTACK_RANGE_SQ  = 22500; // px² — attack when within ~150px of target monster
-        public int   ATTACK_COOLDOWN  = 10;     // ticks between attacks (~800ms at 100ms/tick)
-        public int   GRIND_SEEK_RANGE = 800;   // px; monster search radius
+        public int   ATTACK_RANGE_SQ    = 22500; // px² — attack when within ~150px of target monster
+        public int   ATTACK_COOLDOWN    = 10;    // ticks between attacks (~800ms at 100ms/tick)
+        public int   GRIND_SEEK_RANGE   = 800;   // px; monster search radius
+        public int   AOE_MOB_THRESHOLD  = 2;     // nearby mobs needed to prefer AoE skill over single-target
+        public long  AOE_RANGE_SQ       = 90000L; // px² AoE sweep radius (~300px)
 
         // Mob damage taken
         public int   MOB_TOUCH_HALF_W = 60;    // px; approximate half-width of mob bounding box
@@ -202,6 +207,15 @@ public class BotManager {
         boolean grinding       = false;
         Monster grindTarget    = null;
         int     attackCooldown = 0;
+
+        // Skill cache — rebuilt on job change
+        int          cachedSkillJob = -1;
+        int          attackSkillId  = 0;   // best single-target attack skill (0 = basic attack)
+        int          aoeSkillId     = 0;   // best AoE attack skill (0 = none)
+        int          aoeSkillMobs   = 1;   // mobCount of the chosen AoE skill
+        List<Integer> buffSkillIds  = new ArrayList<>();
+        // skillId → ms timestamp when buff should be re-applied (0 = apply immediately)
+        final Map<Integer, Long> nextBuffAt = new HashMap<>();
 
         // Damage taken
         long deadUntil      = 0;  // ms timestamp when bot may respawn; 0 = alive
@@ -355,6 +369,8 @@ public class BotManager {
         tickPotionCheck(entry, bot, owner);
         checkLevelUp(entry, bot);
         tickAfkCheck(entry, owner);
+        rebuildSkillCacheIfNeeded(entry, bot);
+        tickBuffs(entry, bot);
 
         if (!entry.following && !entry.grinding) {
             if (entry.inAir) {
@@ -959,27 +975,81 @@ public class BotManager {
         int watk   = bot.getTotalWatk();
         int maxDmg = Math.max(1, bot.calculateMaxBaseDamage(watk));
         int minDmg = Math.max(1, bot.calculateMinBaseDamage(watk));
-        int damage = minDmg < maxDmg
-                ? ThreadLocalRandom.current().nextInt(minDmg, maxDmg + 1)
-                : maxDmg;
 
+        // --- skill selection ---
+        int chosenSkill = 0;
+        int chosenLevel = 0;
+        int numDmg      = 1;
+        List<Monster> aoeTargets = null;
+
+        // Try AoE skill first if enough nearby monsters
+        if (entry.aoeSkillId != 0 && !bot.skillIsCooling(entry.aoeSkillId)) {
+            List<Monster> nearby = new ArrayList<>();
+            for (Monster m : bot.getMap().getAllMonsters()) {
+                if (m.isAlive() && distSq(m.getPosition(), target.getPosition()) <= cfg.AOE_RANGE_SQ) {
+                    nearby.add(m);
+                    if (nearby.size() >= entry.aoeSkillMobs) break;
+                }
+            }
+            if (nearby.size() >= cfg.AOE_MOB_THRESHOLD) {
+                chosenSkill = entry.aoeSkillId;
+                chosenLevel = bot.getSkillLevel(chosenSkill);
+                numDmg      = Math.max(1, SkillFactory.getSkill(chosenSkill).getEffect(chosenLevel).getAttackCount());
+                aoeTargets  = nearby;
+            }
+        }
+        // Fall back to single-target attack skill
+        if (chosenSkill == 0 && entry.attackSkillId != 0 && !bot.skillIsCooling(entry.attackSkillId)) {
+            chosenSkill = entry.attackSkillId;
+            chosenLevel = bot.getSkillLevel(chosenSkill);
+            numDmg      = Math.max(1, SkillFactory.getSkill(chosenSkill).getEffect(chosenLevel).getAttackCount());
+        }
+        // chosenSkill == 0 → basic attack (skill=0, numDmg=1)
+
+        // --- build attack ---
+        int numAttacked = aoeTargets != null ? aoeTargets.size() : 1;
         AbstractDealDamageHandler.AttackInfo attack = new AbstractDealDamageHandler.AttackInfo();
-        attack.skill = 0;
-        attack.skilllevel = 0;
-        attack.numAttacked = 1;
-        attack.numDamage = 1;
-        attack.numAttackedAndDamage = (1 << 4) | 1;
-        attack.speed = 4;
-        // bit 7 = facing left (0x80), matching real client attack packet encoding
-        attack.stance = bot.getPosition().x > target.getPosition().x ? -128 : 0;
-        attack.direction = bot.getPosition().x > target.getPosition().x ? 17 : 6; // 17 = left, 6= right
-        attack.targets = new HashMap<>();
-        attack.targets.put(target.getObjectId(),
-                new AbstractDealDamageHandler.AttackTarget((short) 305, List.of(damage)));
+        attack.skill                = chosenSkill;
+        attack.skilllevel           = chosenLevel;
+        attack.numDamage            = numDmg;
+        attack.numAttacked          = numAttacked;
+        attack.numAttackedAndDamage = (numAttacked << 4) | numDmg;
+        attack.speed                = 4;
+        attack.stance    = bot.getPosition().x > target.getPosition().x ? -128 : 0;
+        attack.direction = bot.getPosition().x > target.getPosition().x ? 17 : 6;
+        attack.targets   = new HashMap<>();
+
+        if (aoeTargets != null) {
+            for (Monster m : aoeTargets) {
+                attack.targets.put(m.getObjectId(), makeTarget(numDmg, minDmg, maxDmg));
+            }
+            // Actual count may differ if primary target wasn't in the nearby list
+            if (!attack.targets.containsKey(target.getObjectId())) {
+                attack.targets.put(target.getObjectId(), makeTarget(numDmg, minDmg, maxDmg));
+            }
+            attack.numAttacked          = attack.targets.size();
+            attack.numAttackedAndDamage = (attack.numAttacked << 4) | numDmg;
+        } else {
+            attack.targets.put(target.getObjectId(), makeTarget(numDmg, minDmg, maxDmg));
+        }
 
         CloseRangeDamageHandler.applyCloseRangeEffects(attack, bot, bot.getClient());
-
         entry.attackCooldown = cfg.ATTACK_COOLDOWN;
+    }
+
+    private AbstractDealDamageHandler.AttackTarget makeTarget(int hits, int minDmg, int maxDmg) {
+        List<Integer> lines = new ArrayList<>(hits);
+        for (int i = 0; i < hits; i++) {
+            lines.add(minDmg < maxDmg
+                    ? ThreadLocalRandom.current().nextInt(minDmg, maxDmg + 1)
+                    : maxDmg);
+        }
+        return new AbstractDealDamageHandler.AttackTarget((short) 305, lines);
+    }
+
+    private static long distSq(Point a, Point b) {
+        long dx = a.x - b.x, dy = a.y - b.y;
+        return dx * dx + dy * dy;
     }
 
     // -------------------------------------------------------------------------
@@ -1247,6 +1317,83 @@ public class BotManager {
     // -------------------------------------------------------------------------
 
     // -------------------------------------------------------------------------
+    // Skill cache
+    // -------------------------------------------------------------------------
+
+    private void rebuildSkillCacheIfNeeded(BotEntry entry, Character bot) {
+        if (entry.cachedSkillJob == bot.getJob().getId()) return;
+        entry.cachedSkillJob = bot.getJob().getId();
+
+        entry.attackSkillId = 0;
+        entry.aoeSkillId    = 0;
+        entry.aoeSkillMobs  = 1;
+        entry.buffSkillIds.clear();
+
+        int bestAtkHits = 0;   // attackCount of best single-target skill
+        int bestAoeScore = 0;  // mobCount * attackCount of best AoE skill
+
+        for (Skill skill : bot.getSkills().keySet()) {
+            int lvl = bot.getSkillLevel(skill);
+            if (lvl <= 0) continue;
+
+            StatEffect fx  = skill.getEffect(lvl);
+            int atk  = fx.getAttackCount();
+            int mobs = fx.getMobCount();
+            int dur  = fx.getDuration();
+
+            if (atk > 0) {
+                if (mobs >= 2) {
+                    int score = mobs * atk;
+                    if (score > bestAoeScore) {
+                        bestAoeScore     = score;
+                        entry.aoeSkillId   = skill.getId();
+                        entry.aoeSkillMobs = mobs;
+                    }
+                } else {
+                    if (atk > bestAtkHits) {
+                        bestAtkHits          = atk;
+                        entry.attackSkillId  = skill.getId();
+                    }
+                }
+            } else if (dur > 0) {
+                // Timed buff with no attack component
+                entry.buffSkillIds.add(skill.getId());
+                entry.nextBuffAt.putIfAbsent(skill.getId(), 0L); // 0 = apply immediately
+            }
+            // passive (dur=0, atk=0) — skip
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Auto-buff
+    // -------------------------------------------------------------------------
+
+    private void tickBuffs(BotEntry entry, Character bot) {
+        if (!entry.following && !entry.grinding) return;   // idle — skip
+        if (entry.buffSkillIds.isEmpty()) return;
+        if (bot.getMap().getAllMonsters().stream().noneMatch(Monster::isAlive)) return;
+
+        long now = System.currentTimeMillis();
+        for (int skillId : entry.buffSkillIds) {
+            if (now < entry.nextBuffAt.getOrDefault(skillId, 0L)) continue; // still active
+            if (bot.skillIsCooling(skillId)) continue;
+
+            Skill skill = SkillFactory.getSkill(skillId);
+            int   lvl   = bot.getSkillLevel(skill);
+            if (lvl <= 0) continue;
+
+            StatEffect fx = skill.getEffect(lvl);
+            fx.applyTo(bot, null);
+
+            long dur = fx.getDuration();
+            entry.nextBuffAt.put(skillId, now + (long)(dur * 0.9));
+
+            if (fx.getCooldown() > 0) {
+                bot.addCooldown(skillId, now, fx.getCooldown() * 1000L);
+            }
+        }
+    }
+
     // Status check — called on spawn, grind start, greeting, and level-up
     // -------------------------------------------------------------------------
 
