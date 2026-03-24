@@ -1,6 +1,12 @@
 package server.maps;
 
 import client.Character;
+import client.Job;
+import client.inventory.Inventory;
+import client.inventory.InventoryType;
+import client.inventory.Item;
+import client.keybind.KeyBinding;
+import constants.inventory.ItemConstants;
 import io.netty.buffer.Unpooled;
 import net.packet.ByteBufInPacket;
 import net.packet.InPacket;
@@ -10,11 +16,14 @@ import net.server.channel.handlers.AbstractDealDamageHandler;
 import net.server.channel.handlers.CloseRangeDamageHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import server.ItemInformationProvider;
+import server.StatEffect;
 import server.TimerManager;
 import server.life.Monster;
 import tools.PacketCreator;
 
-import java.awt.Point;
+import java.awt.*;
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -76,6 +85,23 @@ public class BotManager {
         public int   ATTACK_RANGE_SQ  = 22500; // px² — attack when within ~150px of target monster
         public int   ATTACK_COOLDOWN  = 10;     // ticks between attacks (~800ms at 100ms/tick)
         public int   GRIND_SEEK_RANGE = 800;   // px; monster search radius
+
+        // Mob damage taken
+        public int   MOB_TOUCH_HALF_W = 60;    // px; approximate half-width of mob bounding box
+        public int   MOB_TOUCH_HALF_H = 80;    // px; approximate half-height of mob bounding box
+        public int   MOB_HIT_COOLDOWN = 15;    // ticks between mob hits (~1.5s)
+        public long  BOT_DEAD_MS      = 60_000L; // ms bot stays dead before respawning
+
+        // Passive loot
+        public int   LOOT_RADIUS      = 100;   // px; pickup items within this box radius
+        public int   INV_FULL_WARN_CD = 100;   // ticks between "inventory full" complaints
+
+        // Potion management
+        public int   POT_LOW_WARN     = 100;   // warn on grind start below this count
+        public int   POT_STOP         = 10;    // stop grinding below this HP pot count
+        public int   POT_CHECK_TICKS  = 20;    // ticks between potion recount/rebind
+        public float AUTOPOT_HP_THRESH = 0.7f; // use HP pot when HP falls below this ratio
+        public float AUTOPOT_MP_THRESH = 0.5f; // use MP pot when MP falls below this ratio
     }
 
     /** Singleton config — replace with `cfg = new Config()` after hotswapping to reset. */
@@ -100,9 +126,23 @@ public class BotManager {
             "understood", "ok boss");
     private static final Pattern GRIND_PATTERN = Pattern.compile(
             "\\b(farm|grind|kill mobs?)\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern JOB_SELECT_PATTERN = Pattern.compile(
+            "\\b(warrior|fighter|page|spearman|sader|crusader|hero|dk|drk|dark knight|paladin|" +
+            "mage|magician|wizard|cleric|healer|fp|il|fp mage|il mage|fp arch|il arch|priest|bishop|" +
+            "bowman|bowmen|archer|hunter|crossbow|xbow|sniper|ranger|bowmaster|bm|marksman|mm|" +
+            "thief|assassin|sin|bandit|dit|hermit|chief bandit|cb|shadower|shad|night lord|nl|" +
+            "pirate|brawler|gunslinger|gun|marauder|outlaw|bucc|buccaneer|corsair|" +
+            "white knight|wk|dragon knight)\\b", Pattern.CASE_INSENSITIVE);
     private static final List<String> GRIND_REPLIES = List.of(
             "ok", "on it", "lets get it", "farming time", "got it",
             "sure", "ok boss", "time to grind");
+    private static final Pattern GREETING_PATTERN = Pattern.compile(
+            "\\b(hi+|hey+|hello|sup|yo+|howdy|hiya|whats up|what's up|wassup)\\b",
+            Pattern.CASE_INSENSITIVE);
+    private static final List<String> GREETING_REPLIES = List.of(
+            "hey", "hi", "sup", "yo", "heya", "hii", "hey!!", "hi!!");
+    private static final List<String> WB_REPLIES = List.of(
+            "wb", "wb!", "welcome back", "oh ur back", "hey ur back", "welcome back!");
 
     private static String randomReply(List<String> list) {
         return list.get(ThreadLocalRandom.current().nextInt(list.size()));
@@ -158,6 +198,27 @@ public class BotManager {
         Monster grindTarget    = null;
         int     attackCooldown = 0;
 
+        // Damage taken
+        long deadUntil      = 0;  // ms timestamp when bot may respawn; 0 = alive
+        int  mobHitCooldown = 0;  // ticks until next mob hit is allowed
+
+        // Loot & potions
+        int  potCheckTimer      = 0;
+        int  invFullWarnCooldown = 0;
+
+        // Job advancement: 0=none, 8=lv8 mage prompt, 10=lv10 1st job, 30=2nd, 70=3rd, 120=4th
+        int jobPromptSent  = 0;
+        int lastKnownLevel = -1;
+
+        // Message queue — sends with ~5s spacing between messages
+        final ArrayDeque<String> msgQueue = new ArrayDeque<>();
+        boolean msgSending = false;
+
+        // AFK detection
+        Point ownerAfkPos     = null;
+        long  ownerAfkSinceMs = 0;
+        boolean ownerWasAfk   = false;
+
         // Foothold index, rebuilt on map change
         int lastMapId = -1;
         Map<Integer, Foothold> fhIndex = new HashMap<>();
@@ -178,7 +239,9 @@ public class BotManager {
 
         ScheduledFuture<?> task = TimerManager.getInstance().register(
                 () -> tick(ownerCharId, bot), cfg.TICK_MS);
-        bots.put(ownerCharId, new BotEntry(bot, task));
+        BotEntry entry = new BotEntry(bot, task);
+        bots.put(ownerCharId, entry);
+        TimerManager.getInstance().schedule(() -> checkBotStatus(entry, bot), 2000);
     }
 
     public void removeBot(int ownerCharId) {
@@ -215,8 +278,12 @@ public class BotManager {
         } else if (GRIND_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
                 entry.following = false;
-                botSay(entry.bot, randomReply(GRIND_REPLIES));
-                TimerManager.getInstance().schedule(() -> entry.grinding = true, 250);
+                setupAutopotForBot(entry.bot);
+                botSay(entry.bot, grindStartMessage(entry.bot));
+                TimerManager.getInstance().schedule(() -> {
+                    entry.grinding = true;
+                    checkBotStatus(entry, entry.bot);
+                }, 250);
             }, 1500);
         } else if (STOP_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
@@ -224,6 +291,27 @@ public class BotManager {
                 entry.grinding  = false;
                 TimerManager.getInstance().schedule(() -> botSay(entry.bot, randomReply(STOP_REPLIES)), 1500);
             }, 1000);
+        } else if (GREETING_PATTERN.matcher(message).find()) {
+            TimerManager.getInstance().schedule(() -> {
+                queueBotSay(entry, randomReply(GREETING_REPLIES));
+                checkBotStatus(entry, entry.bot);
+            }, 1000);
+        }
+
+        // Job advancement — check if message contains a valid job selection
+        if (JOB_SELECT_PATTERN.matcher(message).find()) {
+            Job advJob = resolveJobChange(entry.bot, message.toLowerCase());
+            if (advJob != null) {
+                String jobName = jobDisplayName(advJob);
+                List<String> replies = List.of(
+                        "ok, ill change to " + jobName + "!",
+                        "alright becoming a " + jobName + " then",
+                        "ok " + jobName + " it is!",
+                        "sure, going " + jobName,
+                        "ok changing to " + jobName + "...");
+                botSay(entry.bot, randomReply(replies));
+                TimerManager.getInstance().schedule(() -> entry.bot.changeJob(advJob), 1000);
+            }
         }
     }
 
@@ -244,8 +332,27 @@ public class BotManager {
             entry.following = false;
             return;
         }
+
+        // Dead state: skip AI until respawn timer expires
+        if (entry.deadUntil > 0) {
+            if (System.currentTimeMillis() >= entry.deadUntil) {
+                respawnBot(entry, bot, owner);
+            }
+            return;
+        }
+
         Point botPos    = bot.getPosition();
         Point targetPos = owner.getPosition();
+
+        // Mob damage — runs in all modes (idle, follow, grind)
+        tickMobDamage(entry, bot);
+
+        // Passive loot + potion management — run in all modes
+        tickPassiveLoot(entry, bot);
+        tickPotionCheck(entry, bot, owner);
+
+        checkLevelUp(entry, bot);
+        tickAfkCheck(entry, owner);
 
         // Keep physics running when idle; grinding runs its own navigation loop
         if (!entry.following && !entry.grinding) {
@@ -874,6 +981,192 @@ public class BotManager {
         entry.attackCooldown = cfg.ATTACK_COOLDOWN;
     }
 
+    // -------------------------------------------------------------------------
+    // Damage taken
+    // -------------------------------------------------------------------------
+
+    /** Check every alive monster on the map; if bot is inside its bounding box, apply a hit. */
+    private void tickMobDamage(BotEntry entry, Character bot) {
+        if (entry.mobHitCooldown > 0) {
+            entry.mobHitCooldown--;
+            return;
+        }
+        if (bot.getHp() <= 0) return;
+
+        Point botPos = bot.getPosition();
+        for (Monster mob : bot.getMap().getAllMonsters()) {
+            if (!mob.isAlive()) continue;
+            Point mp = mob.getPosition();
+            if (Math.abs(botPos.x - mp.x) <= cfg.MOB_TOUCH_HALF_W
+                    && Math.abs(botPos.y - mp.y) <= cfg.MOB_TOUCH_HALF_H) {
+                applyMobHit(entry, bot, mob);
+                return;
+            }
+        }
+    }
+
+    /**
+     * Apply one physical hit from {@code mob} to the bot.
+     * Damage = PADamage ± 15% (v83 mob attack approximation; no server-side WDEF available).
+     */
+    private void applyMobHit(BotEntry entry, Character bot, Monster mob) {
+        int pa  = mob.getPADamage();
+        int max = Math.max(1, pa * 115 / 100);
+        int min = Math.max(1, pa *  85 / 100);
+        int dmg = min < max ? ThreadLocalRandom.current().nextInt(min, max + 1) : max;
+
+        bot.addMPHP(-dmg, 0);
+
+        // direction: 0 = hit from left (knocked right), 1 = hit from right (knocked left)
+        int dir = mob.getPosition().x < bot.getPosition().x ? 0 : 1;
+        bot.getMap().broadcastMessage(bot,
+                PacketCreator.damagePlayer(-1, mob.getId(), bot.getId(), dmg, 0,
+                        dir, false, 0, false, 0, 0, 0), false);
+
+        // Knock bot back away from mob
+        Point bp     = bot.getPosition();
+        int   kbX    = bp.x + (dir == 0 ? 30 : -30);
+        Point snapped = bot.getMap().getPointBelow(new Point(kbX, bp.y));
+        bot.setPosition(snapped != null ? snapped : new Point(kbX, bp.y));
+        broadcastMovement(bot, 0, 0);
+
+        entry.mobHitCooldown = cfg.MOB_HIT_COOLDOWN;
+
+        if (bot.getHp() <= 0) {
+            entry.deadUntil = System.currentTimeMillis() + cfg.BOT_DEAD_MS;
+            resetEntryState(entry);
+        }
+    }
+
+    private void respawnBot(BotEntry entry, Character bot, Character owner) {
+        entry.deadUntil = 0;
+        bot.updateHp(bot.getMaxHp());
+
+        if (bot.getMapId() != owner.getMapId()) {
+            bot.forceChangeMap(owner.getMap(), owner.getMap().findClosestPortal(owner.getPosition()));
+        }
+        Point ownerPos = owner.getPosition();
+        Point spawnPos = bot.getMap().getPointBelow(new Point(ownerPos.x, ownerPos.y - 1));
+        bot.setPosition(spawnPos != null ? spawnPos : ownerPos);
+        resetEntryState(entry);
+        broadcastMovement(bot, 0, 0);
+        botSay(bot, "back!");
+    }
+
+    // -------------------------------------------------------------------------
+    // Potion management
+    // -------------------------------------------------------------------------
+
+    /**
+     * Counts HP and MP potions in the bot's USE inventory.
+     * Items restoring both (elixirs) count toward both totals.
+     * @return int[2]: [hpCount, mpCount]
+     */
+    private int[] countPotions(Character bot) {
+        int hp = 0, mp = 0;
+        ItemInformationProvider ii = ItemInformationProvider.getInstance();
+        for (Item item : bot.getInventory(InventoryType.USE).list()) {
+            StatEffect eff = ii.getItemEffect(item.getItemId());
+            if (eff == null) continue;
+            int qty = item.getQuantity();
+            if (eff.getHp() > 0 || eff.getHpRate() > 0) hp += qty;
+            if (eff.getMp() > 0 || eff.getMpRate() > 0) mp += qty;
+        }
+        return new int[]{hp, mp};
+    }
+
+    /**
+     * Binds the best HP/MP potions from inventory to autopot keymap slots 91/92.
+     * Called on grind start and every POT_CHECK_TICKS to handle type depletion.
+     */
+    private void setupAutopotForBot(Character bot) {
+        ItemInformationProvider ii = ItemInformationProvider.getInstance();
+        int hpItemId = -1, mpItemId = -1;
+        int bestHp = 0, bestMp = 0;
+        for (Item item : bot.getInventory(InventoryType.USE).list()) {
+            if (item.getQuantity() <= 0) continue;
+            StatEffect eff = ii.getItemEffect(item.getItemId());
+            if (eff == null) continue;
+            if (eff.getHp() > bestHp) { bestHp = eff.getHp(); hpItemId = item.getItemId(); }
+            if (eff.getMp() > bestMp) { bestMp = eff.getMp(); mpItemId = item.getItemId(); }
+        }
+        if (hpItemId > 0) {
+            bot.changeKeybinding(91, new KeyBinding(2, hpItemId));
+            bot.setAutopotHpAlert(cfg.AUTOPOT_HP_THRESH);
+        } else {
+            bot.getKeymap().remove(91);
+            bot.setAutopotHpAlert(0f);
+        }
+        if (mpItemId > 0) {
+            bot.changeKeybinding(92, new KeyBinding(2, mpItemId));
+            bot.setAutopotMpAlert(cfg.AUTOPOT_MP_THRESH);
+        } else {
+            bot.getKeymap().remove(92);
+            bot.setAutopotMpAlert(0f);
+        }
+    }
+
+    /** Builds grind-start reply with low-potion warning when below POT_LOW_WARN. */
+    private String grindStartMessage(Character bot) {
+        int[] pots = countPotions(bot);
+        int hp = pots[0], mp = pots[1];
+        String base = randomReply(GRIND_REPLIES);
+        if (hp >= cfg.POT_LOW_WARN && mp >= cfg.POT_LOW_WARN) return base;
+        StringBuilder msg = new StringBuilder(base).append(", but");
+        if (hp < cfg.POT_LOW_WARN) msg.append(" only ").append(hp).append(" HP pots");
+        if (hp < cfg.POT_LOW_WARN && mp < cfg.POT_LOW_WARN) msg.append(" and");
+        if (mp < cfg.POT_LOW_WARN) msg.append(" only ").append(mp).append(" MP pots");
+        return msg.append(" left").toString();
+    }
+
+    // -------------------------------------------------------------------------
+    // Passive loot
+    // -------------------------------------------------------------------------
+
+    /** Picks up lootable drops within LOOT_RADIUS — runs every tick in all modes. */
+    private void tickPassiveLoot(BotEntry entry, Character bot) {
+        if (entry.invFullWarnCooldown > 0) entry.invFullWarnCooldown--;
+        Point botPos = bot.getPosition();
+        for (MapItem drop : bot.getMap().getDroppedItems()) {
+            if (!drop.canBePickedBy(bot)) continue;
+            Point dp = drop.getPosition();
+            if (Math.abs(dp.x - botPos.x) > cfg.LOOT_RADIUS
+                    || Math.abs(dp.y - botPos.y) > cfg.LOOT_RADIUS) continue;
+            if (drop.getMeso() <= 0 && drop.getItemId() > 0) {
+                InventoryType type = ItemConstants.getInventoryType(drop.getItemId());
+                Inventory inv = bot.getInventory(type);
+                if (inv != null && inv.isFull()) {
+                    if (entry.invFullWarnCooldown <= 0) {
+                        botSay(bot, type.name().toLowerCase() + " inventory is full!");
+                        entry.invFullWarnCooldown = cfg.INV_FULL_WARN_CD;
+                    }
+                    continue;
+                }
+            }
+            bot.pickupItem(drop);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Potion check tick
+    // -------------------------------------------------------------------------
+
+    /** Periodically rebinds autopot and stops grinding when HP pots are critically low. */
+    private void tickPotionCheck(BotEntry entry, Character bot, Character owner) {
+        if (entry.potCheckTimer > 0) { entry.potCheckTimer--; return; }
+        entry.potCheckTimer = cfg.POT_CHECK_TICKS;
+
+        setupAutopotForBot(bot);
+
+        if (!entry.grinding) return;
+        int[] pots = countPotions(bot);
+        if (pots[0] < cfg.POT_STOP && bot.getHp() < bot.getMaxHp() * 0.5f) {
+            entry.grinding = false;
+            entry.following = true;
+            botSay(bot, "out of HP pots!! walking to you");
+        }
+    }
+
     /**
      * Broadcasts a MOVE_PLAYER packet with real velocity values so the client
      * smoothly interpolates over TICK_MS ms — matching how real player packets work.
@@ -942,6 +1235,244 @@ public class BotManager {
             }
         }
         return false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Job advancement helpers
+    // -------------------------------------------------------------------------
+
+    // -------------------------------------------------------------------------
+    // Status check — called on spawn, grind start, greeting, and level-up
+    // -------------------------------------------------------------------------
+
+    private void checkBotStatus(BotEntry entry, Character bot) {
+        String mode = entry.grinding ? "grinding" : entry.following ? "following u" : "just chilling";
+//        queueBotSay(entry, "im lv" + bot.getLevel() + " " + jobDisplayName(bot.getJob()) + ", " + mode);
+        String prompt = buildJobPrompt(entry, bot);
+        if (prompt != null) queueBotSay(entry, prompt);
+    }
+
+    /** Returns the next job-advancement prompt (updating jobPromptSent), or null if none pending. */
+    private String buildJobPrompt(BotEntry entry, Character bot) {
+        int lvl = bot.getLevel();
+        Job job = bot.getJob();
+        int prompted = entry.jobPromptSent;
+
+        if (job == Job.BEGINNER) {
+            if (lvl >= 10 && prompted < 10) {
+                entry.jobPromptSent = 10;
+                return "hey i can change jobs now!! warrior, mage, bowman, thief, or pirate?";
+            } else if (lvl >= 8 && prompted < 8) {
+                entry.jobPromptSent = 8;
+                return "i can become a mage already if u want, or wait til lv10 for other jobs";
+            }
+            return null;
+        }
+
+        if (lvl >= 30 && prompted < 30) {
+            String msg = switch (job) {
+                case WARRIOR  -> "lv30! 2nd job time~ fighter, page, or spearman?";
+                case MAGICIAN -> "lv30! pick 2nd job: f/p wizard, i/l wizard, or cleric?";
+                case BOWMAN   -> "lv30! hunter or crossbowman?";
+                case THIEF    -> "lv30! assassin or bandit?";
+                case PIRATE   -> "lv30! brawler or gunslinger?";
+                default       -> null;
+            };
+            if (msg != null) { entry.jobPromptSent = 30; return msg; }
+        }
+
+        if (lvl >= 70 && prompted < 70) {
+            String msg = switch (job) {
+                case FIGHTER     -> "lv70!! 3rd job, type 'crusader'";
+                case PAGE        -> "lv70!! type 'white knight' or 'wk'";
+                case SPEARMAN    -> "lv70!! type 'dragon knight' or 'dk'";
+                case FP_WIZARD   -> "lv70!! type 'fp mage'";
+                case IL_WIZARD   -> "lv70!! type 'il mage'";
+                case CLERIC      -> "lv70!! type 'priest'";
+                case HUNTER      -> "lv70!! type 'ranger'";
+                case CROSSBOWMAN -> "lv70!! type 'sniper'";
+                case ASSASSIN    -> "lv70!! type 'hermit'";
+                case BANDIT      -> "lv70!! type 'chief bandit' or 'cb'";
+                case BRAWLER     -> "lv70!! type 'marauder'";
+                case GUNSLINGER  -> "lv70!! type 'outlaw'";
+                default          -> null;
+            };
+            if (msg != null) { entry.jobPromptSent = 70; return msg; }
+        }
+
+        if (lvl >= 120 && prompted < 120) {
+            String msg = switch (job) {
+                case CRUSADER     -> "lv120!! type 'hero' for 4th job!!";
+                case WHITEKNIGHT  -> "lv120!! type 'paladin'";
+                case DRAGONKNIGHT -> "lv120!! type 'dark knight' or 'drk'";
+                case FP_MAGE      -> "lv120!! type 'fp archmage' or 'fp arch'";
+                case IL_MAGE      -> "lv120!! type 'il archmage' or 'il arch'";
+                case PRIEST       -> "lv120!! type 'bishop'";
+                case RANGER       -> "lv120!! type 'bowmaster' or 'bm'";
+                case SNIPER       -> "lv120!! type 'marksman' or 'mm'";
+                case HERMIT       -> "lv120!! type 'night lord' or 'nl'";
+                case CHIEFBANDIT  -> "lv120!! type 'shadower'";
+                case MARAUDER     -> "lv120!! type 'buccaneer' or 'bucc'";
+                case OUTLAW       -> "lv120!! type 'corsair'";
+                default           -> null;
+            };
+            if (msg != null) { entry.jobPromptSent = 120; return msg; }
+        }
+
+        return null;
+    }
+
+    /** Detects level-up; at job-advancement levels stops grinding and triggers a status check. */
+    private void checkLevelUp(BotEntry entry, Character bot) {
+        int lvl = bot.getLevel();
+        if (entry.lastKnownLevel == lvl) return;
+        int prev = entry.lastKnownLevel;
+        entry.lastKnownLevel = lvl;
+        if (prev == -1) return;  // initial sync on first tick
+
+        if (lvl == 8 || lvl == 10 || lvl == 30 || lvl == 70 || lvl == 120) {
+            entry.grinding  = false;
+            entry.following = true;
+            checkBotStatus(entry, bot);
+        }
+    }
+
+    /** Detects owner AFK (same position ≥5 min) and says "wb" when they return. */
+    private void tickAfkCheck(BotEntry entry, Character owner) {
+        Point pos = owner.getPosition();
+        long now  = System.currentTimeMillis();
+
+        if (entry.ownerAfkPos == null) {
+            entry.ownerAfkPos     = pos;
+            entry.ownerAfkSinceMs = now;
+            return;
+        }
+
+        if (!pos.equals(entry.ownerAfkPos)) {
+            if (entry.ownerWasAfk) {
+                entry.ownerWasAfk = false;
+                final Character bot = entry.bot;
+                TimerManager.getInstance().schedule(
+                        () -> botSay(bot, randomReply(WB_REPLIES)), 2000);
+            }
+            entry.ownerAfkPos     = pos;
+            entry.ownerAfkSinceMs = now;
+        } else if (!entry.ownerWasAfk && (now - entry.ownerAfkSinceMs) >= 5 * 60_000L) {
+            entry.ownerWasAfk = true;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Message queue — 5-second spacing between consecutive bot messages
+    // -------------------------------------------------------------------------
+
+    private void queueBotSay(BotEntry entry, String message) {
+        synchronized (entry.msgQueue) {
+            entry.msgQueue.add(message);
+            if (!entry.msgSending) {
+                entry.msgSending = true;
+                drainMsgQueue(entry);
+            }
+        }
+    }
+
+    private void drainMsgQueue(BotEntry entry) {
+        String msg;
+        synchronized (entry.msgQueue) {
+            msg = entry.msgQueue.poll();
+            if (msg == null) { entry.msgSending = false; return; }
+        }
+        botSay(entry.bot, msg);
+        TimerManager.getInstance().schedule(() -> drainMsgQueue(entry), 5000);
+    }
+
+    /** Maps a chat keyword to the correct next Job given bot's current job and level. Returns null if not valid. */
+    private static Job resolveJobChange(Character bot, String msg) {
+        Job cur = bot.getJob();
+        int lvl = bot.getLevel();
+
+        return switch (cur) {
+            case BEGINNER -> {
+                if (lvl >= 8  && msg.matches(".*\\b(mage|magician|wizard|cleric|healer|fp|il|fp mage|il mage)\\b.*")) yield Job.MAGICIAN;
+                if (lvl >= 10 && msg.matches(".*\\b(warrior|fighter|page|spearman|sader)\\b.*")) yield Job.WARRIOR;
+                if (lvl >= 10 && msg.matches(".*\\b(bowman|bowmen|archer|hunter|crossbow|xbow)\\b.*")) yield Job.BOWMAN;
+                if (lvl >= 10 && msg.matches(".*\\b(thief|assassin|sin|bandit|dit)\\b.*")) yield Job.THIEF;
+                if (lvl >= 10 && msg.matches(".*\\b(pirate|brawler|gunslinger|gun|bucc)\\b.*")) yield Job.PIRATE;
+                yield null;
+            }
+            // 2nd job
+            case WARRIOR -> lvl < 30 ? null :
+                    msg.matches(".*\\b(fighter|sader)\\b.*") ? Job.FIGHTER :
+                    msg.matches(".*\\bpage\\b.*") ? Job.PAGE :
+                    msg.matches(".*\\b(spearman|spear)\\b.*") ? Job.SPEARMAN : null;
+            case MAGICIAN -> lvl < 30 ? null :
+                    msg.matches(".*\\b(fp|fp wizard|fp mage|fire|f\\.p)\\b.*") ? Job.FP_WIZARD :
+                    msg.matches(".*\\b(il|il wizard|il mage|ice|i\\.l)\\b.*") ? Job.IL_WIZARD :
+                    msg.matches(".*\\b(cleric|healer|priest|bishop)\\b.*") ? Job.CLERIC : null;
+            case BOWMAN -> lvl < 30 ? null :
+                    msg.matches(".*\\b(hunter|bow)\\b.*") ? Job.HUNTER :
+                    msg.matches(".*\\b(crossbow|xbow|crossbowman)\\b.*") ? Job.CROSSBOWMAN : null;
+            case THIEF -> lvl < 30 ? null :
+                    msg.matches(".*\\b(assassin|sin)\\b.*") ? Job.ASSASSIN :
+                    msg.matches(".*\\b(bandit|dit)\\b.*") ? Job.BANDIT : null;
+            case PIRATE -> lvl < 30 ? null :
+                    msg.matches(".*\\b(brawler|knuckle)\\b.*") ? Job.BRAWLER :
+                    msg.matches(".*\\b(gunslinger|gun)\\b.*") ? Job.GUNSLINGER : null;
+            // 3rd job
+            case FIGHTER     -> lvl >= 70 && msg.matches(".*\\bcrusader\\b.*")                 ? Job.CRUSADER     : null;
+            case PAGE        -> lvl >= 70 && msg.matches(".*\\b(white knight|wk)\\b.*")         ? Job.WHITEKNIGHT  : null;
+            case SPEARMAN    -> lvl >= 70 && msg.matches(".*\\b(dragon knight|dk)\\b.*")        ? Job.DRAGONKNIGHT : null;
+            case FP_WIZARD   -> lvl >= 70 && msg.matches(".*\\b(fp mage|fp)\\b.*")              ? Job.FP_MAGE      : null;
+            case IL_WIZARD   -> lvl >= 70 && msg.matches(".*\\b(il mage|il)\\b.*")              ? Job.IL_MAGE      : null;
+            case CLERIC      -> lvl >= 70 && msg.matches(".*\\bpriest\\b.*")                    ? Job.PRIEST       : null;
+            case HUNTER      -> lvl >= 70 && msg.matches(".*\\branger\\b.*")                    ? Job.RANGER       : null;
+            case CROSSBOWMAN -> lvl >= 70 && msg.matches(".*\\bsniper\\b.*")                    ? Job.SNIPER       : null;
+            case ASSASSIN    -> lvl >= 70 && msg.matches(".*\\bhermit\\b.*")                    ? Job.HERMIT       : null;
+            case BANDIT      -> lvl >= 70 && msg.matches(".*\\b(chief bandit|cb|chief)\\b.*")   ? Job.CHIEFBANDIT  : null;
+            case BRAWLER     -> lvl >= 70 && msg.matches(".*\\bmarauder\\b.*")                  ? Job.MARAUDER     : null;
+            case GUNSLINGER  -> lvl >= 70 && msg.matches(".*\\boutlaw\\b.*")                    ? Job.OUTLAW       : null;
+            // 4th job
+            case CRUSADER    -> lvl >= 120 && msg.matches(".*\\bhero\\b.*")                         ? Job.HERO        : null;
+            case WHITEKNIGHT -> lvl >= 120 && msg.matches(".*\\bpaladin\\b.*")                      ? Job.PALADIN     : null;
+            case DRAGONKNIGHT -> lvl >= 120 && msg.matches(".*\\b(dark knight|drk)\\b.*")           ? Job.DARKKNIGHT  : null;
+            case FP_MAGE     -> lvl >= 120 && msg.matches(".*\\b(fp archmage|fp arch)\\b.*")        ? Job.FP_ARCHMAGE : null;
+            case IL_MAGE     -> lvl >= 120 && msg.matches(".*\\b(il archmage|il arch)\\b.*")        ? Job.IL_ARCHMAGE : null;
+            case PRIEST      -> lvl >= 120 && msg.matches(".*\\bbishop\\b.*")                       ? Job.BISHOP      : null;
+            case RANGER      -> lvl >= 120 && msg.matches(".*\\b(bowmaster|bm)\\b.*")               ? Job.BOWMASTER   : null;
+            case SNIPER      -> lvl >= 120 && msg.matches(".*\\b(marksman|mm)\\b.*")                ? Job.MARKSMAN    : null;
+            case HERMIT      -> lvl >= 120 && msg.matches(".*\\b(night lord|nl)\\b.*")              ? Job.NIGHTLORD   : null;
+            case CHIEFBANDIT -> lvl >= 120 && msg.matches(".*\\b(shadower|shad)\\b.*")              ? Job.SHADOWER    : null;
+            case MARAUDER    -> lvl >= 120 && msg.matches(".*\\b(buccaneer|bucc)\\b.*")             ? Job.BUCCANEER   : null;
+            case OUTLAW      -> lvl >= 120 && msg.matches(".*\\bcorsair\\b.*")                      ? Job.CORSAIR     : null;
+            default -> null;
+        };
+    }
+
+    private static String jobDisplayName(Job job) {
+        return switch (job) {
+            case WARRIOR     -> "warrior";      case MAGICIAN    -> "mage";
+            case BOWMAN      -> "bowman";       case THIEF       -> "thief";
+            case PIRATE      -> "pirate";       case FIGHTER     -> "fighter";
+            case PAGE        -> "page";         case SPEARMAN    -> "spearman";
+            case FP_WIZARD   -> "f/p wizard";   case IL_WIZARD   -> "i/l wizard";
+            case CLERIC      -> "cleric";       case HUNTER      -> "hunter";
+            case CROSSBOWMAN -> "crossbowman";  case ASSASSIN    -> "assassin";
+            case BANDIT      -> "bandit";       case BRAWLER     -> "brawler";
+            case GUNSLINGER  -> "gunslinger";   case CRUSADER    -> "crusader";
+            case WHITEKNIGHT -> "white knight"; case DRAGONKNIGHT-> "dragon knight";
+            case FP_MAGE     -> "f/p mage";     case IL_MAGE     -> "i/l mage";
+            case PRIEST      -> "priest";       case RANGER      -> "ranger";
+            case SNIPER      -> "sniper";       case HERMIT      -> "hermit";
+            case CHIEFBANDIT -> "chief bandit"; case MARAUDER    -> "marauder";
+            case OUTLAW      -> "outlaw";       case HERO        -> "hero";
+            case PALADIN     -> "paladin";      case DARKKNIGHT  -> "dark knight";
+            case FP_ARCHMAGE -> "f/p archmage"; case IL_ARCHMAGE -> "i/l archmage";
+            case BISHOP      -> "bishop";       case BOWMASTER   -> "bowmaster";
+            case MARKSMAN    -> "marksman";     case NIGHTLORD   -> "night lord";
+            case SHADOWER    -> "shadower";     case BUCCANEER   -> "buccaneer";
+            case CORSAIR     -> "corsair";
+            default -> job.name().toLowerCase();
+        };
     }
 
     private static Map<Integer, Foothold> buildFhIndex(MapleMap map) {
