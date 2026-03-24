@@ -74,7 +74,7 @@ public class BotManager {
 
         // Grind mode
         public int   ATTACK_RANGE_SQ  = 22500; // px² — attack when within ~150px of target monster
-        public int   ATTACK_COOLDOWN  = 8;     // ticks between attacks (~800ms at 100ms/tick)
+        public int   ATTACK_COOLDOWN  = 10;     // ticks between attacks (~800ms at 100ms/tick)
         public int   GRIND_SEEK_RANGE = 800;   // px; monster search radius
     }
 
@@ -271,14 +271,14 @@ public class BotManager {
                 resetEntryState(entry);
                 return;
             }
-            // Teleport if hopelessly far (portal shortcut, fell off map, etc.)
-            if (Math.abs(botPos.x - targetPos.x) + Math.abs(botPos.y - targetPos.y) > cfg.TELEPORT_DIST) {
-                Point spawn = new Point(targetPos.x, targetPos.y - 10);
-                bot.setPosition(spawn);
-                resetEntryState(entry);
-                broadcastMovement(bot, 0, 0);
-                return;
-            }
+        }
+        // Teleport if hopelessly far — applies to both follow and grind (catches falling off map)
+        if (Math.abs(botPos.x - targetPos.x) + Math.abs(botPos.y - targetPos.y) > cfg.TELEPORT_DIST) {
+            Point spawn = new Point(targetPos.x, targetPos.y - 10);
+            bot.setPosition(spawn);
+            resetEntryState(entry);
+            broadcastMovement(bot, 0, 0);
+            return;
         }
 
         // Rebuild foothold index on map change
@@ -291,15 +291,15 @@ public class BotManager {
         if (entry.grinding) {
             Monster target = findNearestMonster(bot);
             if (target == null) {
-                log.debug("[GRIND] no target found for bot={} map={}", bot.getName(), bot.getMapId());
+//                log.debug("[GRIND] no target found for bot={} map={}", bot.getName(), bot.getMapId());
                 if (entry.inAir) tickAirborne(entry, targetPos);
                 else { bot.setStance(5); broadcastMovement(bot, 0, 0); }
                 return;
             }
             entry.grindTarget = target;
             int distSq = (int) target.getPosition().distanceSq(botPos);
-            log.debug("[GRIND] target={} distSq={} rangeSq={} inAir={} climbing={}",
-                    target.getId(), distSq, cfg.ATTACK_RANGE_SQ, entry.inAir, entry.climbing);
+//            log.debug("[GRIND] target={} distSq={} rangeSq={} inAir={} climbing={}",
+//                    target.getId(), distSq, cfg.ATTACK_RANGE_SQ, entry.inAir, entry.climbing);
             if (!entry.inAir && !entry.climbing
                     && distSq <= cfg.ATTACK_RANGE_SQ) {
                 attackMonster(entry, bot, target);
@@ -644,9 +644,9 @@ public class BotManager {
                 int maxJumpH = (int) calculateMaxJumpHeight();
                 // Track the winning jump direction so initiateJump uses the correct airVelX
                 int winDir = Integer.MIN_VALUE; // sentinel: no winner yet
-                if (arcCheckJump(bot, botPos, arcStep, targetPos.y)) {
+                if (arcCheckJump(bot, botPos, arcStep, targetPos.x, targetPos.y)) {
                     winDir = arcStep;                       // diagonal arc found a platform
-                } else if (arcCheckJump(bot, botPos, 0, targetPos.y)) {
+                } else if (arcCheckJump(bot, botPos, 0, targetPos.x, targetPos.y)) {
                     winDir = 0;                             // vertical arc found a platform
                 } else if (farAbove) {
                     // Widen search: walk 1..ARC_LEAD_STEPS in either direction then check both jump dirs
@@ -659,7 +659,7 @@ public class BotManager {
                             if (leadGround == null || leadGround.y > botPos.y + cfg.MAX_SNAP_DROP) continue;
                             Point leadPt = new Point(leadX, leadGround.y);
                             for (int jDir : new int[]{1, -1}) {
-                                if (arcCheckJump(bot, leadPt, arcStep * jDir, targetPos.y)) {
+                                if (arcCheckJump(bot, leadPt, arcStep * jDir, targetPos.x, targetPos.y)) {
                                     winDir = arcStep * jDir;
                                     break outer;
                                 }
@@ -676,7 +676,7 @@ public class BotManager {
                 if (entry.rawChaseTicks > 0) {
                     int backStep = -arcStep;
                     if (Math.abs(dx) <= cfg.STUCK_WALKBACK_LIMIT
-                            && arcCheckJump(bot, botPos, backStep, targetPos.y)) {
+                            && arcCheckJump(bot, botPos, backStep, targetPos.x, targetPos.y)) {
                         entry.jumpCooldown = cfg.JUMP_COOLDOWN;
                         initiateJump(entry, bot, backStep);
                         return;
@@ -716,7 +716,7 @@ public class BotManager {
                 entry.airVelX = stepX;
                 entry.velY   = 0f;
             } else if (entry.jumpCooldown == 0 && stepX != 0
-                    && arcCheckJump(bot, botPos, stepX, targetPos.y)) {
+                    && arcCheckJump(bot, botPos, stepX, targetPos.x, targetPos.y)) {
                 // Arc would reach a useful platform — jump instead of falling
                 initiateJump(entry, bot, dx);
             } else {
@@ -852,15 +852,17 @@ public class BotManager {
 
         AbstractDealDamageHandler.AttackInfo attack = new AbstractDealDamageHandler.AttackInfo();
         attack.skill = 0;
+        attack.skilllevel = 0;
         attack.numAttacked = 1;
         attack.numDamage = 1;
         attack.numAttackedAndDamage = (1 << 4) | 1;
         attack.speed = 4;
         // bit 7 = facing left (0x80), matching real client attack packet encoding
-        attack.stance = bot.getPosition().x > target.getPosition().x ? 0x80 : 0x00;
+        attack.stance = bot.getPosition().x > target.getPosition().x ? -128 : 0;
+        attack.direction = bot.getPosition().x > target.getPosition().x ? 17 : 6; // 17 = left, 6= right
         attack.targets = new HashMap<>();
         attack.targets.put(target.getObjectId(),
-                new AbstractDealDamageHandler.AttackTarget((short) 0, List.of(damage)));
+                new AbstractDealDamageHandler.AttackTarget((short) 305, List.of(damage)));
 
         CloseRangeDamageHandler.applyCloseRangeEffects(attack, bot, bot.getClient());
 
@@ -914,7 +916,7 @@ public class BotManager {
         return best;
     }
 
-    private boolean arcCheckJump(Character bot, Point from, int stepX, int targetY) {
+    private boolean arcCheckJump(Character bot, Point from, int stepX, int targetX, int targetY) {
         float vy = -cfg.JUMP_FORCE;
         int x = from.x, y = from.y;
         for (int t = 0; t < 40; t++) {
@@ -925,14 +927,12 @@ public class BotManager {
             if (vy > 0) { // descending — use prevY as search origin (mirrors tickAirborne)
                 Point floor = bot.getMap().getPointBelow(new Point(x, prevY));
                 if (floor != null && floor.y <= y) {
-                    // assume sideway jump toward target always useful
                     if (stepX != 0) {
-                        return true;
+                        // Reject if the arc overshoots the target — bot would land past owner
+                        boolean overshoot = (stepX > 0 && x > targetX) || (stepX < 0 && x < targetX);
+                        return !overshoot;
                     }
-                    // Useful if we gain height OR land near target's platform (same-level gap jump)
-//                    boolean usefulHorizontalJump = stepX != 0 && Math.abs(floor.y - from.y) <= cfg.JUMP_Y_THRESH;
-                    boolean hasYGains = floor.y < from.y - cfg.JUMP_Y_THRESH;
-                    return hasYGains;
+                    return floor.y < from.y - cfg.JUMP_Y_THRESH;
                 }
             }
         }
