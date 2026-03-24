@@ -87,6 +87,7 @@ public class SpawnBotCommand extends Command {
             // Override mapid before newClient so it initialises directly on the admin's map
             botChar.setMapId(adminMap.getId());
             botChar.newClient(botClient);
+            botChar.recalcLocalStats(); // initialize localwatk/matk/etc from loaded equipment
 
             Point spawnPos = adminMap.getPointBelow(new Point(adminPos.x, adminPos.y - 1));
             if (spawnPos == null) {

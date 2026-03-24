@@ -7776,7 +7776,7 @@ public class Character extends AbstractCharacterObject {
         }
     }
 
-    private List<Pair<Stat, Integer>> recalcLocalStats() {
+    public List<Pair<Stat, Integer>> recalcLocalStats() {
         effLock.lock();
         chrLock.lock();
         statWlock.lock();
