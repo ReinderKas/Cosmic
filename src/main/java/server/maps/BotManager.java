@@ -848,7 +848,12 @@ public class BotManager {
             return;
         }
 
-        int damage = Math.max(1, bot.calculateMaxBaseDamage(bot.getTotalWatk()));
+        int watk   = bot.getTotalWatk();
+        int maxDmg = Math.max(1, bot.calculateMaxBaseDamage(watk));
+        int minDmg = Math.max(1, bot.calculateMinBaseDamage(watk));
+        int damage = minDmg < maxDmg
+                ? ThreadLocalRandom.current().nextInt(minDmg, maxDmg + 1)
+                : maxDmg;
 
         AbstractDealDamageHandler.AttackInfo attack = new AbstractDealDamageHandler.AttackInfo();
         attack.skill = 0;

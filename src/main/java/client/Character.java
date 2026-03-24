@@ -810,6 +810,39 @@ public class Character extends AbstractCharacterObject {
         return (int) Math.ceil(((weapon.getMaxDamageMultiplier() * mainstat + secondarystat) / 100.0) * watk);
     }
 
+    /**
+     * Minimum base damage for a basic attack.
+     * Formula: (multiplier * mainStat * 0.9 * mastery + secondaryStat) / 100 * watk
+     * Uses mastery=0.1 (no mastery skill); callers may pass a higher value if the
+     * character has a mastery skill active.
+     */
+    public int calculateMinBaseDamage(int watk) {
+        return calculateMinBaseDamage(watk, 0.1);
+    }
+
+    public int calculateMinBaseDamage(int watk, double mastery) {
+        Item weapon_item = getInventory(InventoryType.EQUIPPED).getItem((short) -11);
+        if (weapon_item == null) {
+            return 1;
+        }
+        WeaponType weapon = ItemInformationProvider.getInstance().getWeaponType(weapon_item.getItemId());
+        if (getJob().isA(Job.THIEF) && weapon == WeaponType.DAGGER_OTHER) {
+            weapon = WeaponType.DAGGER_THIEVES;
+        }
+        int mainstat, secondarystat;
+        if (weapon == WeaponType.BOW || weapon == WeaponType.CROSSBOW || weapon == WeaponType.GUN) {
+            mainstat = localdex;
+            secondarystat = localstr;
+        } else if (weapon == WeaponType.CLAW || weapon == WeaponType.DAGGER_THIEVES) {
+            mainstat = localluk;
+            secondarystat = localdex + localstr;
+        } else {
+            mainstat = localstr;
+            secondarystat = localdex;
+        }
+        return (int) Math.ceil((weapon.getMaxDamageMultiplier() * mainstat * 0.9 * mastery + secondarystat) / 100.0 * watk);
+    }
+
     public int calculateMaxBaseDamage(int watk) {
         int maxbasedamage;
         Item weapon_item = getInventory(InventoryType.EQUIPPED).getItem((short) -11);
