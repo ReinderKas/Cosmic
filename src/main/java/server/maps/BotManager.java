@@ -6,9 +6,12 @@ import net.packet.ByteBufInPacket;
 import net.packet.InPacket;
 import net.packet.Packet;
 import net.server.Server;
+import net.server.channel.handlers.AbstractDealDamageHandler;
+import net.server.channel.handlers.CloseRangeDamageHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import server.TimerManager;
+import server.life.Monster;
 import tools.PacketCreator;
 
 import java.awt.Point;
@@ -68,6 +71,11 @@ public class BotManager {
         // Waypoint (1-hop pathfinding to a rope outside normal detection range)
         public int   WAYPOINT_SEEK_X  = 1500;  // expanded rope search radius when setting a waypoint
         public int   WAYPOINT_TIMEOUT = 80;   // ticks before an unreached waypoint expires (~8s)
+
+        // Grind mode
+        public int   ATTACK_RANGE_SQ  = 22500; // px² — attack when within ~150px of target monster
+        public int   ATTACK_COOLDOWN  = 8;     // ticks between attacks (~800ms at 100ms/tick)
+        public int   GRIND_SEEK_RANGE = 800;   // px; monster search radius
     }
 
     /** Singleton config — replace with `cfg = new Config()` after hotswapping to reset. */
@@ -90,6 +98,11 @@ public class BotManager {
             "ok", "k", "sure", "alright", "got it", "stopping",
             "ok ill wait here", "ill be here", "np", "standing by",
             "understood", "ok boss");
+    private static final Pattern GRIND_PATTERN = Pattern.compile(
+            "\\b(farm|grind|kill mobs?)\\b", Pattern.CASE_INSENSITIVE);
+    private static final List<String> GRIND_REPLIES = List.of(
+            "ok", "on it", "lets get it", "farming time", "got it",
+            "sure", "ok boss", "time to grind");
 
     private static String randomReply(List<String> list) {
         return list.get(ThreadLocalRandom.current().nextInt(list.size()));
@@ -139,6 +152,11 @@ public class BotManager {
         // Waypoint — navigate to a rope outside normal detection range
         Rope  waypointRope  = null;
         int   waypointTimer = 0;
+
+        // Grind mode
+        boolean grinding       = false;
+        Monster grindTarget    = null;
+        int     attackCooldown = 0;
 
         // Foothold index, rebuilt on map change
         int lastMapId = -1;
@@ -190,12 +208,20 @@ public class BotManager {
 
         if (FOLLOW_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
+                entry.grinding = false;
                 botSay(entry.bot, randomReply(FOLLOW_REPLIES));
                 TimerManager.getInstance().schedule(() -> entry.following = true, 250);
+            }, 1500);
+        } else if (GRIND_PATTERN.matcher(message).find()) {
+            TimerManager.getInstance().schedule(() -> {
+                entry.following = false;
+                botSay(entry.bot, randomReply(GRIND_REPLIES));
+                TimerManager.getInstance().schedule(() -> entry.grinding = true, 250);
             }, 1500);
         } else if (STOP_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
                 entry.following = false;
+                entry.grinding  = false;
                 TimerManager.getInstance().schedule(() -> botSay(entry.bot, randomReply(STOP_REPLIES)), 1500);
             }, 1000);
         }
@@ -221,19 +247,29 @@ public class BotManager {
         Point botPos    = bot.getPosition();
         Point targetPos = owner.getPosition();
 
-        // Keep physics running even when stopped — prevents freezing mid-air
-        if (!entry.following) {
+        // Keep physics running when idle; grinding runs its own navigation loop
+        if (!entry.following && !entry.grinding) {
             if (entry.inAir) tickAirborne(entry, targetPos);
             return;
         }
 
-        // Map change — teleport instantly, reset all motion state
-        if (bot.getMapId() != owner.getMapId()) {
-            Point spawn = new Point(owner.getPosition().x, owner.getPosition().y - 10);
-            bot.setStance(5); // ensure spawn packet shows stand stance, not walk
-            bot.changeMap(owner.getMap(), spawn);
-            resetEntryState(entry);
-            return;
+        // Map change and teleport checks only apply when following owner
+        if (entry.following) {
+            if (bot.getMapId() != owner.getMapId()) {
+                Point spawn = new Point(owner.getPosition().x, owner.getPosition().y - 10);
+                bot.setStance(5); // ensure spawn packet shows stand stance, not walk
+                bot.changeMap(owner.getMap(), spawn);
+                resetEntryState(entry);
+                return;
+            }
+            // Teleport if hopelessly far (portal shortcut, fell off map, etc.)
+            if (Math.abs(botPos.x - targetPos.x) + Math.abs(botPos.y - targetPos.y) > cfg.TELEPORT_DIST) {
+                Point spawn = new Point(targetPos.x, targetPos.y - 10);
+                bot.setPosition(spawn);
+                resetEntryState(entry);
+                broadcastMovement(bot, 0, 0);
+                return;
+            }
         }
 
         // Rebuild foothold index on map change
@@ -242,13 +278,25 @@ public class BotManager {
             entry.lastMapId = bot.getMapId();
         }
 
-        // Teleport if hopelessly far (portal shortcut, fell off map, etc.)
-        if (Math.abs(botPos.x - targetPos.x) + Math.abs(botPos.y - targetPos.y) > cfg.TELEPORT_DIST) {
-            Point spawn = new Point(targetPos.x, targetPos.y - 10);
-            bot.setPosition(spawn);
-            resetEntryState(entry);
-            broadcastMovement(bot, 0, 0);
-            return;
+        // Grind mode: navigate toward nearest monster, attack when in range
+        if (entry.grinding) {
+            Monster target = findNearestMonster(bot);
+            if (target == null) {
+                log.debug("[GRIND] no target found for bot={} map={}", bot.getName(), bot.getMapId());
+                if (entry.inAir) tickAirborne(entry, targetPos);
+                else { bot.setStance(5); broadcastMovement(bot, 0, 0); }
+                return;
+            }
+            entry.grindTarget = target;
+            int distSq = (int) target.getPosition().distanceSq(botPos);
+            log.debug("[GRIND] target={} distSq={} rangeSq={} inAir={} climbing={}",
+                    target.getId(), distSq, cfg.ATTACK_RANGE_SQ, entry.inAir, entry.climbing);
+            if (!entry.inAir && !entry.climbing
+                    && distSq <= cfg.ATTACK_RANGE_SQ) {
+                attackMonster(entry, bot, target);
+                return;
+            }
+            targetPos = target.getPosition();
         }
 
         if (entry.climbing) {
@@ -273,6 +321,8 @@ public class BotManager {
         entry.stuckCheckTimer   = 0;
         entry.lastStuckCheckPos = null;
         entry.waypointRope      = null;
+        entry.grindTarget       = null;
+        entry.attackCooldown    = 0;
     }
 
     // -------------------------------------------------------------------------
@@ -765,6 +815,47 @@ public class BotManager {
             }
         }
         return best;
+    }
+
+    // -------------------------------------------------------------------------
+    // Grind mode helpers
+    // -------------------------------------------------------------------------
+
+    private Monster findNearestMonster(Character bot) {
+        Point botPos = bot.getPosition();
+        Monster best = null;
+        double bestDist = (double) cfg.GRIND_SEEK_RANGE * cfg.GRIND_SEEK_RANGE;
+        for (Monster m : bot.getMap().getAllMonsters()) {
+            if (!m.isAlive()) continue;
+            double d = m.getPosition().distanceSq(botPos);
+            if (d < bestDist) { bestDist = d; best = m; }
+        }
+        return best;
+    }
+
+    private void attackMonster(BotEntry entry, Character bot, Monster target) {
+        if (entry.attackCooldown > 0) {
+            entry.attackCooldown--;
+            return;
+        }
+
+        int damage = Math.max(1, bot.calculateMaxBaseDamage(bot.getTotalWatk()));
+
+        AbstractDealDamageHandler.AttackInfo attack = new AbstractDealDamageHandler.AttackInfo();
+        attack.skill = 0;
+        attack.numAttacked = 1;
+        attack.numDamage = 1;
+        attack.numAttackedAndDamage = (1 << 4) | 1;
+        attack.speed = 4;
+        attack.stance = bot.getPosition().x <= target.getPosition().x ? 2 : 3;
+        attack.targets = new HashMap<>();
+        attack.targets.put(target.getObjectId(),
+                new AbstractDealDamageHandler.AttackTarget((short) 0, List.of(damage)));
+
+        bot.setStance(attack.stance);
+        CloseRangeDamageHandler.applyCloseRangeEffects(attack, bot, bot.getClient());
+
+        entry.attackCooldown = cfg.ATTACK_COOLDOWN;
     }
 
     /**
