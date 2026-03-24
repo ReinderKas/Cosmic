@@ -136,6 +136,9 @@ public class BotManager {
     private static final List<String> GRIND_REPLIES = List.of(
             "ok", "on it", "lets get it", "farming time", "got it",
             "sure", "ok boss", "time to grind");
+    private static final List<String> DEATH_REPLIES = List.of(
+            "oops im dead", "gg", "rip me", "oww", "i died lol",
+            "welp", "ouchh", "nooo", "ok i died", "i'll be right back");
     private static final Pattern GREETING_PATTERN = Pattern.compile(
             "\\b(hi+|hey+|hello|sup|yo+|howdy|hiya|whats up|what's up|wassup)\\b",
             Pattern.CASE_INSENSITIVE);
@@ -344,17 +347,13 @@ public class BotManager {
         Point botPos    = bot.getPosition();
         Point targetPos = owner.getPosition();
 
-        // Mob damage — runs in all modes (idle, follow, grind)
+        // These run in all modes (idle, follow, grind)
         tickMobDamage(entry, bot);
-
-        // Passive loot + potion management — run in all modes
         tickPassiveLoot(entry, bot);
         tickPotionCheck(entry, bot, owner);
-
         checkLevelUp(entry, bot);
         tickAfkCheck(entry, owner);
 
-        // Keep physics running when idle; grinding runs its own navigation loop
         if (!entry.following && !entry.grinding) {
             if (entry.inAir) {
                 tickAirborne(entry, targetPos);
@@ -1033,6 +1032,10 @@ public class BotManager {
         entry.mobHitCooldown = cfg.MOB_HIT_COOLDOWN;
 
         if (bot.getHp() <= 0) {
+            // Show tombstone: stance 0 = dead, broadcast so nearby clients see it
+            bot.setStance(0);
+            broadcastMovement(bot, 0, 0);
+            botSay(bot, randomReply(DEATH_REPLIES));
             entry.deadUntil = System.currentTimeMillis() + cfg.BOT_DEAD_MS;
             resetEntryState(entry);
         }
@@ -1049,6 +1052,7 @@ public class BotManager {
         Point spawnPos = bot.getMap().getPointBelow(new Point(ownerPos.x, ownerPos.y - 1));
         bot.setPosition(spawnPos != null ? spawnPos : ownerPos);
         resetEntryState(entry);
+        bot.setStance(5); // standing — clears the tombstone (stance 0) for nearby clients
         broadcastMovement(bot, 0, 0);
         botSay(bot, "back!");
     }

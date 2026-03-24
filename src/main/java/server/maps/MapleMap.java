@@ -962,7 +962,7 @@ public class MapleMap {
         }
     }
 
-    private List<MapItem> getDroppedItems() {
+    List<MapItem> getDroppedItems() {
         objectRLock.lock();
         try {
             return new LinkedList<>(droppedItems.keySet());

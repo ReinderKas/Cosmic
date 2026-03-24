@@ -569,6 +569,8 @@ public abstract class AbstractDealDamageHandler extends AbstractPacketHandler {
 
     protected AttackInfo parseDamage(InPacket p, Character chr, boolean ranged, boolean magic) {
         //2C 00 00 01 91 A1 12 00 A5 57 62 FC E2 75 99 10 00 47 80 01 04 01 C6 CC 02 DD FF 5F 00
+//        44-00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 10 80 01 04 12 C1 BD 00 96 04 D7 00
+//        44-00 11 00 00 00 00 00 00 00 00 00 00 00 00 00 10 80 01 04 E2 C3 BD 00 02 CA 9A 3B 06 01 00 01 5E 04 D7 00 5C 04 D7 00 31 01 31 00 00 00 1B AD DA C1 96 04 D7 00
         AttackInfo ret = new AttackInfo();
         p.readByte();
         ret.numAttackedAndDamage = p.readByte();
@@ -900,6 +902,7 @@ public abstract class AbstractDealDamageHandler extends AbstractPacketHandler {
             p.skip(4);
             ret.position.setLocation(p.readShort(), p.readShort());
         }
+//        LoggerFactory.getLogger(BotManager.class).info("Parsed attack info: {}", ret);
         return ret;
     }
 
