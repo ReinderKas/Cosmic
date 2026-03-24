@@ -1240,20 +1240,25 @@ public class Client extends ChannelInboundHandlerAdapter {
         return disconnect;
     }
 
-    public void checkChar(int accid) {  /// issue with multiple chars from same account login found by shavit, resinate
+    public int checkChar(int accid) {  /// issue with multiple chars from same account login found by shavit, resinate
         if (!YamlConfig.config.server.USE_CHARACTER_ACCOUNT_CHECK) {
-            return;
+            return 0;
         }
 
+        int disconnectedBots = 0;
         for (World w : Server.getInstance().getWorlds()) {
             for (Character chr : w.getPlayerStorage().getAllCharacters()) {
                 if (accid == chr.getAccountID()) {
                     log.warn("Chr {} has been removed from world {}. Possible Dupe attempt.", chr.getName(), GameConstants.WORLD_NAMES[w.getId()]);
+                    if (chr.getClient() instanceof BotClient) {
+                        disconnectedBots++;
+                    }
                     chr.getClient().forceDisconnect();
                     w.getPlayerStorage().removePlayer(chr.getId());
                 }
             }
         }
+        return disconnectedBots;
     }
 
     public int getVotePoints() {

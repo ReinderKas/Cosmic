@@ -79,7 +79,10 @@ public class SpawnBotCommand extends Command {
         // Load character from DB and spawn it into the current map
         try {
             BotClient botClient = new BotClient(c.getWorld(), c.getChannel());
-            Character botChar = Character.loadCharFromDB(charId, botClient, false);
+            // Existing characters must be fully loaded before being used as bots.
+            // A partial load skips keymap/quests/skills/macros/saved-locations, and a later
+            // disconnect/save would then delete the persisted rows with empty in-memory state.
+            Character botChar = Character.loadCharFromDB(charId, botClient, true);
 
             botClient.setPlayer(botChar);
             botClient.setAccID(botChar.getAccountID());
@@ -101,7 +104,7 @@ public class SpawnBotCommand extends Command {
             adminMap.addPlayer(botChar);
             botChar.broadcastStance(); // fix floating on spawn
 
-            BotManager.getInstance().registerBot(player.getId(), botChar);
+            BotManager.getInstance().registerBot(player.getId(), player, botChar);
             player.yellowMessage("Bot '" + botName + "' spawned. Say 'follow me' or 'stop' to control it.");
         } catch (SQLException e) {
             player.yellowMessage("Failed to load bot character '" + botName + "'.");

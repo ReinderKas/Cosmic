@@ -43,14 +43,6 @@ import java.util.regex.Pattern;
 
 public class BotManager {
     // TODO: list from most important to least important
-    // TODO: CRITICAL BUG: FIX FIRST: when using spawnbot to spawn a real player character(there should be no difference),
-    //  i logged in while bot is still online and got the following gamebreaking bugs
-    //  I lost the entire inventory(everything except equipped items),
-    //  lost the entire quest progress, inprogress and completed,
-    //  lost the keybindings(all got reset)
-    //  Investigate this bug, make sure that spawning a bot should not have any destructive operation if avoidable,
-    //  check for existing data before trying to create new data/dummy data
-    //  make bot chat message about their owner logging in as soon as account login, dont wait for character login, "disconnect"/save the bot gracefully after 2 seconds delay or so
     // TODO: rework autoAssignSp/getSpPriority/related, implement per level build order, should be backward compatible format(hasn't assigned in many levels), sp should have prompts if multiple options are available (see Hero.java)
     // TODO: fix bug bot dead but become alive with 0 hp, invulnerable to mobs, check how this can happens and fix, some state should persist on save/disconnect
     // TODO: Option to ask bot to logoff/disconnect + save/relog, this should take an additional confirmation prompt (remember human like response and delay between actions)
@@ -213,6 +205,7 @@ public class BotManager {
 
     private static class BotEntry {
         final Character bot;
+        volatile Character owner;
         volatile boolean following = false;
         final ScheduledFuture<?> task;
 
@@ -291,8 +284,9 @@ public class BotManager {
         int lastMapId = -1;
         Map<Integer, Foothold> fhIndex = new HashMap<>();
 
-        BotEntry(Character bot, ScheduledFuture<?> task) {
+        BotEntry(Character bot, Character owner, ScheduledFuture<?> task) {
             this.bot = bot;
+            this.owner = owner;
             this.task = task;
         }
     }
@@ -301,13 +295,13 @@ public class BotManager {
     // Public API
     // -------------------------------------------------------------------------
 
-    public void registerBot(int ownerCharId, Character bot) {
+    public void registerBot(int ownerCharId, Character owner, Character bot) {
         BotEntry old = bots.remove(ownerCharId);
         if (old != null) old.task.cancel(false);
 
         ScheduledFuture<?> task = TimerManager.getInstance().register(
                 () -> tick(ownerCharId, bot), cfg.TICK_MS);
-        BotEntry entry = new BotEntry(bot, task);
+        BotEntry entry = new BotEntry(bot, owner, task);
         bots.put(ownerCharId, entry);
         TimerManager.getInstance().schedule(() -> checkBotStatus(entry, bot), 2000);
     }
@@ -408,11 +402,14 @@ public class BotManager {
         BotEntry entry = bots.get(ownerCharId);
         if (entry == null) return;
 
-        // TODO: put owner in entry?
-        Character owner = Server.getInstance()
-                .getWorld(bot.getWorld())
-                .getPlayerStorage()
-                .getCharacterById(ownerCharId);
+        Character owner = entry.owner;
+        if (owner == null || owner.getId() != ownerCharId || !owner.isLoggedinWorld()) {
+            owner = Server.getInstance()
+                    .getWorld(bot.getWorld())
+                    .getPlayerStorage()
+                    .getCharacterById(ownerCharId);
+            entry.owner = owner;
+        }
         if (owner == null) {
             entry.following = false;
             return;
