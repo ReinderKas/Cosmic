@@ -10,7 +10,8 @@
       "mcp__plugin_context-mode_context-mode__ctx_index",
       "Bash(grep -rn \"HpRecover\\\\|hpRecover\\\\|hpRegen\\\\|mp_recover\\\\|addHP.*regen\\\\|recoverHp\\\\|naturallyRecoverHp\\\\|HpMpRecovery\\\\|startRecov\" D:/GameServers/Maplestory/Cosmic/src/main/java --include=*.java -l)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(ls:*)"
     ]
   }
 }
