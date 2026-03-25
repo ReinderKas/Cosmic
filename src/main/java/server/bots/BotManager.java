@@ -66,6 +66,7 @@ public class BotManager {
         public float JUMP_FORCE_DOWNWARD   = 16f;   // initial upward velocity px/tick
         public float JUMP_FORCE_ROPE   = 16f;   // initial upward velocity px/tick
         public float MAX_FALL     = 50f;   // terminal fall velocity px/tick
+        public float KNOCKBACK_RISE = 18f; // upward velocity applied on mob knockback (~1/3 jump)
 
         // Jump control
         public int   JUMP_Y_THRESH = 30;   // jump when target is this many px higher
@@ -107,7 +108,7 @@ public class BotManager {
         public int   MOB_TOUCH_HALF_W = 60;    // px; approximate half-width of mob bounding box
         public int   MOB_TOUCH_HALF_H = 80;    // px; approximate half-height of mob bounding box
         public int   MOB_HIT_COOLDOWN = 15;    // ticks between mob hits (~1.5s)
-        public long  BOT_DEAD_MS      = 60_000L; // ms bot stays dead before respawning
+        public long  BOT_DEAD_MS      = 10_000L; // ms bot stays dead before respawning
 
         // Passive loot
         public int   LOOT_RADIUS      = 100;   // px; pickup items within this box radius
@@ -440,12 +441,17 @@ public class BotManager {
                 PacketCreator.damagePlayer(-1, mob.getId(), bot.getId(), dmg, 0,
                         dir, false, 0, false, 0, 0, 0), false);
 
-        // Knock bot back away from mob
-        Point bp     = bot.getPosition();
-        int   kbX    = bp.x + (dir == 0 ? 30 : -30);
-        Point snapped = bot.getMap().getPointBelow(new Point(kbX, bp.y));
-        bot.setPosition(snapped != null ? snapped : new Point(kbX, bp.y));
-        broadcastMovement(bot, 0, 0);
+        // Knock bot back — enter airborne with slight upward arc so physics land it correctly.
+        // Never snap to ground: let tickAirborne handle landing to avoid falling through platforms.
+        Point bp  = bot.getPosition();
+        int   kbX = bp.x + (dir == 0 ? 30 : -30);
+        bot.setPosition(new Point(kbX, bp.y));
+        BotMovementManager.resetEntryState(entry); // inAir=true, velY=0
+        entry.velY    = -cfg.KNOCKBACK_RISE;        // slight upward kick
+        entry.airVelX = (dir == 0 ? 1 : -1) * cfg.STEP; // carry horizontal momentum
+        int velXBcast = entry.airVelX * (1000 / cfg.TICK_MS);
+        int velYBcast = (int) (-entry.velY * (1000f / cfg.TICK_MS));
+        broadcastMovement(bot, velXBcast, velYBcast);
 
         entry.mobHitCooldown = cfg.MOB_HIT_COOLDOWN;
 
