@@ -65,29 +65,46 @@ public final class MagicDamageHandler extends AbstractDealDamageHandler {
             c.sendPacket(PacketCreator.getEnergy("energy", chr.getDojoEnergy()));
         }
 
-        int charge = (attack.skill == Evan.FIRE_BREATH || attack.skill == Evan.ICE_BREATH || attack.skill == FPArchMage.BIG_BANG || attack.skill == ILArchMage.BIG_BANG || attack.skill == Bishop.BIG_BANG) ? attack.charge : -1;
+        applyMagicAttackEffects(attack, chr, c);
+    }
+
+    public static void applyMagicAttackEffects(AttackInfo attack, Character chr, Client c) {
+        int charge = (attack.skill == Evan.FIRE_BREATH || attack.skill == Evan.ICE_BREATH
+                || attack.skill == FPArchMage.BIG_BANG || attack.skill == ILArchMage.BIG_BANG
+                || attack.skill == Bishop.BIG_BANG) ? attack.charge : -1;
         Packet packet = PacketCreator.magicAttack(chr, attack.skill, attack.skilllevel, attack.stance,
                 attack.numAttackedAndDamage, attack.targets, charge, attack.speed, attack.direction, attack.display);
 
         chr.getMap().broadcastMessage(chr, packet, false, true);
         StatEffect effect = attack.getAttackEffect(chr, null);
+        if (effect == null) {
+            return;
+        }
+
         Skill skill = SkillFactory.getSkill(attack.skill);
-        StatEffect effect_ = skill.getEffect(chr.getSkillLevel(skill));
-        if (effect_.getCooldown() > 0) {
+        StatEffect skillEffect = skill.getEffect(chr.getSkillLevel(skill));
+        if (skillEffect.getCooldown() > 0) {
             if (chr.skillIsCooling(attack.skill)) {
                 return;
-            } else {
-                c.sendPacket(PacketCreator.skillCooldown(attack.skill, effect_.getCooldown()));
-                chr.addCooldown(attack.skill, currentServerTime(), SECONDS.toMillis(effect_.getCooldown()));
             }
+
+            c.sendPacket(PacketCreator.skillCooldown(attack.skill, skillEffect.getCooldown()));
+            chr.addCooldown(attack.skill, currentServerTime(), SECONDS.toMillis(skillEffect.getCooldown()));
         }
+
         applyAttack(attack, chr, effect.getAttackCount());
-        Skill eaterSkill = SkillFactory.getSkill((chr.getJob().getId() - (chr.getJob().getId() % 10)) * 10000);// MP Eater, works with right job
+        applyMpEater(attack, chr);
+    }
+
+    private static void applyMpEater(AttackInfo attack, Character chr) {
+        Skill eaterSkill = SkillFactory.getSkill((chr.getJob().getId() - (chr.getJob().getId() % 10)) * 10000);
         int eaterLevel = chr.getSkillLevel(eaterSkill);
-        if (eaterLevel > 0) {
-            for (Integer oid : attack.targets.keySet()) {
-                eaterSkill.getEffect(eaterLevel).applyPassive(chr, chr.getMap().getMapObject(oid), 0);
-            }
+        if (eaterLevel <= 0) {
+            return;
+        }
+
+        for (Integer oid : attack.targets.keySet()) {
+            eaterSkill.getEffect(eaterLevel).applyPassive(chr, chr.getMap().getMapObject(oid), 0);
         }
     }
 }

@@ -5,8 +5,11 @@ import client.Skill;
 import client.SkillFactory;
 import client.inventory.InventoryType;
 import client.inventory.Item;
+import client.inventory.WeaponType;
 import net.server.channel.handlers.AbstractDealDamageHandler;
 import net.server.channel.handlers.CloseRangeDamageHandler;
+import net.server.channel.handlers.MagicDamageHandler;
+import net.server.channel.handlers.RangedAttackHandler;
 import server.StatEffect;
 import server.life.Monster;
 import tools.PacketCreator;
@@ -20,19 +23,27 @@ import java.util.concurrent.ThreadLocalRandom;
 
 class BotCombatManager {
 
+    private enum AttackRoute {
+        CLOSE,
+        RANGED,
+        MAGIC
+    }
+
     static final class AttackPlan {
         final int skillId;
         final int skillLevel;
         final int numDamage;
         final Rectangle hitBox;
         final List<Monster> targets;
+        final AttackRoute route;
 
-        AttackPlan(int skillId, int skillLevel, int numDamage, Rectangle hitBox, List<Monster> targets) {
+        AttackPlan(int skillId, int skillLevel, int numDamage, Rectangle hitBox, List<Monster> targets, AttackRoute route) {
             this.skillId = skillId;
             this.skillLevel = skillLevel;
             this.numDamage = numDamage;
             this.hitBox = hitBox;
             this.targets = targets;
+            this.route = route;
         }
 
         boolean hasHitBox() {
@@ -234,7 +245,7 @@ class BotCombatManager {
         }
 
         Rectangle basicAttackHitBox = calculateBasicAttackHitBox(bot, target);
-        return new AttackPlan(0, 0, 1, basicAttackHitBox, List.of(target));
+        return new AttackPlan(0, 0, 1, basicAttackHitBox, List.of(target), determineBasicAttackRoute(bot));
     }
 
     static boolean isTargetInAttackRange(AttackPlan attackPlan, Character bot, Monster target) {
@@ -270,15 +281,18 @@ class BotCombatManager {
         attack.numAttacked = numAttacked;
         attack.numAttackedAndDamage = (numAttacked << 4) | attackPlan.numDamage;
         attack.speed = 4;
-        attack.stance = bot.getPosition().x > primaryTarget.getPosition().x ? -128 : 0;
-        attack.direction = bot.getPosition().x > primaryTarget.getPosition().x ? 17 : 6;
+        attack.stance = primaryTarget.getPosition().x < bot.getPosition().x ? -128 : 0;
+        attack.direction = primaryTarget.getPosition().x < bot.getPosition().x ? 17 : 6;
+        attack.rangedirection = attack.direction;
+        attack.ranged = attackPlan.route == AttackRoute.RANGED;
+        attack.magic = attackPlan.route == AttackRoute.MAGIC;
         attack.targets = new HashMap<>();
 
         for (Monster target : attackPlan.targets) {
             attack.targets.put(target.getObjectId(), makeTarget(attackPlan.numDamage, minDmg, maxDmg));
         }
 
-        CloseRangeDamageHandler.applyCloseRangeEffects(attack, bot, bot.getClient());
+        applyAttackRoute(attackPlan.route, attack, bot);
         entry.attackCooldown = BotCombatManager.cfg.ATTACK_COOLDOWN;
     }
 
@@ -305,7 +319,8 @@ class BotCombatManager {
         }
 
         int attackCount = Math.max(1, effect.getAttackCount());
-        return new AttackPlan(entry.aoeSkillId, skillLevel, attackCount, hitBox, targets);
+        return new AttackPlan(entry.aoeSkillId, skillLevel, attackCount, hitBox, targets,
+                determineSkillRoute(bot, entry.aoeSkillId));
     }
 
     private static AttackPlan planSingleTargetSkill(BotEntry entry, Character bot, Monster primaryTarget) {
@@ -326,7 +341,8 @@ class BotCombatManager {
         }
 
         int attackCount = Math.max(1, effect.getAttackCount());
-        return new AttackPlan(entry.attackSkillId, skillLevel, attackCount, hitBox, List.of(primaryTarget));
+        return new AttackPlan(entry.attackSkillId, skillLevel, attackCount, hitBox, List.of(primaryTarget),
+                determineSkillRoute(bot, entry.attackSkillId));
     }
 
     private static Rectangle calculateSkillHitBox(StatEffect effect, Character bot, Monster primaryTarget) {
@@ -392,6 +408,66 @@ class BotCombatManager {
 
         boolean facingLeft = primaryTarget.getPosition().x < bot.getPosition().x;
         return attackProfile.calculateBoundingBox(bot.getPosition(), facingLeft);
+    }
+
+    private static void applyAttackRoute(AttackRoute route, AbstractDealDamageHandler.AttackInfo attack, Character bot) {
+        switch (route) {
+            case RANGED -> RangedAttackHandler.applyRangedAttackEffects(attack, bot, bot.getClient());
+            case MAGIC -> MagicDamageHandler.applyMagicAttackEffects(attack, bot, bot.getClient());
+            default -> CloseRangeDamageHandler.applyCloseRangeEffects(attack, bot, bot.getClient());
+        }
+    }
+
+    private static AttackRoute determineBasicAttackRoute(Character bot) {
+        return determineWeaponRoute(getEquippedWeaponType(bot));
+    }
+
+    private static AttackRoute determineSkillRoute(Character bot, int skillId) {
+        if (isRangedSkill(skillId)) {
+            return AttackRoute.RANGED;
+        }
+
+        WeaponType weaponType = getEquippedWeaponType(bot);
+        if (weaponType == WeaponType.WAND || weaponType == WeaponType.STAFF) {
+            return AttackRoute.MAGIC;
+        }
+
+        return determineWeaponRoute(weaponType);
+    }
+
+    private static AttackRoute determineWeaponRoute(WeaponType weaponType) {
+        if (weaponType == null) {
+            return AttackRoute.CLOSE;
+        }
+
+        return switch (weaponType) {
+            case BOW, CROSSBOW, CLAW, GUN -> AttackRoute.RANGED;
+            case WAND, STAFF -> AttackRoute.MAGIC;
+            default -> AttackRoute.CLOSE;
+        };
+    }
+
+    private static WeaponType getEquippedWeaponType(Character bot) {
+        Item weapon = bot.getInventory(InventoryType.EQUIPPED).getItem((short) -11);
+        if (weapon == null) {
+            return null;
+        }
+
+        return server.ItemInformationProvider.getInstance().getWeaponType(weapon.getItemId());
+    }
+
+    private static boolean isRangedSkill(int skillId) {
+        return switch (skillId) {
+            case constants.skills.Buccaneer.ENERGY_ORB,
+                 constants.skills.ThunderBreaker.SPARK,
+                 constants.skills.ThunderBreaker.SHARK_WAVE,
+                 constants.skills.Shadower.TAUNT,
+                 constants.skills.NightLord.TAUNT,
+                 constants.skills.Aran.COMBO_SMASH,
+                 constants.skills.Aran.COMBO_FENRIR,
+                 constants.skills.Aran.COMBO_TEMPEST -> true;
+            default -> false;
+        };
     }
 
     private static AbstractDealDamageHandler.AttackTarget makeTarget(int hits, int minDmg, int maxDmg) {
