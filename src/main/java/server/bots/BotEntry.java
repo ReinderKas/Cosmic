@@ -1,6 +1,7 @@
 package server.bots;
 
 import client.Character;
+import client.inventory.Item;
 import server.life.Monster;
 import server.maps.Foothold;
 import server.maps.Rope;
@@ -79,11 +80,25 @@ class BotEntry {
     int lastKnownLevel = -1;
 
     // AP/SP builds — set once on first job, can be changed via chat
-    BotBuildManager.ApBuild apBuild       = null;   // null = not chosen yet
-    boolean apPromptSent  = false;  // prevent re-prompting before owner responds
+    BotBuildManager.ApBuild apBuild         = null;  // null = not chosen yet
+    boolean apPromptSent    = false; // prevent re-prompting before owner responds
 
-    // Pending two-step action: null, "logout", or "relog"
-    String pendingAction = null;
+    // SP build variant — for jobs with multiple paths (currently only Hero: "1h" or "2h")
+    String  spVariant           = null;  // null = use default; set after owner responds
+    boolean spVariantPromptSent = false; // sent once; Hero SP held until owner responds
+
+    // Pending two-step action: null, "logout", "relog", or "item_choice"
+    String pendingAction       = null;
+    String pendingDropCategory = null; // set when pendingAction="item_choice": "scrolls","pots","equips","etc","name:<x>"
+    int    lootInhibitTicks    = 0;    // prevents bot re-looting its own drops after a give/drop command
+
+    // Trade queue — driven by BotDropManager.tickTrade; null category = idle
+    String     pendingTradeCategory = null;  // category being traded across the whole sequence
+    List<Item> pendingTradeItems    = null;  // current batch (≤9); null while pausing between trades
+    int        pendingTradeIdx      = 0;     // next item index in current batch
+    int        pendingTradeTick     = 0;     // context-dependent tick counter (reset on state change)
+    boolean    pendingTradeAllAdded = false; // all items in batch added; waiting for owner OK
+    boolean    pendingTradeBotDone  = false; // bot has called completeTrade this batch
 
     // Message queue — sends with ~5s spacing between messages
     final ArrayDeque<String> msgQueue = new ArrayDeque<>();

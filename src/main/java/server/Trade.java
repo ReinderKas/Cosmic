@@ -539,6 +539,11 @@ public class Trade {
         this.fullTrade = fullTrade;
     }
 
+    /** Returns true once the partner has clicked OK (locked their side). */
+    public boolean isPartnerConfirmed() {
+        return partner != null && partner.isLocked();
+    }
+
     private static void logTrade(Trade trade1, Trade trade2) {
         String name1 = trade1.getChr().getName();
         String name2 = trade2.getChr().getName();

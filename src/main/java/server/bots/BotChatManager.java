@@ -115,6 +115,38 @@ class BotChatManager {
             "\\bpure\\s+str\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern AP_FIXED_DEX_PATTERN = Pattern.compile(
             "\\b(\\d+)\\s*dex\\b", Pattern.CASE_INSENSITIVE);
+    // Drop-choice responses (matched only when pendingAction = "item_choice")
+    private static final Pattern DROP_CHOICE_DROP_PATTERN = Pattern.compile(
+            "\\b(drop\\s*(it|them|to\\s+ground)?|floor|ground)\\b",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern DROP_CHOICE_TRADE_PATTERN = Pattern.compile(
+            "\\b(trade|trade\\s*me|send|give|transfer|give\\s*me)\\b",
+            Pattern.CASE_INSENSITIVE);
+
+    // Drop category commands
+    private static final Pattern DROP_SCROLLS_PATTERN = Pattern.compile(
+            "\\b(?:drop|toss|give(?:\\s+(?:me|us))?)\\s+(?:(?:your|ur|my|all)\\s+)?scrolls?\\b",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern DROP_POTS_PATTERN = Pattern.compile(
+            "\\b(?:drop|toss|give(?:\\s+(?:me|us))?)\\s+(?:(?:your|ur|my|all)\\s+)?(?:pots?|potions?|supplies)\\b",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern DROP_EQUIPS_PATTERN = Pattern.compile(
+            "\\b(?:drop|toss|give(?:\\s+(?:me|us))?|pass(?:\\s+me)?)\\s+(?:(?:your|ur|my|all)\\s+)?(?:equips?|equipment|gear)\\b",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern DROP_ETC_PATTERN = Pattern.compile(
+            "\\b(?:drop|toss|throw)\\s+(?:(?:your|ur|my|all)\\s+)?(?:etc|junk|misc(?:ellaneous)?)\\b",
+            Pattern.CASE_INSENSITIVE);
+    // Generic drop by item name — captured group 1 is the name; processed only if category patterns don't match
+    private static final Pattern DROP_ITEM_PATTERN = Pattern.compile(
+            "\\bdrop\\s+(?:(?:your|ur|my)\\s+)?([\\w][\\w '\\-]{1,39})$",
+            Pattern.CASE_INSENSITIVE);
+    // Inventory slot query
+    private static final Pattern INV_SLOTS_PATTERN = Pattern.compile(
+            "\\bslots?\\s*(?:left|free|remaining)?\\b"
+            + "|\\binv(?:entory)?\\s+(?:full|space|slots?)\\b"
+            + "|\\bhow\\s+full\\b",
+            Pattern.CASE_INSENSITIVE);
+
     private static final Pattern AP_CHANGE_BUILD_PATTERN = Pattern.compile(
             "\\b(change|switch|update|reset|new)\\s+(your\\s+|ur\\s+)?build\\b",
             Pattern.CASE_INSENSITIVE);
@@ -162,6 +194,29 @@ class BotChatManager {
             return;
         }
         if (entry.pendingAction != null) {
+            // Item-choice: three-way "drop / trade / cancel" — handled independently of yes/no
+            if ("item_choice".equals(entry.pendingAction)) {
+                String category = entry.pendingDropCategory;
+                if (DROP_CHOICE_TRADE_PATTERN.matcher(message).find()) {
+                    entry.pendingAction       = null;
+                    entry.pendingDropCategory = null;
+                    TimerManager.getInstance().schedule(
+                            () -> BotDropManager.executeChoice(category, true, entry, entry.bot), 500);
+                } else if (DROP_CHOICE_DROP_PATTERN.matcher(message).find()) {
+                    entry.pendingAction       = null;
+                    entry.pendingDropCategory = null;
+                    TimerManager.getInstance().schedule(
+                            () -> BotDropManager.executeChoice(category, false, entry, entry.bot), 500);
+                } else {
+                    // any other response = cancel
+                    entry.pendingAction       = null;
+                    entry.pendingDropCategory = null;
+                    TimerManager.getInstance().schedule(
+                            () -> BotManager.getInstance().botSay(entry.bot, "ok! keeping them"), 500);
+                }
+                return;
+            }
+
             if (LOGOUT_CONFIRM_PATTERN.matcher(message).find()) {
                 String action = entry.pendingAction;
                 entry.pendingAction = null;
@@ -189,9 +244,11 @@ class BotChatManager {
                     }, 1000);
                 }
             } else {
+                String action = entry.pendingAction;
                 entry.pendingAction = null;
+                String cancelMsg = action != null && action.startsWith("drop") ? "ok! keeping them" : "ok nvm, staying!";
                 TimerManager.getInstance().schedule(() ->
-                        BotManager.getInstance().botSay(entry.bot, "ok nvm, staying!"), 800);
+                        BotManager.getInstance().botSay(entry.bot, cancelMsg), 800);
             }
             return;
         }
@@ -269,6 +326,27 @@ class BotChatManager {
             }
         }
 
+        // Drop commands — prompt "drop or trade?" for all categories; name-match is fallback
+        {
+            String dropCategory = null;
+            if      (DROP_SCROLLS_PATTERN.matcher(message).find()) dropCategory = "scrolls";
+            else if (DROP_POTS_PATTERN   .matcher(message).find()) dropCategory = "pots";
+            else if (DROP_EQUIPS_PATTERN .matcher(message).find()) dropCategory = "equips";
+            else if (DROP_ETC_PATTERN    .matcher(message).find()) dropCategory = "etc";
+            else {
+                Matcher dm = DROP_ITEM_PATTERN.matcher(message);
+                if (dm.find()) dropCategory = "name:" + dm.group(1).trim();
+            }
+            if (dropCategory != null) {
+                final String cat = dropCategory;
+                entry.pendingAction       = "item_choice";
+                entry.pendingDropCategory = cat;
+                TimerManager.getInstance().schedule(() ->
+                        BotManager.getInstance().botSay(entry.bot,
+                                "drop to ground or trade to you? say 'drop', 'trade', or 'cancel'"), 600);
+            }
+        }
+
         // Info commands
         if (STATS_PATTERN.matcher(message).find())
             TimerManager.getInstance().schedule(() -> reportStats(entry, entry.bot), 1000);
@@ -278,6 +356,8 @@ class BotChatManager {
             TimerManager.getInstance().schedule(() -> reportBuild(entry, entry.bot), 1000);
         if (INVENTORY_PATTERN.matcher(message).find())
             TimerManager.getInstance().schedule(() -> reportInventory(entry, entry.bot), 1000);
+        if (INV_SLOTS_PATTERN.matcher(message).find())
+            TimerManager.getInstance().schedule(() -> reportInventorySlots(entry, entry.bot), 1000);
         if (SCROLLS_PATTERN.matcher(message).find())
             TimerManager.getInstance().schedule(() -> reportScrolls(entry, entry.bot), 1000);
         if (POTIONS_PATTERN.matcher(message).find())
@@ -381,9 +461,11 @@ class BotChatManager {
     }
 
     private static void reportInventory(BotEntry entry, Character bot) {
-        int slots = bot.getInventory(InventoryType.EQUIP).getSlotLimit();
-        int count = slots - bot.getInventory(InventoryType.EQUIP).getNumFreeSlot();
-        queueBotSay(entry, "I have " + count + " item" + (count != 1 ? "s" : "") + " in my equip inventory");
+        queueBotSay(entry, BotDropManager.inventorySummary(bot));
+    }
+
+    private static void reportInventorySlots(BotEntry entry, Character bot) {
+        queueBotSay(entry, BotDropManager.slotsReport(bot));
     }
 
     private static void reportScrolls(BotEntry entry, Character bot) {

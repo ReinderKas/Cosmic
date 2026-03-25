@@ -43,7 +43,6 @@ public class BotManager {
     // TODO: list from most important to least important
     // TODO: Option to respec bot ap/sp
     // TODO: Make bot auto scan/autoequip the "best" equipment they have + can equip in their inventory
-    // TODO: Option to ask bot to drop their entire equip inventory/only scrolls/only potions/specific item/ etc, some useful options, remember to skip untradable/quest items
     // TODO: some kind of help command/question on available interactions available (can ask to drop, respec, change build, check stats, etc)
     private static final Logger log = LoggerFactory.getLogger(BotManager.class);
     private static final BotManager instance = new BotManager();
@@ -373,6 +372,7 @@ public class BotManager {
         tickPotionCheck(entry, bot);
         BotBuildManager.checkLevelUp(entry, bot);
         BotChatManager.tickAfkCheck(entry, owner);
+        BotDropManager.tickTrade(entry, bot);
         rebuildSkillCacheIfNeeded(entry, bot);
         tickBuffs(entry, bot);
 
@@ -768,6 +768,7 @@ public class BotManager {
 
     /** Picks up lootable drops within LOOT_RADIUS — runs every tick in all modes. */
     private void tickPassiveLoot(BotEntry entry, Character bot) {
+        if (entry.lootInhibitTicks > 0) { entry.lootInhibitTicks--; return; }
         if (entry.invFullWarnCooldown > 0) entry.invFullWarnCooldown--;
         Point botPos = bot.getPosition();
         for (MapItem drop : bot.getMap().getDroppedItems()) {
