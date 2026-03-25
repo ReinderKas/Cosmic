@@ -97,7 +97,10 @@ public class BotManager {
         public int   WAYPOINT_TIMEOUT = 80;   // ticks before an unreached waypoint expires (~8s)
 
         // Grind mode
-        public int   ATTACK_RANGE_SQ    = 22500; // px² — attack when within ~150px of target monster
+        public int   ATTACK_RANGE_X     = 150;   // px; horizontal attack reach
+        public int   ATTACK_RANGE_Y     = 60;    // px; vertical reach upward (tight — same level to slightly above)
+        public int   ATTACK_DOWN_MAX    = 20;    // px; max downward tolerance (no attacking far below)
+        public int   ATTACK_JUMP_Y      = 130;   // px; jump toward target if it is this far above and in X range
         public int   ATTACK_COOLDOWN    = 10;    // ticks between attacks (~800ms at 100ms/tick)
         public int   GRIND_SEEK_RANGE   = 800;   // px; monster search radius
         public int   AOE_MOB_THRESHOLD  = 2;     // nearby mobs needed to prefer AoE skill over single-target
@@ -276,15 +279,29 @@ public class BotManager {
                 return;
             }
             entry.grindTarget = target;
-            int distSq = (int) target.getPosition().distanceSq(botPos);
-//            log.debug("[GRIND] target={} distSq={} rangeSq={} inAir={} climbing={}",
-//                    target.getId(), distSq, cfg.ATTACK_RANGE_SQ, entry.inAir, entry.climbing);
-            if (!entry.inAir && !entry.climbing
-                    && distSq <= cfg.ATTACK_RANGE_SQ) {
-                attackMonster(entry, bot, target);
-                return;
+            Point tp = target.getPosition();
+            int dx = Math.abs(tp.x - botPos.x);
+            int dy = botPos.y - tp.y; // positive = target is higher on screen (above bot)
+
+            if (!entry.climbing) {
+                boolean inHRange = dx <= cfg.ATTACK_RANGE_X;
+                boolean inVRange = dy >= -cfg.ATTACK_DOWN_MAX && dy <= cfg.ATTACK_RANGE_Y;
+                boolean jumpable = dy > cfg.ATTACK_RANGE_Y && dy <= cfg.ATTACK_JUMP_Y;
+
+                if (inHRange && inVRange) {
+                    // In range — attack if grounded, or during ascent of a jump
+                    if (!entry.inAir || entry.velY < 0) {
+                        attackMonster(entry, bot, target);
+                        if (!entry.inAir) return;
+                        // airborne: fall through so tickAirborne still runs this tick
+                    }
+                } else if (!entry.inAir && inHRange && jumpable && entry.jumpCooldown == 0) {
+                    // Target is above but within jump height — jump toward it
+                    BotMovementManager.initiateJump(entry, bot, tp.x - botPos.x);
+                    return;
+                }
             }
-            targetPos = target.getPosition();
+            targetPos = tp;
         }
 
         if (entry.climbing) {
