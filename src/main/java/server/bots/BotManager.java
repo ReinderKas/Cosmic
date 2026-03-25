@@ -2,20 +2,12 @@ package server.bots;
 
 import client.BotClient;
 import client.Character;
-import client.Skill;
-import client.SkillFactory;
 import client.inventory.Inventory;
 import client.inventory.InventoryType;
 import client.inventory.Item;
 import client.keybind.KeyBinding;
 import constants.inventory.ItemConstants;
-import io.netty.buffer.Unpooled;
-import net.packet.ByteBufInPacket;
-import net.packet.InPacket;
-import net.packet.Packet;
 import net.server.Server;
-import net.server.channel.handlers.AbstractDealDamageHandler;
-import net.server.channel.handlers.CloseRangeDamageHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import server.ItemInformationProvider;
@@ -29,7 +21,6 @@ import tools.PacketCreator;
 import java.awt.*;
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -140,10 +131,6 @@ public class BotManager {
     // "give Jason Bob" or "transfer Jason to Bob"
     private static final Pattern GIVE_PATTERN = Pattern.compile(
             "\\b(give|transfer)\\s+(\\S+)(?:\\s+to)?\\s+(\\S+)\\b", Pattern.CASE_INSENSITIVE);
-
-    private static final List<String> DEATH_REPLIES = List.of(
-            "oops im dead", "gg", "rip me", "oww", "i died lol",
-            "welp", "ouchh", "nooo", "ok i died", "i'll be right back");
 
     static String randomReply(List<String> list) {
         return list.get(ThreadLocalRandom.current().nextInt(list.size()));
@@ -352,7 +339,7 @@ public class BotManager {
         // Also catch stale hp=0 (e.g. deadUntil was lost on save/reconnect) — re-enter dead state.
         if (entry.deadUntil == 0 && bot.getHp() <= 0) {
             bot.setStance(cfg.DEAD_STANCE);
-            broadcastMovement(bot, 0, 0);
+            BotMovementManager.broadcastMovement(bot, 0, 0);
             entry.deadUntil = System.currentTimeMillis() + cfg.BOT_DEAD_MS;
             BotMovementManager.resetEntryState(entry);
         }
@@ -367,14 +354,14 @@ public class BotManager {
         Point targetPos = owner.getPosition();
 
         // These run in all modes (idle, follow, grind)
-        tickMobDamage(entry, bot);
+        BotCombatManager.tickMobDamage(entry, bot);
         tickPassiveLoot(entry, bot);
         tickPotionCheck(entry, bot);
         BotBuildManager.checkLevelUp(entry, bot);
         BotChatManager.tickAfkCheck(entry, owner);
         BotDropManager.tickTrade(entry, bot);
-        rebuildSkillCacheIfNeeded(entry, bot);
-        tickBuffs(entry, bot);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+        BotCombatManager.tickBuffs(entry, bot);
 
         if (!entry.following && !entry.grinding) {
             if (entry.inAir) {
@@ -383,7 +370,7 @@ public class BotManager {
                 // On ground — snap to stand stance once so walking/jumping animation clears
                 if (bot.getStance() != 5) {
                     bot.setStance(5);
-                    broadcastMovement(bot, 0, 0);
+                    BotMovementManager.broadcastMovement(bot, 0, 0);
                 }
             }
             // If climbing, bot idles on the rope — no stance change needed (16/17 is already idle)
@@ -405,7 +392,7 @@ public class BotManager {
             Point spawn = new Point(targetPos.x, targetPos.y - 10);
             bot.setPosition(spawn);
             BotMovementManager.resetEntryState(entry);
-            broadcastMovement(bot, 0, 0);
+            BotMovementManager.broadcastMovement(bot, 0, 0);
             return;
         }
 
@@ -422,11 +409,11 @@ public class BotManager {
             Monster target = entry.grindTarget;
             if (target == null || !target.isAlive()
                     || target.getPosition().distanceSq(botPos) > seekRangeSq) {
-                target = findGrindTarget(bot);
+                target = BotCombatManager.findGrindTarget(bot);
             }
             if (target == null) {
                 if (entry.inAir) BotMovementManager.tickAirborne(entry, targetPos);
-                else { bot.setStance(5); broadcastMovement(bot, 0, 0); }
+                else { bot.setStance(5); BotMovementManager.broadcastMovement(bot, 0, 0); }
                 return;
             }
             entry.grindTarget = target;
@@ -442,7 +429,7 @@ public class BotManager {
                 if (inHRange && inVRange) {
                     // In range — attack if grounded, or during ascent of a jump
                     if (!entry.inAir || entry.velY < 0) {
-                        attackMonster(entry, bot, target);
+                        BotCombatManager.attackMonster(entry, bot, target);
                         if (!entry.inAir) return;
                         // airborne: fall through so tickAirborne still runs this tick
                     }
@@ -469,174 +456,6 @@ public class BotManager {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Grind mode helpers
-    // -------------------------------------------------------------------------
-
-    /** Returns a random monster from the nearest 3 within seek range, so multiple bots spread across different targets. */
-    private Monster findGrindTarget(Character bot) {
-        Point botPos = bot.getPosition();
-        double rangeSq = (double) cfg.GRIND_SEEK_RANGE * cfg.GRIND_SEEK_RANGE;
-        List<Monster> candidates = new ArrayList<>();
-        for (Monster m : bot.getMap().getAllMonsters()) {
-            if (m.isAlive() && m.getPosition().distanceSq(botPos) <= rangeSq) candidates.add(m);
-        }
-        if (candidates.isEmpty()) return null;
-        candidates.sort((a, b) -> Double.compare(a.getPosition().distanceSq(botPos), b.getPosition().distanceSq(botPos)));
-        return candidates.get(ThreadLocalRandom.current().nextInt(Math.min(3, candidates.size())));
-    }
-
-    private void attackMonster(BotEntry entry, Character bot, Monster target) {
-        if (entry.attackCooldown > 0) {
-            entry.attackCooldown--;
-            return;
-        }
-
-        int watk   = bot.getTotalWatk();
-        int maxDmg = Math.max(1, bot.calculateMaxBaseDamage(watk));
-        int minDmg = Math.max(1, bot.calculateMinBaseDamage(watk));
-
-        // --- skill selection ---
-        // TODO: have a dynamic sized list of available skills in case of cooldown heavy class with many skills
-        int chosenSkill = 0;
-        int chosenLevel = 0;
-        int numDmg      = 1;
-        List<Monster> aoeTargets = null;
-
-        // Try AoE skill first if enough nearby monsters
-        if (entry.aoeSkillId != 0 && !bot.skillIsCooling(entry.aoeSkillId)) {
-            List<Monster> nearby = new ArrayList<>();
-            for (Monster m : bot.getMap().getAllMonsters()) {
-                if (m.isAlive() && distSq(m.getPosition(), target.getPosition()) <= cfg.AOE_RANGE_SQ) {
-                    nearby.add(m);
-                    if (nearby.size() >= entry.aoeSkillMobs) break;
-                }
-            }
-            if (nearby.size() >= cfg.AOE_MOB_THRESHOLD) {
-                chosenSkill = entry.aoeSkillId;
-                chosenLevel = bot.getSkillLevel(chosenSkill);
-                numDmg      = Math.max(1, SkillFactory.getSkill(chosenSkill).getEffect(chosenLevel).getAttackCount());
-                aoeTargets  = nearby;
-            }
-        }
-        // Fall back to single-target attack skill
-        if (chosenSkill == 0 && entry.attackSkillId != 0 && !bot.skillIsCooling(entry.attackSkillId)) {
-            chosenSkill = entry.attackSkillId;
-            chosenLevel = bot.getSkillLevel(chosenSkill);
-            numDmg      = Math.max(1, SkillFactory.getSkill(chosenSkill).getEffect(chosenLevel).getAttackCount());
-        }
-        // chosenSkill == 0 → basic attack (skill=0, numDmg=1)
-
-        // --- build attack ---
-        int numAttacked = aoeTargets != null ? aoeTargets.size() : 1;
-        AbstractDealDamageHandler.AttackInfo attack = new AbstractDealDamageHandler.AttackInfo();
-        attack.skill                = chosenSkill;
-        attack.skilllevel           = chosenLevel;
-        attack.numDamage            = numDmg;
-        attack.numAttacked          = numAttacked;
-        attack.numAttackedAndDamage = (numAttacked << 4) | numDmg;
-        attack.speed                = 4;
-        attack.stance    = bot.getPosition().x > target.getPosition().x ? -128 : 0;
-        attack.direction = bot.getPosition().x > target.getPosition().x ? 17 : 6;
-        attack.targets   = new HashMap<>();
-
-        if (aoeTargets != null) {
-            for (Monster m : aoeTargets) {
-                attack.targets.put(m.getObjectId(), makeTarget(numDmg, minDmg, maxDmg));
-            }
-            // Actual count may differ if primary target wasn't in the nearby list
-            if (!attack.targets.containsKey(target.getObjectId())) {
-                attack.targets.put(target.getObjectId(), makeTarget(numDmg, minDmg, maxDmg));
-            }
-            attack.numAttacked          = attack.targets.size();
-            attack.numAttackedAndDamage = (attack.numAttacked << 4) | numDmg;
-        } else {
-            attack.targets.put(target.getObjectId(), makeTarget(numDmg, minDmg, maxDmg));
-        }
-
-        CloseRangeDamageHandler.applyCloseRangeEffects(attack, bot, bot.getClient());
-        entry.attackCooldown = cfg.ATTACK_COOLDOWN;
-    }
-
-    private AbstractDealDamageHandler.AttackTarget makeTarget(int hits, int minDmg, int maxDmg) {
-        List<Integer> lines = new ArrayList<>(hits);
-        for (int i = 0; i < hits; i++) {
-            lines.add(minDmg < maxDmg
-                    ? ThreadLocalRandom.current().nextInt(minDmg, maxDmg + 1)
-                    : maxDmg);
-        }
-        return new AbstractDealDamageHandler.AttackTarget((short) 305, lines);
-    }
-
-    static long distSq(Point a, Point b) {
-        long dx = a.x - b.x, dy = a.y - b.y;
-        return dx * dx + dy * dy;
-    }
-
-    // -------------------------------------------------------------------------
-    // Damage taken
-    // -------------------------------------------------------------------------
-
-    /** Check every alive monster on the map; if bot is inside its bounding box, apply a hit. */
-    private void tickMobDamage(BotEntry entry, Character bot) {
-        if (entry.mobHitCooldown > 0) {
-            entry.mobHitCooldown--;
-            return;
-        }
-        if (bot.getHp() <= 0) return;
-
-        Point botPos = bot.getPosition();
-        for (Monster mob : bot.getMap().getAllMonsters()) {
-            if (!mob.isAlive()) continue;
-            Point mp = mob.getPosition();
-            if (Math.abs(botPos.x - mp.x) <= cfg.MOB_TOUCH_HALF_W
-                    && Math.abs(botPos.y - mp.y) <= cfg.MOB_TOUCH_HALF_H) {
-                applyMobHit(entry, bot, mob);
-                return;
-            }
-        }
-    }
-
-    /**
-     * Apply one physical hit from {@code mob} to the bot.
-     * Damage = PADamage ± 15% (v83 mob attack approximation; no server-side WDEF available).
-     */
-    void applyMobHit(BotEntry entry, Character bot, Monster mob) {
-        int pa  = mob.getPADamage();
-        int max = Math.max(1, pa * 115 / 100);
-        int min = Math.max(1, pa *  85 / 100);
-        int dmg = min < max ? ThreadLocalRandom.current().nextInt(min, max + 1) : max;
-
-        bot.addMPHP(-dmg, 0);
-
-        // direction: 0 = hit from left (knocked right), 1 = hit from right (knocked left)
-        int dir = mob.getPosition().x < bot.getPosition().x ? 0 : 1;
-        bot.getMap().broadcastMessage(bot,
-                PacketCreator.damagePlayer(-1, mob.getId(), bot.getId(), dmg, 0,
-                        dir, false, 0, false, 0, 0, 0), false);
-
-        // Knock bot back — enter airborne with slight upward arc so physics land it correctly.
-        // Never snap to ground: let tickAirborne handle landing to avoid falling through platforms.
-        Point bp  = bot.getPosition();
-        int   kbX = bp.x + (dir == 0 ? 30 : -30);
-        bot.setPosition(new Point(kbX, bp.y));
-        BotMovementManager.resetEntryState(entry); // inAir=true, velY=0
-        entry.velY    = -cfg.KNOCKBACK_RISE;        // slight upward kick
-        entry.airVelX = (dir == 0 ? 1 : -1) * cfg.STEP; // carry horizontal momentum
-        int velXBcast = entry.airVelX * (1000 / cfg.TICK_MS);
-        int velYBcast = (int) (-entry.velY * (1000f / cfg.TICK_MS));
-        broadcastMovement(bot, velXBcast, velYBcast);
-
-        entry.mobHitCooldown = cfg.MOB_HIT_COOLDOWN;
-
-        if (bot.getHp() <= 0) {
-            bot.setStance(cfg.DEAD_STANCE);
-            broadcastMovement(bot, 0, 0);
-            botSay(bot, randomReply(DEATH_REPLIES));
-            entry.deadUntil = System.currentTimeMillis() + cfg.BOT_DEAD_MS;
-            BotMovementManager.resetEntryState(entry);
-        }
-    }
 
     void reloginBot(int charId, int ownerCharId, int world, int channel) {
         Character owner = Server.getInstance()
@@ -686,7 +505,7 @@ public class BotManager {
         bot.setPosition(spawnPos != null ? spawnPos : ownerPos);
         BotMovementManager.resetEntryState(entry);
         bot.setStance(cfg.STAND_STANCE); // clears tombstone for nearby clients
-        broadcastMovement(bot, 0, 0);
+        BotMovementManager.broadcastMovement(bot, 0, 0);
         botSay(bot, "back!");
     }
 
@@ -810,111 +629,6 @@ public class BotManager {
             entry.grinding = false;
             entry.following = true;
             botSay(bot, "out of HP pots!! walking to you");
-        }
-    }
-
-    /**
-     * Broadcasts a MOVE_PLAYER packet with real velocity values so the client
-     * smoothly interpolates over TICK_MS ms — matching how real player packets work.
-     *
-     * AbsoluteLifeMovement layout (15 bytes total):
-     *   numCmds(1) cmd(1) x(2) y(2) xv(2) yv(2) fh(2) stance(1) duration(2)
-     */
-    void broadcastMovement(Character bot, int velX, int velY) {
-        byte[] d = new byte[15];
-        d[0] = 1; // numCmds
-        // d[1] = 0 = AbsoluteLifeMovement cmd (already 0)
-        int x = bot.getPosition().x;
-        int y = bot.getPosition().y;
-        d[2]  = (byte)  (x & 0xFF);        d[3]  = (byte) (x >> 8);
-        d[4]  = (byte)  (y & 0xFF);        d[5]  = (byte) (y >> 8);
-        d[6]  = (byte) (velX & 0xFF);      d[7]  = (byte) (velX >> 8);
-        d[8]  = (byte) (velY & 0xFF);      d[9]  = (byte) (velY >> 8);
-        // d[10..11] = fh = 0 (client recalculates)
-        d[12] = (byte) bot.getStance();
-        d[13] = (byte) (cfg.TICK_MS & 0xFF); d[14] = (byte) (cfg.TICK_MS >> 8);
-        InPacket ip  = new ByteBufInPacket(Unpooled.wrappedBuffer(d));
-        Packet   pkt = PacketCreator.movePlayer(bot.getId(), ip, d.length);
-        bot.getMap().broadcastMessage(bot, pkt, false);
-    }
-
-    // -------------------------------------------------------------------------
-    // Skill cache
-    // -------------------------------------------------------------------------
-
-    private void rebuildSkillCacheIfNeeded(BotEntry entry, Character bot) {
-        if (entry.cachedSkillJob   == bot.getJob().getId()
-                && entry.cachedSkillLevel == bot.getLevel()) return;
-        entry.cachedSkillJob   = bot.getJob().getId();
-        entry.cachedSkillLevel = bot.getLevel();
-
-        entry.attackSkillId = 0;
-        entry.aoeSkillId    = 0;
-        entry.aoeSkillMobs  = 1;
-        entry.buffSkillIds.clear();
-
-        int bestAtkHits = 0;   // attackCount of best single-target skill
-        int bestAoeScore = 0;  // mobCount * attackCount of best AoE skill
-
-        for (Skill skill : bot.getSkills().keySet()) {
-            int lvl = bot.getSkillLevel(skill);
-            if (lvl <= 0) continue;
-
-            StatEffect fx  = skill.getEffect(lvl);
-            int atk  = fx.getAttackCount();
-            int mobs = fx.getMobCount();
-            int dur  = fx.getDuration();
-
-            if (atk > 0) {
-                if (mobs >= 2) {
-                    int score = mobs * atk;
-                    if (score > bestAoeScore) {
-                        bestAoeScore     = score;
-                        entry.aoeSkillId   = skill.getId();
-                        entry.aoeSkillMobs = mobs;
-                    }
-                } else {
-                    if (atk > bestAtkHits) {
-                        bestAtkHits          = atk;
-                        entry.attackSkillId  = skill.getId();
-                    }
-                }
-            } else if (dur > 0) {
-                // Timed buff with no attack component
-                entry.buffSkillIds.add(skill.getId());
-                entry.nextBuffAt.putIfAbsent(skill.getId(), 0L); // 0 = apply immediately
-            }
-            // passive (dur=0, atk=0) — skip
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Auto-buff
-    // -------------------------------------------------------------------------
-
-    private void tickBuffs(BotEntry entry, Character bot) {
-        if (!entry.following && !entry.grinding) return;   // idle — skip
-        if (entry.buffSkillIds.isEmpty()) return;
-        if (bot.getMap().getAllMonsters().stream().noneMatch(Monster::isAlive)) return;
-
-        long now = System.currentTimeMillis();
-        for (int skillId : entry.buffSkillIds) {
-            if (now < entry.nextBuffAt.getOrDefault(skillId, 0L)) continue; // still active
-            if (bot.skillIsCooling(skillId)) continue;
-
-            Skill skill = SkillFactory.getSkill(skillId);
-            int   lvl   = bot.getSkillLevel(skill);
-            if (lvl <= 0) continue;
-
-            StatEffect fx = skill.getEffect(lvl);
-            fx.applyTo(bot, null);
-
-            long dur = fx.getDuration();
-            entry.nextBuffAt.put(skillId, now + (long)(dur * 0.9));
-
-            if (fx.getCooldown() > 0) {
-                bot.addCooldown(skillId, now, fx.getCooldown() * 1000L);
-            }
         }
     }
 

@@ -56,7 +56,7 @@ class BotMovementManager {
                 entry.velY  = 0f;
                 bot.setPosition(new Point(botPos.x, ground.y));
                 bot.setStance(5);
-                BotManager.getInstance().broadcastMovement(bot, 0, 0);
+                broadcastMovement(bot, 0, 0);
             } else {
                 entry.inAir = true;
                 entry.velY  = 0f;
@@ -70,14 +70,14 @@ class BotMovementManager {
             entry.inAir    = true;
             entry.velY     = 0f;
             bot.setStance(6);
-            BotManager.getInstance().broadcastMovement(bot, 0, 0);
+            broadcastMovement(bot, 0, 0);
             return;
         }
 
         // Close enough to owner — hold position on rope (follow mode only; grind always climbs to top)
         if (!entry.grinding && Math.abs(dy) < cfg.FOLLOW_DIST && Math.abs(dxOwner) < cfg.FOLLOW_DIST * 2) {
             bot.setStance(entry.climbRope.isLadder() ? 17 : 16);
-            BotManager.getInstance().broadcastMovement(bot, 0, 0);
+            broadcastMovement(bot, 0, 0);
             return;
         }
 
@@ -85,7 +85,7 @@ class BotMovementManager {
                           : Math.min(botPos.y + cfg.CLIMB_SPEED, entry.climbRope.bottomY());
         bot.setPosition(new Point(entry.climbRope.x(), newY));
         bot.setStance(entry.climbRope.isLadder() ? 17 : 16);
-        BotManager.getInstance().broadcastMovement(bot, 0, 0);
+        broadcastMovement(bot, 0, 0);
     }
 
     /** Jump off the current rope position toward dx direction. */
@@ -100,7 +100,7 @@ class BotMovementManager {
         entry.jumpCooldown    = cfg.JUMP_COOLDOWN;
         bot.setStance(dx >= 0 ? 6 : 7);
         int jumpVelY = (int) -cfg.JUMP_FORCE_ROPE;
-        BotManager.getInstance().broadcastMovement(bot, dx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, jumpVelY);
+        broadcastMovement(bot, dx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, jumpVelY);
     }
 
     // -------------------------------------------------------------------------
@@ -130,7 +130,7 @@ class BotMovementManager {
                     entry.climbRope   = rope;
                     bot.setPosition(new Point(rope.x(), botPos.y));
                     bot.setStance(entry.climbRope.isLadder() ? 17 : 16);
-                    BotManager.getInstance().broadcastMovement(bot, 0, 0);
+                    broadcastMovement(bot, 0, 0);
                     return;
                 }
             }
@@ -154,7 +154,7 @@ class BotMovementManager {
                 int dx = targetPos.x - botPos.x;
                 int dy = targetPos.y - botPos.y;
                 bot.setStance(dx >= 0 ? 2 : 3);
-                BotManager.getInstance().broadcastMovement(bot, 0, 0);
+                broadcastMovement(bot, 0, 0);
                 return;
             }
         }
@@ -164,7 +164,7 @@ class BotMovementManager {
         int velXBcast = entry.airVelX > 0 ? cfg.WALK_VEL : entry.airVelX < 0 ? -cfg.WALK_VEL : 0;
         bot.setStance(entry.airVelX >= 0 ? 6 : 7);
         int velYBcast = (int) (entry.velY * (1000f / cfg.TICK_MS));
-        BotManager.getInstance().broadcastMovement(bot, velXBcast, velYBcast);
+        broadcastMovement(bot, velXBcast, velYBcast);
     }
 
     // -------------------------------------------------------------------------
@@ -220,7 +220,7 @@ class BotMovementManager {
                         entry.climbRope = wp;
                         bot.setPosition(new Point(wp.x(), botPos.y));
                         bot.setStance(entry.climbRope.isLadder() ? 17 : 16);
-                        BotManager.getInstance().broadcastMovement(bot, 0, 0);
+                        broadcastMovement(bot, 0, 0);
                     } else {
                         entry.jumpCooldown = cfg.JUMP_COOLDOWN;
                         initiateRopeJump(entry, bot, wdx);
@@ -234,7 +234,7 @@ class BotMovementManager {
                 if (snapped != null && snapped.y <= botPos.y + cfg.MAX_SNAP_DROP) {
                     bot.setPosition(new Point(walkX, snapped.y));
                     bot.setStance(wdx >= 0 ? 2 : 3);
-                    BotManager.getInstance().broadcastMovement(bot, wdx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, 0);
+                    broadcastMovement(bot, wdx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, 0);
                     return;
                 }
                 // Path blocked — redirect targetPos to waypoint rope so the proactive jump section handles it
@@ -253,7 +253,7 @@ class BotMovementManager {
             entry.jumpCooldown    = cfg.JUMP_COOLDOWN;
             bot.setPosition(new Point(botPos.x, botPos.y));
             bot.setStance(dx >= 0 ? 6 : 7);
-            BotManager.getInstance().broadcastMovement(bot, 0, (int) entry.velY);
+            broadcastMovement(bot, 0, (int) entry.velY);
             return;
         }
 
@@ -279,7 +279,7 @@ class BotMovementManager {
                     if (walkSnapped != null && walkSnapped.y <= botPos.y + cfg.MAX_SNAP_DROP) {
                         bot.setPosition(new Point(walkX, walkSnapped.y));
                         bot.setStance(dropStepX > 0 ? 2 : 3);
-                        BotManager.getInstance().broadcastMovement(bot, dropStepX > 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, 0);
+                        broadcastMovement(bot, dropStepX > 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, 0);
                     } else {
                         entry.inAir   = true;
                         entry.airVelX = dropStepX;
@@ -291,7 +291,7 @@ class BotMovementManager {
             // No nearby drop (or owner directly below) — use prone down-jump
             entry.downJumpPending = true;
             bot.setStance(cfg.PRONE_STANCE);
-            BotManager.getInstance().broadcastMovement(bot, 0, 0);
+            broadcastMovement(bot, 0, 0);
             return;
         }
 
@@ -307,7 +307,7 @@ class BotMovementManager {
                     entry.climbRope = rope;
                     bot.setPosition(new Point(rope.x(), botPos.y));
                     bot.setStance(entry.climbRope.isLadder() ? 17 : 16);
-                    BotManager.getInstance().broadcastMovement(bot, 0, 0);
+                    broadcastMovement(bot, 0, 0);
                     return;
                 }
                 // Prefer a direct platform jump over walking to a distant rope.
@@ -334,7 +334,7 @@ class BotMovementManager {
                         if (snapped != null && snapped.y <= botPos.y + cfg.MAX_SNAP_DROP) {
                             bot.setPosition(new Point(newX, snapped.y));
                             bot.setStance(rdx >= 0 ? 2 : 3);
-                            BotManager.getInstance().broadcastMovement(bot, rdx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, 0);
+                            broadcastMovement(bot, rdx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, 0);
                             return;
                         }
                     }
@@ -346,7 +346,7 @@ class BotMovementManager {
                     if (snapped != null && snapped.y <= botPos.y + cfg.MAX_SNAP_DROP) {
                         bot.setPosition(new Point(newX, snapped.y));
                         bot.setStance(rdx >= 0 ? 2 : 3);
-                        BotManager.getInstance().broadcastMovement(bot, rdx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, 0);
+                        broadcastMovement(bot, rdx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, 0);
                         return;
                     }
                 }
@@ -418,7 +418,7 @@ class BotMovementManager {
         if (Math.abs(dx) < cfg.STOP_DIST && Math.abs(dy) < cfg.STOP_DIST) {
             entry.wasMovingX = false;
             bot.setStance(5);
-            BotManager.getInstance().broadcastMovement(bot, 0, 0);
+            broadcastMovement(bot, 0, 0);
             return;
         }
 
@@ -442,7 +442,7 @@ class BotMovementManager {
             } else {
                 // No valid landing — abort step, stand at edge
                 bot.setStance(5);
-                BotManager.getInstance().broadcastMovement(bot, 0, 0);
+                broadcastMovement(bot, 0, 0);
             }
             return;
         }
@@ -455,7 +455,7 @@ class BotMovementManager {
 
         bot.setPosition(new Point(newX, snapped.y));
         bot.setStance(newStance);
-        BotManager.getInstance().broadcastMovement(bot, velX, 0);
+        broadcastMovement(bot, velX, 0);
     }
 
     static float calculateMaxJumpHeight() {
@@ -510,11 +510,11 @@ class BotMovementManager {
             // Vertical jump — only when explicitly 0 (winDir=0 or owner directly above)
             entry.airVelX = 0;
             bot.setStance(6);
-            BotManager.getInstance().broadcastMovement(bot, 0, jumpVelY);
+            broadcastMovement(bot, 0, jumpVelY);
         } else {
             entry.airVelX = dx >= 0 ? cfg.STEP : -cfg.STEP;
             bot.setStance(dx >= 0 ? 6 : 7);
-            BotManager.getInstance().broadcastMovement(bot, dx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, jumpVelY);
+            broadcastMovement(bot, dx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, jumpVelY);
         }
     }
 
@@ -527,7 +527,7 @@ class BotMovementManager {
         bot.setStance(dx >= 0 ? 6 : 7);
         int jumpVelY  = -(int) ((cfg.JUMP_FORCE - cfg.GRAVITY) * (1000f / cfg.TICK_MS));
         int velXBcast = dx > 0 ? cfg.WALK_VEL : dx < 0 ? -cfg.WALK_VEL : 0;
-        BotManager.getInstance().broadcastMovement(bot, velXBcast, jumpVelY);
+        broadcastMovement(bot, velXBcast, jumpVelY);
     }
 
     /**
@@ -598,6 +598,34 @@ class BotMovementManager {
             }
         }
         return false;
+    }
+
+    // ─── Movement broadcast ───────────────────────────────────────────────────
+
+    /**
+     * Broadcasts a MOVE_PLAYER packet with real velocity values so the client
+     * smoothly interpolates over TICK_MS ms — matching how real player packets work.
+     *
+     * AbsoluteLifeMovement layout (15 bytes total):
+     *   numCmds(1) cmd(1) x(2) y(2) xv(2) yv(2) fh(2) stance(1) duration(2)
+     */
+    static void broadcastMovement(Character bot, int velX, int velY) {
+        BotManager.Config cfg = BotManager.cfg;
+        byte[] d = new byte[15];
+        d[0] = 1; // numCmds
+        // d[1] = 0 = AbsoluteLifeMovement cmd (already 0)
+        int x = bot.getPosition().x;
+        int y = bot.getPosition().y;
+        d[2]  = (byte)  (x & 0xFF);        d[3]  = (byte) (x >> 8);
+        d[4]  = (byte)  (y & 0xFF);        d[5]  = (byte) (y >> 8);
+        d[6]  = (byte) (velX & 0xFF);      d[7]  = (byte) (velX >> 8);
+        d[8]  = (byte) (velY & 0xFF);      d[9]  = (byte) (velY >> 8);
+        // d[10..11] = fh = 0 (client recalculates)
+        d[12] = (byte) bot.getStance();
+        d[13] = (byte) (cfg.TICK_MS & 0xFF); d[14] = (byte) (cfg.TICK_MS >> 8);
+        InPacket ip  = new ByteBufInPacket(Unpooled.wrappedBuffer(d));
+        Packet   pkt = PacketCreator.movePlayer(bot.getId(), ip, d.length);
+        bot.getMap().broadcastMessage(bot, pkt, false);
     }
 
     static Map<Integer, Foothold> buildFhIndex(MapleMap map) {
