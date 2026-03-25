@@ -189,6 +189,16 @@ public class BotManager {
         return (entries != null && !entries.isEmpty()) ? entries.get(0).bot : null;
     }
 
+    public String manualTradeGreeting() {
+        return randomReply(List.of(
+                "?",
+                "got something for me?",
+                "what you got?",
+                "trade?",
+                "show me",
+                "lets see"));
+    }
+
     public void handleChat(Character owner, String message) {
         // Recruit must work even when owner has no bots yet
         Matcher rm = RECRUIT_PATTERN.matcher(message);
@@ -304,6 +314,7 @@ public class BotManager {
         BotBuildManager.checkLevelUp(entry, bot);
         BotChatManager.tickAfkCheck(entry, owner);
         BotDropManager.tickTrade(entry, bot);
+        BotDropManager.tickManualTrade(entry, bot);
         if (runAiTick) {
             BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
             BotCombatManager.tickBuffs(entry, bot);

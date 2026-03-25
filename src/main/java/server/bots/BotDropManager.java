@@ -11,10 +11,49 @@ import tools.PacketCreator;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Predicate;
 
 class BotDropManager {
+    private static final Set<Integer> manualTradeGreetingSent = ConcurrentHashMap.newKeySet();
+
+    static void tickManualTrade(BotEntry entry, Character bot) {
+        if (entry.pendingTradeCategory != null) return;
+
+        Trade trade = bot.getTrade();
+        Character owner = entry.owner;
+        if (trade == null || owner == null) {
+            manualTradeGreetingSent.remove(bot.getId());
+            return;
+        }
+
+        Trade ownerTrade = owner.getTrade();
+        Trade partner = trade.getPartner();
+        boolean isOwnerTrade = ownerTrade != null
+                && partner == ownerTrade
+                && ownerTrade.getPartner() == trade
+                && owner.getId() == ownerTrade.getChr().getId();
+        if (!isOwnerTrade) {
+            manualTradeGreetingSent.remove(bot.getId());
+            return;
+        }
+
+        if (!trade.isFullTrade()) {
+            Trade.visitTrade(bot, owner);
+            trade = bot.getTrade();
+            if (trade == null || !trade.isFullTrade()) return;
+        }
+
+        if (manualTradeGreetingSent.add(bot.getId())) {
+            trade.chat(BotManager.getInstance().manualTradeGreeting());
+        }
+
+        if (trade.isPartnerConfirmed()) {
+            Trade.completeTrade(bot);
+        }
+    }
 
     // ─── Entry point from chat choice ─────────────────────────────────────────
 

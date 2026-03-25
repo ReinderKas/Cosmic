@@ -434,7 +434,7 @@ class BotCombatManager {
         Rectangle hitBox = attackProfile.hasBoundingBox()
                 ? attackProfile.calculateBoundingBox(bot.getPosition(), facingLeft)
                 : null;
-        return BasicAttackData.fromProfile(attackProfile, hitBox, facingLeft);
+        return BasicAttackData.fromProfile(attackProfile, hitBox, facingLeft, bot);
     }
 
     private static void applyAttackRoute(AttackRoute route, AbstractDealDamageHandler.AttackInfo attack, Character bot) {
@@ -498,7 +498,7 @@ class BotCombatManager {
     }
 
     private record BasicAttackData(Rectangle hitBox, int display, int direction, int rangedDirection, int speed, int cooldownMs) {
-        private static BasicAttackData fromProfile(BotAttackDataProvider.NormalAttackProfile profile, Rectangle hitBox, boolean facingLeft) {
+        private static BasicAttackData fromProfile(BotAttackDataProvider.NormalAttackProfile profile, Rectangle hitBox, boolean facingLeft, Character bot) {
             int baseDirection = profile.getAttack();
             if (baseDirection <= 0) {
                 return fallback(facingLeft, hitBox);
@@ -508,7 +508,7 @@ class BotCombatManager {
             int variantOffset = ThreadLocalRandom.current().nextInt(variantCount);
             int display = baseDirection + variantOffset;
             int direction = facingLeft ? display + 11 : display;
-            int effectiveAttackSpeed = resolveEffectiveAttackSpeed(profile.getAttackSpeed(), null);
+            int effectiveAttackSpeed = resolveEffectiveAttackSpeed(profile.getAttackSpeed(), bot);
             return new BasicAttackData(hitBox, display, direction, direction,
                     effectiveAttackSpeed,
                     toCooldownMs(adjustAttackDelayMillis(profile.getAttackDelayMillis(), profile.getAttackSpeed(), effectiveAttackSpeed)));
@@ -612,5 +612,24 @@ class BotCombatManager {
                     : maxDmg);
         }
         return new AbstractDealDamageHandler.AttackTarget((short) 305, lines);
+    }
+
+    static String describeDebugStats(BotEntry entry, Character bot) {
+        Monster target = entry.grindTarget;
+        if (target == null || !target.isAlive()) {
+            target = findGrindTarget(bot);
+        }
+
+        AttackPlan plan = target != null ? planAttack(entry, bot, target) : null;
+        String route = plan != null ? plan.route.name().toLowerCase() : determineBasicAttackRoute(bot).name().toLowerCase();
+        int speed = plan != null ? plan.speed : resolveWeaponAttackSpeed(bot);
+        double cooldownSeconds = (plan != null ? plan.cooldownMs : 0) / 1000.0;
+        double remainingSeconds = entry.attackCooldownMs / 1000.0;
+        String targetName = target != null ? target.getName() : "none";
+
+        return String.format(
+                "debug: route %s, atk speed %d, atk cd %.2fs, remaining %.2fs, tick %dms, ai %dms, target %s",
+                route, speed, cooldownSeconds, remainingSeconds,
+                BotMovementManager.cfg.TICK_MS, BotManager.cfg.AI_TICK_MS, targetName);
     }
 }

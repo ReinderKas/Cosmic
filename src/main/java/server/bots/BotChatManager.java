@@ -90,6 +90,11 @@ class BotChatManager {
             + "|\\bwhat.?s\\s+in\\s+(your|ur)\\s+(inv(entory)?|bag)\\b"
             + "|\\b(show|check)\\s+(your|ur)\\s+(inv(entory)?|items?)\\b",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern DEBUG_STATS_PATTERN = Pattern.compile(
+            INFO_PFX + "(debug\\s+stats?|attack\\s+cooldown|atk\\s+cooldown)\\b"
+            + "|\\bshow\\s+(me\\s+)?debug\\s+stats\\b"
+            + "|\\bwhat.?s\\s+(your|ur)\\s+attack\\s+cooldown\\b",
+            Pattern.CASE_INSENSITIVE);
 
     private static final Pattern SCROLLS_PATTERN = Pattern.compile(
             "\\b(any|do\\s+(you|u)\\s+have(\\s+any)?|got(\\s+any)?|"
@@ -368,6 +373,8 @@ class BotChatManager {
             TimerManager.getInstance().schedule(() -> reportScrolls(entry, entry.bot), 1000);
         if (POTIONS_PATTERN.matcher(message).find())
             TimerManager.getInstance().schedule(() -> reportPotions(entry, entry.bot), 1000);
+        if (DEBUG_STATS_PATTERN.matcher(message).find())
+            TimerManager.getInstance().schedule(() -> reportDebugStats(entry, entry.bot), 1000);
 
         // Job advancement — check if message contains a valid job selection
         if (JOB_SELECT_PATTERN.matcher(message).find()) {
@@ -418,6 +425,10 @@ class BotChatManager {
         if (spPrompt != null) queueBotSay(entry, spPrompt);
         String apPrompt = BotBuildManager.buildApPrompt(entry, bot);
         if (apPrompt != null) queueBotSay(entry, apPrompt);
+        if (!entry.debugPromptSent) {
+            queueBotSay(entry, "ask me for debug stats if you want my attack cooldown");
+            entry.debugPromptSent = true;
+        }
     }
 
     /** Detects owner AFK (same position ≥5 min) and says "wb" when they return. */
@@ -505,6 +516,10 @@ class BotChatManager {
                 + " and " + mp + " mp pot" + (mp != 1 ? "s" : "");
         }
         queueBotSay(entry, msg);
+    }
+
+    private static void reportDebugStats(BotEntry entry, Character bot) {
+        queueBotSay(entry, BotCombatManager.describeDebugStats(entry, bot));
     }
 
     private static final String[] DROP_OR_TRADE_PROMPTS = {

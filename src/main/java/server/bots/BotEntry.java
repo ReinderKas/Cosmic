@@ -121,6 +121,7 @@ class BotEntry {
     int aiTickAccumulatorMs = 0;
 
     BotEntry(Character bot, Character owner, ScheduledFuture<?> task) {
+    boolean debugPromptSent = false;
         this.bot = bot;
         this.owner = owner;
         this.task = task;
