@@ -137,9 +137,10 @@ public class BotManager {
     // ownerCharId → list of owned bot entries (1:N)
     private final Map<Integer, List<BotEntry>> bots = new ConcurrentHashMap<>();
 
-    // Dismiss command: "dismiss <name>" or "remove <name>"
     private static final Pattern DISMISS_PATTERN = Pattern.compile(
-            "\\b(dismiss|remove)\\s+(\\S+)\\b", Pattern.CASE_INSENSITIVE);
+            "\\b(dismiss|disown|release)\\s+(\\S+)\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern RECRUIT_PATTERN = Pattern.compile(
+            "\\b(recruit|adopt|hire|claim)\\s+(\\S+)\\b", Pattern.CASE_INSENSITIVE);
 
     private static final List<String> DEATH_REPLIES = List.of(
             "oops im dead", "gg", "rip me", "oww", "i died lol",
@@ -183,7 +184,7 @@ public class BotManager {
         }
     }
 
-    /** Dismiss a specific bot by name, saving and disconnecting it. Returns false if not found. */
+    /** Disown a bot by name — cancels its AI tick and leaves it idle in the map. */
     public boolean dismissBot(int ownerCharId, String botName) {
         List<BotEntry> entries = bots.get(ownerCharId);
         if (entries == null) return false;
@@ -195,14 +196,37 @@ public class BotManager {
         BotEntry entry = found;
         entries.remove(entry);
         entry.task.cancel(false);
-        TimerManager.getInstance().schedule(() -> {
-            botSay(entry.bot, randomReply(List.of("cya!", "ok bye!!", "see ya~", "later!")));
-            TimerManager.getInstance().schedule(() -> {
-                entry.bot.saveCharToDB(true);
-                entry.bot.getClient().disconnect(false, false);
-            }, 2000);
-        }, 500);
+        entry.following = false;
+        entry.grinding  = false;
+        TimerManager.getInstance().schedule(() ->
+                botSay(entry.bot, randomReply(List.of("ok", "sure", "alright", "gotcha"))), 500);
         return true;
+    }
+
+    /** Recruit an ownerless bot by name into the owner's group. */
+    public boolean recruitBot(int ownerCharId, Character owner, String botName) {
+        Character bot = findOwnerlessBot(botName, owner.getWorld());
+        if (bot == null) return false;
+        registerBot(ownerCharId, owner, bot);
+        return true;
+    }
+
+    /** Finds a bot-client character with the given name that is not currently owned by anyone. */
+    private Character findOwnerlessBot(String name, int world) {
+        for (var ch : Server.getInstance().getWorld(world).getChannels()) {
+            Character c = ch.getPlayerStorage().getCharacterByName(name);
+            if (c == null || !(c.getClient() instanceof BotClient)) continue;
+            // Check not already owned
+            boolean owned = false;
+            outer:
+            for (List<BotEntry> entries : bots.values()) {
+                for (BotEntry e : entries) {
+                    if (e.bot.getId() == c.getId()) { owned = true; break outer; }
+                }
+            }
+            if (!owned) return c;
+        }
+        return null;
     }
 
     public Character getBot(int ownerCharId) {
@@ -211,15 +235,27 @@ public class BotManager {
     }
 
     public void handleChat(Character owner, String message) {
+        // Recruit must work even when owner has no bots yet
+        Matcher rm = RECRUIT_PATTERN.matcher(message);
+        if (rm.find()) {
+            String name = rm.group(2);
+            if (recruitBot(owner.getId(), owner, name)) {
+                owner.yellowMessage("Bot '" + name + "' recruited!");
+            } else {
+                owner.yellowMessage("No ownerless bot named '" + name + "' found.");
+            }
+            return;
+        }
+
         List<BotEntry> entries = bots.get(owner.getId());
         if (entries == null || entries.isEmpty()) return;
 
-        // Dismiss command: "dismiss Jason" / "remove Jason"
+        // Dismiss: disown bot, leaves it idle in map
         Matcher dm = DISMISS_PATTERN.matcher(message);
         if (dm.find()) {
             String name = dm.group(2);
             if (dismissBot(owner.getId(), name)) {
-                owner.yellowMessage("Bot '" + name + "' dismissed.");
+                owner.yellowMessage("Bot '" + name + "' disowned — now idle.");
             } else {
                 owner.yellowMessage("No bot named '" + name + "' in your group.");
             }
