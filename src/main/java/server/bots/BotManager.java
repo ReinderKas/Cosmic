@@ -420,9 +420,14 @@ public class BotManager {
 
         // Grind mode: navigate toward nearest monster, attack when in range
         if (entry.grinding) {
-            Monster target = findNearestMonster(bot);
+            // Stick to current target while it's alive and in range; only re-pick when needed
+            double seekRangeSq = (double) cfg.GRIND_SEEK_RANGE * cfg.GRIND_SEEK_RANGE;
+            Monster target = entry.grindTarget;
+            if (target == null || !target.isAlive()
+                    || target.getPosition().distanceSq(botPos) > seekRangeSq) {
+                target = findGrindTarget(bot);
+            }
             if (target == null) {
-//                log.debug("[GRIND] no target found for bot={} map={}", bot.getName(), bot.getMapId());
                 if (entry.inAir) BotMovementManager.tickAirborne(entry, targetPos);
                 else { bot.setStance(5); broadcastMovement(bot, 0, 0); }
                 return;
@@ -453,8 +458,8 @@ public class BotManager {
             targetPos = tp;
         }
 
-        // Shift follow target by bot's personal offset so bots naturally spread out
-        if (entry.following) {
+        // Shift target by bot's personal offset so multiple bots spread out (follow + grind)
+        if (entry.following || entry.grinding) {
             targetPos = new Point(targetPos.x + entry.followOffsetX, targetPos.y);
         }
 
@@ -471,16 +476,17 @@ public class BotManager {
     // Grind mode helpers
     // -------------------------------------------------------------------------
 
-    private Monster findNearestMonster(Character bot) {
+    /** Returns a random monster from the nearest 3 within seek range, so multiple bots spread across different targets. */
+    private Monster findGrindTarget(Character bot) {
         Point botPos = bot.getPosition();
-        Monster best = null;
-        double bestDist = (double) cfg.GRIND_SEEK_RANGE * cfg.GRIND_SEEK_RANGE;
+        double rangeSq = (double) cfg.GRIND_SEEK_RANGE * cfg.GRIND_SEEK_RANGE;
+        List<Monster> candidates = new ArrayList<>();
         for (Monster m : bot.getMap().getAllMonsters()) {
-            if (!m.isAlive()) continue;
-            double d = m.getPosition().distanceSq(botPos);
-            if (d < bestDist) { bestDist = d; best = m; }
+            if (m.isAlive() && m.getPosition().distanceSq(botPos) <= rangeSq) candidates.add(m);
         }
-        return best;
+        if (candidates.isEmpty()) return null;
+        candidates.sort((a, b) -> Double.compare(a.getPosition().distanceSq(botPos), b.getPosition().distanceSq(botPos)));
+        return candidates.get(ThreadLocalRandom.current().nextInt(Math.min(3, candidates.size())));
     }
 
     private void attackMonster(BotEntry entry, Character bot, Monster target) {
