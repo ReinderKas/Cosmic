@@ -1400,7 +1400,8 @@ public class BotManager {
         int hp = 0, mp = 0;
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
         for (Item item : bot.getInventory(InventoryType.USE).list()) {
-            StatEffect eff = ii.getItemEffect(item.getItemId());
+            StatEffect eff;
+            try { eff = ii.getItemEffect(item.getItemId()); } catch (Exception e) { continue; }
             if (eff == null) continue;
             int qty = item.getQuantity();
             if (eff.getHp() > 0 || eff.getHpRate() > 0) hp += qty;
@@ -1419,7 +1420,8 @@ public class BotManager {
         int bestHp = 0, bestMp = 0;
         for (Item item : bot.getInventory(InventoryType.USE).list()) {
             if (item.getQuantity() <= 0) continue;
-            StatEffect eff = ii.getItemEffect(item.getItemId());
+            StatEffect eff;
+            try { eff = ii.getItemEffect(item.getItemId()); } catch (Exception e) { continue; }
             if (eff == null) continue;
             if (eff.getHp() > bestHp) { bestHp = eff.getHp(); hpItemId = item.getItemId(); }
             if (eff.getMp() > bestMp) { bestMp = eff.getMp(); mpItemId = item.getItemId(); }

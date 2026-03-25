@@ -39,10 +39,21 @@ public class SpawnBotCommand extends Command {
         MapleMap adminMap = player.getMap();
         Point adminPos = player.getPosition();
 
-        // Case 1: bot already active in this channel — teleport it to admin
-        Character existingBot = c.getChannelServer().getPlayerStorage().getCharacterByName(botName);
-        if (existingBot != null) {
-            teleportBotToPlayer(existingBot, adminMap, adminPos);
+        // Case 1: character is online somewhere — check all channels
+        Character existingChr = null;
+        outer:
+        for (var world : net.server.Server.getInstance().getWorlds()) {
+            for (var ch : world.getChannels()) {
+                Character found = ch.getPlayerStorage().getCharacterByName(botName);
+                if (found != null) { existingChr = found; break outer; }
+            }
+        }
+        if (existingChr != null) {
+            if (!(existingChr.getClient() instanceof BotClient)) {
+                player.yellowMessage("'" + botName + "' is currently being played by a real player — cannot spawn as bot.");
+                return;
+            }
+            teleportBotToPlayer(existingChr, adminMap, adminPos);
             player.yellowMessage("Bot '" + botName + "' teleported to your position.");
             return;
         }
