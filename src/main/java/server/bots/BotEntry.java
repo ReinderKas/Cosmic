@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadLocalRandom;
 
 class BotEntry {
     final Character bot;
@@ -96,6 +97,11 @@ class BotEntry {
     // Foothold index, rebuilt on map change
     int lastMapId = -1;
     Map<Integer, Foothold> fhIndex = new HashMap<>();
+
+    // Human-like spacing: random horizontal offset so multiple bots don't stack on top of each other
+    final int followOffsetX = ThreadLocalRandom.current().nextInt(-100, 101);
+    // Staggered tick start: skip first N ticks so bots don't all move in lockstep
+    int skipTicks = ThreadLocalRandom.current().nextInt(0, 5);
 
     BotEntry(Character bot, Character owner, ScheduledFuture<?> task) {
         this.bot = bot;

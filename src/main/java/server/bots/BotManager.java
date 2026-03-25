@@ -336,6 +336,7 @@ public class BotManager {
             if (e.bot.getId() == botCharId) { entry = e; break; }
         }
         if (entry == null) return;
+        if (entry.skipTicks > 0) { entry.skipTicks--; return; }
         Character bot = entry.bot;
 
         Character owner = entry.owner;
@@ -450,6 +451,11 @@ public class BotManager {
                 }
             }
             targetPos = tp;
+        }
+
+        // Shift follow target by bot's personal offset so bots naturally spread out
+        if (entry.following) {
+            targetPos = new Point(targetPos.x + entry.followOffsetX, targetPos.y);
         }
 
         if (entry.climbing) {
