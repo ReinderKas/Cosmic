@@ -36,14 +36,21 @@ class BotCombatManager {
         final Rectangle hitBox;
         final List<Monster> targets;
         final AttackRoute route;
+        final int display;
+        final int direction;
+        final int rangedDirection;
 
-        AttackPlan(int skillId, int skillLevel, int numDamage, Rectangle hitBox, List<Monster> targets, AttackRoute route) {
+        AttackPlan(int skillId, int skillLevel, int numDamage, Rectangle hitBox, List<Monster> targets,
+                   AttackRoute route, int display, int direction, int rangedDirection) {
             this.skillId = skillId;
             this.skillLevel = skillLevel;
             this.numDamage = numDamage;
             this.hitBox = hitBox;
             this.targets = targets;
             this.route = route;
+            this.display = display;
+            this.direction = direction;
+            this.rangedDirection = rangedDirection;
         }
 
         boolean hasHitBox() {
@@ -244,8 +251,9 @@ class BotCombatManager {
             return skillAttack;
         }
 
-        Rectangle basicAttackHitBox = calculateBasicAttackHitBox(bot, target);
-        return new AttackPlan(0, 0, 1, basicAttackHitBox, List.of(target), determineBasicAttackRoute(bot));
+        BasicAttackData basicAttackData = buildBasicAttackData(bot, target);
+        return new AttackPlan(0, 0, 1, basicAttackData.hitBox, List.of(target), determineBasicAttackRoute(bot),
+                basicAttackData.display, basicAttackData.direction, basicAttackData.rangedDirection);
     }
 
     static boolean isTargetInAttackRange(AttackPlan attackPlan, Character bot, Monster target) {
@@ -282,8 +290,9 @@ class BotCombatManager {
         attack.numAttackedAndDamage = (numAttacked << 4) | attackPlan.numDamage;
         attack.speed = 4;
         attack.stance = primaryTarget.getPosition().x < bot.getPosition().x ? -128 : 0;
-        attack.direction = primaryTarget.getPosition().x < bot.getPosition().x ? 17 : 6;
-        attack.rangedirection = attack.direction;
+        attack.display = attackPlan.display;
+        attack.direction = attackPlan.direction;
+        attack.rangedirection = attackPlan.rangedDirection;
         attack.ranged = attackPlan.route == AttackRoute.RANGED;
         attack.magic = attackPlan.route == AttackRoute.MAGIC;
         attack.targets = new HashMap<>();
@@ -319,8 +328,9 @@ class BotCombatManager {
         }
 
         int attackCount = Math.max(1, effect.getAttackCount());
+        int direction = primaryTarget.getPosition().x < bot.getPosition().x ? 17 : 6;
         return new AttackPlan(entry.aoeSkillId, skillLevel, attackCount, hitBox, targets,
-                determineSkillRoute(bot, entry.aoeSkillId));
+                determineSkillRoute(bot, entry.aoeSkillId), 0, direction, direction);
     }
 
     private static AttackPlan planSingleTargetSkill(BotEntry entry, Character bot, Monster primaryTarget) {
@@ -341,8 +351,9 @@ class BotCombatManager {
         }
 
         int attackCount = Math.max(1, effect.getAttackCount());
+        int direction = primaryTarget.getPosition().x < bot.getPosition().x ? 17 : 6;
         return new AttackPlan(entry.attackSkillId, skillLevel, attackCount, hitBox, List.of(primaryTarget),
-                determineSkillRoute(bot, entry.attackSkillId));
+                determineSkillRoute(bot, entry.attackSkillId), 0, direction, direction);
     }
 
     private static Rectangle calculateSkillHitBox(StatEffect effect, Character bot, Monster primaryTarget) {
@@ -394,20 +405,23 @@ class BotCombatManager {
         return inHRange && inVRange;
     }
 
-    private static Rectangle calculateBasicAttackHitBox(Character bot, Monster primaryTarget) {
+    private static BasicAttackData buildBasicAttackData(Character bot, Monster primaryTarget) {
         Item weapon = bot.getInventory(InventoryType.EQUIPPED).getItem((short) -11);
         if (weapon == null) {
-            return null;
+            return BasicAttackData.fallback(primaryTarget.getPosition().x < bot.getPosition().x);
         }
 
         BotAttackDataProvider.NormalAttackProfile attackProfile =
                 BotAttackDataProvider.getInstance().getNormalAttackProfile(weapon.getItemId());
-        if (attackProfile == null || !attackProfile.hasBoundingBox()) {
-            return null;
+        if (attackProfile == null) {
+            return BasicAttackData.fallback(primaryTarget.getPosition().x < bot.getPosition().x);
         }
 
         boolean facingLeft = primaryTarget.getPosition().x < bot.getPosition().x;
-        return attackProfile.calculateBoundingBox(bot.getPosition(), facingLeft);
+        Rectangle hitBox = attackProfile.hasBoundingBox()
+                ? attackProfile.calculateBoundingBox(bot.getPosition(), facingLeft)
+                : null;
+        return BasicAttackData.fromProfile(attackProfile, hitBox, facingLeft);
     }
 
     private static void applyAttackRoute(AttackRoute route, AbstractDealDamageHandler.AttackInfo attack, Character bot) {
@@ -468,6 +482,45 @@ class BotCombatManager {
                  constants.skills.Aran.COMBO_TEMPEST -> true;
             default -> false;
         };
+    }
+
+    private record BasicAttackData(Rectangle hitBox, int display, int direction, int rangedDirection) {
+        private static BasicAttackData fromProfile(BotAttackDataProvider.NormalAttackProfile profile, Rectangle hitBox, boolean facingLeft) {
+            int baseDirection = profile.getAttack();
+            if (baseDirection <= 0) {
+                return fallback(facingLeft, hitBox);
+            }
+
+            int variantCount = Math.max(1, countMoveVariants(profile.getSourceActions()));
+            int variantOffset = ThreadLocalRandom.current().nextInt(variantCount);
+            int display = baseDirection + variantOffset;
+            int direction = facingLeft ? display + 11 : display;
+            return new BasicAttackData(hitBox, display, direction, direction);
+        }
+
+        private static BasicAttackData fallback(boolean facingLeft) {
+            return fallback(facingLeft, null);
+        }
+
+        private static BasicAttackData fallback(boolean facingLeft, Rectangle hitBox) {
+            int direction = facingLeft ? 17 : 6;
+            return new BasicAttackData(hitBox, 0, direction, direction);
+        }
+
+        private static int countMoveVariants(List<String> sourceActions) {
+            if (sourceActions == null || sourceActions.isEmpty()) {
+                return 1;
+            }
+
+            int variantCount = 0;
+            for (String sourceAction : sourceActions) {
+                if (sourceAction == null || sourceAction.isBlank()) {
+                    continue;
+                }
+                variantCount++;
+            }
+            return Math.max(1, variantCount);
+        }
     }
 
     private static AbstractDealDamageHandler.AttackTarget makeTarget(int hits, int minDmg, int maxDmg) {

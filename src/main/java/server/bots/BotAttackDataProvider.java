@@ -32,14 +32,16 @@ final class BotAttackDataProvider {
 
     static final class NormalAttackProfile {
         private final int attackSpeed;
+        private final int attack;
         private final String afterImage;
         private final Rectangle rightFacingBounds;
         private final List<String> sourceActions;
         private final String sourcePath;
 
-        private NormalAttackProfile(int attackSpeed, String afterImage, Rectangle rightFacingBounds,
+        private NormalAttackProfile(int attackSpeed, int attack, String afterImage, Rectangle rightFacingBounds,
                                     List<String> sourceActions, String sourcePath) {
             this.attackSpeed = attackSpeed;
+            this.attack = attack;
             this.afterImage = afterImage;
             this.rightFacingBounds = rightFacingBounds != null ? new Rectangle(rightFacingBounds) : null;
             this.sourceActions = List.copyOf(sourceActions);
@@ -48,6 +50,10 @@ final class BotAttackDataProvider {
 
         int getAttackSpeed() {
             return attackSpeed;
+        }
+
+        int getAttack() {
+            return attack;
         }
 
         String getAfterImage() {
@@ -128,6 +134,7 @@ final class BotAttackDataProvider {
         Element info = findNamedChild(weaponRoot, "info");
         String afterImage = getStringValue(findNamedChild(info, "afterImage"));
         int attackSpeed = getIntValue(findNamedChild(info, "attackSpeed"), 0);
+        int attack = getIntValue(findNamedChild(info, "attack"), 0);
         int reqLevel = getIntValue(findNamedChild(info, "reqLevel"), 0);
 
         AttackBoundsData boundsData = loadAfterimageBounds(afterImage, reqLevel);
@@ -136,10 +143,10 @@ final class BotAttackDataProvider {
         }
 
         if (boundsData == null) {
-            return new NormalAttackProfile(attackSpeed, afterImage, null, List.of(), weaponFile.toString());
+            return new NormalAttackProfile(attackSpeed, attack, afterImage, null, List.of(), weaponFile.toString());
         }
 
-        return new NormalAttackProfile(attackSpeed, afterImage, boundsData.bounds,
+        return new NormalAttackProfile(attackSpeed, attack, afterImage, boundsData.bounds,
                 boundsData.sourceActions, boundsData.sourcePath);
     }
 
