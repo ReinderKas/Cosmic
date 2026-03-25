@@ -141,6 +141,9 @@ public class BotManager {
             "\\b(dismiss|disown|release)\\s+(\\S+)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern RECRUIT_PATTERN = Pattern.compile(
             "\\b(recruit|adopt|hire|claim)\\s+(\\S+)\\b", Pattern.CASE_INSENSITIVE);
+    // "give Jason Bob" or "transfer Jason to Bob"
+    private static final Pattern GIVE_PATTERN = Pattern.compile(
+            "\\b(give|transfer)\\s+(\\S+)(?:\\s+to)?\\s+(\\S+)\\b", Pattern.CASE_INSENSITIVE);
 
     private static final List<String> DEATH_REPLIES = List.of(
             "oops im dead", "gg", "rip me", "oww", "i died lol",
@@ -211,6 +214,35 @@ public class BotManager {
         return true;
     }
 
+    /** Transfer a bot from this owner to another player in the same map. Returns an error string on failure, null on success. */
+    public String giveBot(int ownerCharId, Character owner, String botName, String targetName) {
+        List<BotEntry> entries = bots.get(ownerCharId);
+        if (entries == null) return "You have no bots.";
+        BotEntry found = null;
+        for (BotEntry e : entries) {
+            if (e.bot.getName().equalsIgnoreCase(botName)) { found = e; break; }
+        }
+        if (found == null) return "No bot named '" + botName + "' in your group.";
+
+        // Find target player in the same map
+        Character target = owner.getMap().getCharacterByName(targetName);
+        if (target == null) return "Player '" + targetName + "' not found in this map.";
+        if (target.getId() == ownerCharId) return "That's you.";
+
+        // Disown from current owner
+        Character bot = found.bot;
+        entries.remove(found);
+        found.task.cancel(false);
+        found.following = false;
+        found.grinding  = false;
+
+        // Register under new owner
+        registerBot(target.getId(), target, bot);
+        TimerManager.getInstance().schedule(() ->
+                botSay(bot, randomReply(List.of("ok!", "sure!", "hey " + target.getName() + "!", "hi " + target.getName() + "!"))), 800);
+        return null;
+    }
+
     /** Finds a bot-client character with the given name that is not currently owned by anyone. */
     private Character findOwnerlessBot(String name, int world) {
         for (var ch : Server.getInstance().getWorld(world).getChannels()) {
@@ -244,6 +276,14 @@ public class BotManager {
             } else {
                 owner.yellowMessage("No ownerless bot named '" + name + "' found.");
             }
+            return;
+        }
+
+        Matcher gm = GIVE_PATTERN.matcher(message);
+        if (gm.find()) {
+            String err = giveBot(owner.getId(), owner, gm.group(2), gm.group(3));
+            if (err != null) owner.yellowMessage(err);
+            else owner.yellowMessage("Bot '" + gm.group(2) + "' transferred to " + gm.group(3) + ".");
             return;
         }
 
