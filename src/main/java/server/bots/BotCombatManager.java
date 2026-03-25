@@ -39,9 +39,11 @@ class BotCombatManager {
         final int display;
         final int direction;
         final int rangedDirection;
+        final int speed;
+        final int cooldownTicks;
 
         AttackPlan(int skillId, int skillLevel, int numDamage, Rectangle hitBox, List<Monster> targets,
-                   AttackRoute route, int display, int direction, int rangedDirection) {
+                   AttackRoute route, int display, int direction, int rangedDirection, int speed, int cooldownTicks) {
             this.skillId = skillId;
             this.skillLevel = skillLevel;
             this.numDamage = numDamage;
@@ -51,6 +53,8 @@ class BotCombatManager {
             this.display = display;
             this.direction = direction;
             this.rangedDirection = rangedDirection;
+            this.speed = speed;
+            this.cooldownTicks = cooldownTicks;
         }
 
         boolean hasHitBox() {
@@ -71,7 +75,6 @@ class BotCombatManager {
         public int   ATTACK_RANGE_Y  = 50;
         public int   ATTACK_DOWN_MAX = 20;
         public int   ATTACK_JUMP_Y   = 130;
-        public int   ATTACK_COOLDOWN = 10;
 
         // Grind / AoE
         public int   GRIND_SEEK_RANGE  = 800;
@@ -253,7 +256,8 @@ class BotCombatManager {
 
         BasicAttackData basicAttackData = buildBasicAttackData(bot, target);
         return new AttackPlan(0, 0, 1, basicAttackData.hitBox, List.of(target), determineBasicAttackRoute(bot),
-                basicAttackData.display, basicAttackData.direction, basicAttackData.rangedDirection);
+                basicAttackData.display, basicAttackData.direction, basicAttackData.rangedDirection,
+                basicAttackData.speed, basicAttackData.cooldownTicks);
     }
 
     static boolean isTargetInAttackRange(AttackPlan attackPlan, Character bot, Monster target) {
@@ -288,7 +292,7 @@ class BotCombatManager {
         attack.numDamage = attackPlan.numDamage;
         attack.numAttacked = numAttacked;
         attack.numAttackedAndDamage = (numAttacked << 4) | attackPlan.numDamage;
-        attack.speed = 4;
+        attack.speed = attackPlan.speed;
         attack.stance = primaryTarget.getPosition().x < bot.getPosition().x ? -128 : 0;
         attack.display = attackPlan.display;
         attack.direction = attackPlan.direction;
@@ -302,7 +306,7 @@ class BotCombatManager {
         }
 
         applyAttackRoute(attackPlan.route, attack, bot);
-        entry.attackCooldown = BotCombatManager.cfg.ATTACK_COOLDOWN;
+        entry.attackCooldown = attackPlan.cooldownTicks;
     }
 
     private static AttackPlan planAoeAttack(BotEntry entry, Character bot, Monster primaryTarget) {
@@ -330,7 +334,8 @@ class BotCombatManager {
         int attackCount = Math.max(1, effect.getAttackCount());
         int direction = primaryTarget.getPosition().x < bot.getPosition().x ? 17 : 6;
         return new AttackPlan(entry.aoeSkillId, skillLevel, attackCount, hitBox, targets,
-                determineSkillRoute(bot, entry.aoeSkillId), 0, direction, direction);
+                determineSkillRoute(bot, entry.aoeSkillId), 0, direction, direction,
+                resolveWeaponAttackSpeed(bot), toCooldownTicks(resolveSkillAttackDelayMillis(skill)));
     }
 
     private static AttackPlan planSingleTargetSkill(BotEntry entry, Character bot, Monster primaryTarget) {
@@ -353,7 +358,8 @@ class BotCombatManager {
         int attackCount = Math.max(1, effect.getAttackCount());
         int direction = primaryTarget.getPosition().x < bot.getPosition().x ? 17 : 6;
         return new AttackPlan(entry.attackSkillId, skillLevel, attackCount, hitBox, List.of(primaryTarget),
-                determineSkillRoute(bot, entry.attackSkillId), 0, direction, direction);
+                determineSkillRoute(bot, entry.attackSkillId), 0, direction, direction,
+                resolveWeaponAttackSpeed(bot), toCooldownTicks(resolveSkillAttackDelayMillis(skill)));
     }
 
     private static Rectangle calculateSkillHitBox(StatEffect effect, Character bot, Monster primaryTarget) {
@@ -484,7 +490,7 @@ class BotCombatManager {
         };
     }
 
-    private record BasicAttackData(Rectangle hitBox, int display, int direction, int rangedDirection) {
+    private record BasicAttackData(Rectangle hitBox, int display, int direction, int rangedDirection, int speed, int cooldownTicks) {
         private static BasicAttackData fromProfile(BotAttackDataProvider.NormalAttackProfile profile, Rectangle hitBox, boolean facingLeft) {
             int baseDirection = profile.getAttack();
             if (baseDirection <= 0) {
@@ -495,7 +501,9 @@ class BotCombatManager {
             int variantOffset = ThreadLocalRandom.current().nextInt(variantCount);
             int display = baseDirection + variantOffset;
             int direction = facingLeft ? display + 11 : display;
-            return new BasicAttackData(hitBox, display, direction, direction);
+            return new BasicAttackData(hitBox, display, direction, direction,
+                    normalizeAttackSpeed(profile.getAttackSpeed()),
+                    toCooldownTicks(profile.getAttackDelayMillis()));
         }
 
         private static BasicAttackData fallback(boolean facingLeft) {
@@ -504,7 +512,7 @@ class BotCombatManager {
 
         private static BasicAttackData fallback(boolean facingLeft, Rectangle hitBox) {
             int direction = facingLeft ? 17 : 6;
-            return new BasicAttackData(hitBox, 0, direction, direction);
+            return new BasicAttackData(hitBox, 0, direction, direction, 4, 0);
         }
 
         private static int countMoveVariants(List<String> sourceActions) {
@@ -521,6 +529,44 @@ class BotCombatManager {
             }
             return Math.max(1, variantCount);
         }
+    }
+
+    private static int resolveSkillAttackDelayMillis(Skill skill) {
+        if (skill == null) {
+            return 0;
+        }
+        return Math.max(0, skill.getAnimationTime());
+    }
+
+    private static int toCooldownTicks(int attackDelayMillis) {
+        if (attackDelayMillis <= 0) {
+            return 0;
+        }
+
+        int tickMs = BotMovementManager.cfg.TICK_MS;
+        return Math.max(0, (attackDelayMillis + tickMs - 1) / tickMs - 1);
+    }
+
+    private static int resolveWeaponAttackSpeed(Character bot) {
+        Item weapon = bot.getInventory(InventoryType.EQUIPPED).getItem((short) -11);
+        if (weapon == null) {
+            return 4;
+        }
+
+        BotAttackDataProvider.NormalAttackProfile attackProfile =
+                BotAttackDataProvider.getInstance().getNormalAttackProfile(weapon.getItemId());
+        if (attackProfile == null) {
+            return 4;
+        }
+
+        return normalizeAttackSpeed(attackProfile.getAttackSpeed());
+    }
+
+    private static int normalizeAttackSpeed(int attackSpeed) {
+        if (attackSpeed <= 0) {
+            return 4;
+        }
+        return attackSpeed;
     }
 
     private static AbstractDealDamageHandler.AttackTarget makeTarget(int hits, int minDmg, int maxDmg) {

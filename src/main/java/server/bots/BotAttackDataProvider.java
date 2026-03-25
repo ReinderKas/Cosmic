@@ -33,15 +33,17 @@ final class BotAttackDataProvider {
     static final class NormalAttackProfile {
         private final int attackSpeed;
         private final int attack;
+        private final int attackDelayMillis;
         private final String afterImage;
         private final Rectangle rightFacingBounds;
         private final List<String> sourceActions;
         private final String sourcePath;
 
-        private NormalAttackProfile(int attackSpeed, int attack, String afterImage, Rectangle rightFacingBounds,
+        private NormalAttackProfile(int attackSpeed, int attack, int attackDelayMillis, String afterImage, Rectangle rightFacingBounds,
                                     List<String> sourceActions, String sourcePath) {
             this.attackSpeed = attackSpeed;
             this.attack = attack;
+            this.attackDelayMillis = attackDelayMillis;
             this.afterImage = afterImage;
             this.rightFacingBounds = rightFacingBounds != null ? new Rectangle(rightFacingBounds) : null;
             this.sourceActions = List.copyOf(sourceActions);
@@ -54,6 +56,10 @@ final class BotAttackDataProvider {
 
         int getAttack() {
             return attack;
+        }
+
+        int getAttackDelayMillis() {
+            return attackDelayMillis;
         }
 
         String getAfterImage() {
@@ -92,11 +98,13 @@ final class BotAttackDataProvider {
 
     private static final class AttackBoundsData {
         private final Rectangle bounds;
+        private final int attackDelayMillis;
         private final List<String> sourceActions;
         private final String sourcePath;
 
-        private AttackBoundsData(Rectangle bounds, List<String> sourceActions, String sourcePath) {
+        private AttackBoundsData(Rectangle bounds, int attackDelayMillis, List<String> sourceActions, String sourcePath) {
             this.bounds = new Rectangle(bounds);
+            this.attackDelayMillis = attackDelayMillis;
             this.sourceActions = List.copyOf(sourceActions);
             this.sourcePath = sourcePath;
         }
@@ -143,10 +151,10 @@ final class BotAttackDataProvider {
         }
 
         if (boundsData == null) {
-            return new NormalAttackProfile(attackSpeed, attack, afterImage, null, List.of(), weaponFile.toString());
+            return new NormalAttackProfile(attackSpeed, attack, 0, afterImage, null, List.of(), weaponFile.toString());
         }
 
-        return new NormalAttackProfile(attackSpeed, attack, afterImage, boundsData.bounds,
+        return new NormalAttackProfile(attackSpeed, attack, boundsData.attackDelayMillis, afterImage, boundsData.bounds,
                 boundsData.sourceActions, boundsData.sourcePath);
     }
 
@@ -174,6 +182,8 @@ final class BotAttackDataProvider {
         }
 
         Rectangle bounds = null;
+        int totalDelay = 0;
+        int delayedActions = 0;
         Set<String> actionNames = new LinkedHashSet<>();
         for (Element action : getNamedChildren(levelBucket)) {
             Element lt = findNamedChild(action, "lt");
@@ -189,13 +199,18 @@ final class BotAttackDataProvider {
 
             bounds = bounds == null ? new Rectangle(actionBounds) : bounds.union(actionBounds);
             actionNames.add(action.getAttribute("name"));
+            int actionDelay = sumActionDelayMillis(action);
+            if (actionDelay > 0) {
+                totalDelay += actionDelay;
+                delayedActions++;
+            }
         }
 
         if (bounds == null) {
             return null;
         }
 
-        return new AttackBoundsData(bounds, new ArrayList<>(actionNames), afterimageFile.toString());
+        return new AttackBoundsData(bounds, averageDelay(totalDelay, delayedActions), new ArrayList<>(actionNames), afterimageFile.toString());
     }
 
     private Element findBestLevelBucket(Element root, int requestedBucket) {
@@ -241,6 +256,8 @@ final class BotAttackDataProvider {
 
     private AttackBoundsData loadWeaponActionBounds(Element root, Path weaponFile) {
         Rectangle bounds = null;
+        int totalDelay = 0;
+        int delayedActions = 0;
         Set<String> actionNames = new LinkedHashSet<>();
 
         for (Element child : getNamedChildren(root)) {
@@ -259,13 +276,19 @@ final class BotAttackDataProvider {
                 bounds = bounds == null ? new Rectangle(frameBounds) : bounds.union(frameBounds);
                 actionNames.add(actionName);
             }
+
+            int actionDelay = sumActionDelayMillis(child);
+            if (actionDelay > 0) {
+                totalDelay += actionDelay;
+                delayedActions++;
+            }
         }
 
         if (bounds == null) {
             return null;
         }
 
-        return new AttackBoundsData(bounds, new ArrayList<>(actionNames), weaponFile.toString());
+        return new AttackBoundsData(bounds, averageDelay(totalDelay, delayedActions), new ArrayList<>(actionNames), weaponFile.toString());
     }
 
     private static boolean isBasicAttackAction(String actionName) {
@@ -414,5 +437,28 @@ final class BotAttackDataProvider {
             return null;
         }
         return element.getAttribute("value");
+    }
+
+    private static int sumActionDelayMillis(Element action) {
+        if (action == null) {
+            return 0;
+        }
+
+        int totalDelay = 0;
+        for (Element child : getNamedChildren(action)) {
+            if ("int".equals(child.getTagName()) && "delay".equals(child.getAttribute("name"))) {
+                totalDelay += getIntAttribute(child, "value", 0);
+                continue;
+            }
+            totalDelay += sumActionDelayMillis(child);
+        }
+        return totalDelay;
+    }
+
+    private static int averageDelay(int totalDelay, int delayedActions) {
+        if (totalDelay <= 0 || delayedActions <= 0) {
+            return 0;
+        }
+        return Math.max(1, totalDelay / delayedActions);
     }
 }
