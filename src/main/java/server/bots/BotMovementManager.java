@@ -235,13 +235,11 @@ class BotMovementManager {
                     bot.setPosition(new Point(walkX, snapped.y));
                     bot.setStance(wdx >= 0 ? 2 : 3);
                     BotManager.getInstance().broadcastMovement(bot, wdx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, 0);
-                } else if (dy > cfg.JUMP_Y_THRESH) {
-                    // Ledge on path to waypoint and owner is below — fall through naturally
-                    entry.inAir   = true;
-                    entry.airVelX = stepToWp;
-                    entry.velY    = 0f;
+                    return;
                 }
-                return;
+                // Path blocked — redirect targetPos to waypoint rope so the proactive jump section handles it
+                targetPos = new Point(wp.x(), wp.topY());
+                // fall through to proactive jump below
             }
         }
 
@@ -312,22 +310,45 @@ class BotMovementManager {
                     BotManager.getInstance().broadcastMovement(bot, 0, 0);
                     return;
                 }
-                // Jump toward rope — but only if the rope is within horizontal reach of the arc
-                int maxHTravel = cfg.STEP * (int) (2 * cfg.JUMP_FORCE / cfg.GRAVITY);
-                if (entry.jumpCooldown == 0 && Math.abs(rdx) <= maxHTravel) {
-                    entry.jumpCooldown = cfg.JUMP_COOLDOWN;
-                    initiateRopeJump(entry, bot, rdx);
-                    return;
-                }
-                // On cooldown — walk toward rope X to align horizontally
-                int stepToRope = Math.min(Math.abs(rdx), cfg.STEP) * (rdx >= 0 ? 1 : -1);
-                int newX = botPos.x + stepToRope;
-                Point snapped = bot.getMap().getPointBelow(new Point(newX, botPos.y - cfg.MAX_SLOPE_UP));
-                if (snapped != null && snapped.y <= botPos.y + cfg.MAX_SNAP_DROP) {
-                    bot.setPosition(new Point(newX, snapped.y));
-                    bot.setStance(rdx >= 0 ? 2 : 3);
-                    BotManager.getInstance().broadcastMovement(bot, rdx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, 0);
-                    return;
+                // Prefer a direct platform jump over walking to a distant rope.
+                // If any arc (toward target, away, or vertical) lands on a higher platform, skip rope.
+                if (entry.jumpCooldown == 0) {
+                    int arcStep = dx >= 0 ? cfg.STEP : -cfg.STEP;
+                    boolean jumpWorks = arcCheckJump(bot, botPos, arcStep, targetPos.x, targetPos.y)
+                            || arcCheckJump(bot, botPos, -arcStep, targetPos.x, targetPos.y)
+                            || arcCheckJump(bot, botPos, 0, targetPos.x, targetPos.y);
+                    if (jumpWorks) {
+                        // Fall through to proactive jump section which will handle it
+                    } else {
+                        // No jumpable platform — commit to rope approach
+                        int maxHTravel = cfg.STEP * (int) (2 * cfg.JUMP_FORCE / cfg.GRAVITY);
+                        if (Math.abs(rdx) <= maxHTravel) {
+                            entry.jumpCooldown = cfg.JUMP_COOLDOWN;
+                            initiateRopeJump(entry, bot, rdx);
+                            return;
+                        }
+                        // Rope too far for a direct jump — walk toward it
+                        int stepToRope = Math.min(Math.abs(rdx), cfg.STEP) * (rdx >= 0 ? 1 : -1);
+                        int newX = botPos.x + stepToRope;
+                        Point snapped = bot.getMap().getPointBelow(new Point(newX, botPos.y - cfg.MAX_SLOPE_UP));
+                        if (snapped != null && snapped.y <= botPos.y + cfg.MAX_SNAP_DROP) {
+                            bot.setPosition(new Point(newX, snapped.y));
+                            bot.setStance(rdx >= 0 ? 2 : 3);
+                            BotManager.getInstance().broadcastMovement(bot, rdx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, 0);
+                            return;
+                        }
+                    }
+                } else {
+                    // On jump cooldown — walk toward rope X to align horizontally
+                    int stepToRope = Math.min(Math.abs(rdx), cfg.STEP) * (rdx >= 0 ? 1 : -1);
+                    int newX = botPos.x + stepToRope;
+                    Point snapped = bot.getMap().getPointBelow(new Point(newX, botPos.y - cfg.MAX_SLOPE_UP));
+                    if (snapped != null && snapped.y <= botPos.y + cfg.MAX_SNAP_DROP) {
+                        bot.setPosition(new Point(newX, snapped.y));
+                        bot.setStance(rdx >= 0 ? 2 : 3);
+                        BotManager.getInstance().broadcastMovement(bot, rdx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, 0);
+                        return;
+                    }
                 }
             }
         }
