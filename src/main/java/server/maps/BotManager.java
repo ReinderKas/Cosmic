@@ -44,8 +44,6 @@ import java.util.regex.Pattern;
 public class BotManager {
     // TODO: list from most important to least important
     // TODO: rework autoAssignSp/getSpPriority/related, implement per level build order, should be backward compatible format(hasn't assigned in many levels), sp should have prompts if multiple options are available (see Hero.java)
-    // TODO: fix bug bot dead but become alive with 0 hp, invulnerable to mobs, check how this can happens and fix, some state should persist on save/disconnect
-    // TODO: Option to ask bot to logoff/disconnect + save/relog, this should take an additional confirmation prompt (remember human like response and delay between actions)
     // TODO: Option to ask bot for their current stats/damage range/current buid/inventory
     // TODO: Option to respec bot ap/sp
     // TODO: Option to ask bot to change ap/sp build
@@ -169,8 +167,19 @@ public class BotManager {
             "\\b(hi+|hey+|hello|sup|yo+|howdy|hiya|whats up|what's up|wassup)\\b",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern STATS_PATTERN = Pattern.compile(
-            "\\b(stats?|damage|dmg|build|inventory|inv|equips?|what (do you have|are (your|ur) stats?)|"
-            + "how (strong|good) are you|show (me )?(your|ur) (stats?|build|gear))\\b",
+            "\\byour (stats?|str|dex|int|luk|level)\\b|\\bwhat are your stats\\b",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern RANGE_PATTERN = Pattern.compile(
+            "\\byour (range|dmg|damage)\\b|\\bhow much (dmg|damage)\\b",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern BUILD_PATTERN = Pattern.compile(
+            "\\byour build\\b|\\bcurrent build\\b",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern INVENTORY_PATTERN = Pattern.compile(
+            "\\byour (loot|inv|inventory|items|equips?)\\b|\\bwhat do you have\\b",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern SCROLLS_PATTERN = Pattern.compile(
+            "\\byour scrolls\\b|\\bany scrolls\\b|\\bdo you have (any )?scrolls\\b",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern AP_PURE_STR_PATTERN = Pattern.compile(
             "\\bpure str\\b", Pattern.CASE_INSENSITIVE);
@@ -178,6 +187,11 @@ public class BotManager {
             "\\b(\\d+)\\s*dex\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern AP_CHANGE_BUILD_PATTERN = Pattern.compile(
             "\\bchange build\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern LOGOUT_PATTERN = Pattern.compile(
+            "\\b(log off|logout|log out|disconnect|save and (relog|log ?off|logout)|relog)\\b",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern LOGOUT_CONFIRM_PATTERN = Pattern.compile(
+            "\\b(yes|yep|yeah|yea|y|ok|sure|confirm|do it)\\b", Pattern.CASE_INSENSITIVE);
 
     // TODO: Extract Ap/Sp/Job/build related code to BotBuildManager or something, unbloat this file
     /**
@@ -275,6 +289,9 @@ public class BotManager {
         ApBuild apBuild       = null;   // null = not chosen yet
         boolean apPromptSent  = false;  // prevent re-prompting before owner responds
 
+        // Logout / relog
+        boolean pendingLogout = false;  // true = waiting for owner confirmation
+
         // Message queue — sends with ~5s spacing between messages
         final ArrayDeque<String> msgQueue = new ArrayDeque<>();
         boolean msgSending = false;
@@ -335,6 +352,38 @@ public class BotManager {
         BotEntry entry = bots.get(owner.getId());
         if (entry == null) return;
 
+        // Logout / relog — two-step confirmation
+        if (LOGOUT_PATTERN.matcher(message).find()) {
+            TimerManager.getInstance().schedule(() -> {
+                entry.pendingLogout = true;
+                entry.following = false;
+                entry.grinding  = false;
+                List<String> prompts = List.of(
+                        "log off? you sure? say yes to confirm",
+                        "relog? type yes to confirm",
+                        "save and log off? say yes if you're sure");
+                botSay(entry.bot, randomReply(prompts));
+            }, 1000);
+            return;
+        }
+        if (entry.pendingLogout) {
+            if (LOGOUT_CONFIRM_PATTERN.matcher(message).find()) {
+                TimerManager.getInstance().schedule(() -> {
+                    List<String> byes = List.of("ok! saving and logging off~", "cya! logging off now", "ok bye!!");
+                    botSay(entry.bot, randomReply(byes));
+                    TimerManager.getInstance().schedule(() -> {
+                        entry.bot.saveCharToDB(true);
+                        entry.bot.getClient().disconnect(false, false);
+                    }, 3000);
+                }, 1000);
+            } else {
+                entry.pendingLogout = false;
+                TimerManager.getInstance().schedule(() ->
+                        botSay(entry.bot, "ok nvm, staying!"), 800);
+            }
+            return;
+        }
+
         if (FOLLOW_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
                 entry.grinding = false;
@@ -381,10 +430,17 @@ public class BotManager {
             }
         }
 
-        // Stats request
-        if (STATS_PATTERN.matcher(message).find()) {
-            TimerManager.getInstance().schedule(() -> buildStatsReport(entry, entry.bot), 1000);
-        }
+        // Info commands
+        if (STATS_PATTERN.matcher(message).find())
+            TimerManager.getInstance().schedule(() -> reportStats(entry, entry.bot), 1000);
+        if (RANGE_PATTERN.matcher(message).find())
+            TimerManager.getInstance().schedule(() -> reportRange(entry, entry.bot), 1000);
+        if (BUILD_PATTERN.matcher(message).find())
+            TimerManager.getInstance().schedule(() -> reportBuild(entry, entry.bot), 1000);
+        if (INVENTORY_PATTERN.matcher(message).find())
+            TimerManager.getInstance().schedule(() -> reportInventory(entry, entry.bot), 1000);
+        if (SCROLLS_PATTERN.matcher(message).find())
+            TimerManager.getInstance().schedule(() -> reportScrolls(entry, entry.bot), 1000);
 
         // Job advancement — check if message contains a valid job selection
         if (JOB_SELECT_PATTERN.matcher(message).find()) {
@@ -424,7 +480,14 @@ public class BotManager {
             return;
         }
 
-        // Dead state: skip AI until respawn timer expires
+        // Dead state: skip AI until respawn timer expires.
+        // Also catch stale hp=0 (e.g. deadUntil was lost on save/reconnect) — re-enter dead state.
+        if (entry.deadUntil == 0 && bot.getHp() <= 0) {
+            bot.setStance(cfg.DEAD_STANCE);
+            broadcastMovement(bot, 0, 0);
+            entry.deadUntil = System.currentTimeMillis() + cfg.BOT_DEAD_MS;
+            resetEntryState(entry);
+        }
         if (entry.deadUntil > 0) {
             if (System.currentTimeMillis() >= entry.deadUntil) {
                 respawnBot(entry, bot, owner);
@@ -1477,45 +1540,41 @@ public class BotManager {
         if (apPrompt != null) queueBotSay(entry, apPrompt);
     }
 
-    private void buildStatsReport(BotEntry entry, Character bot) {
+    private void reportStats(BotEntry entry, Character bot) {
+        queueBotSay(entry, String.format("lv%d %s | str %d dex %d int %d luk %d | hp %d/%d mp %d/%d",
+                bot.getLevel(), jobDisplayName(bot.getJob()),
+                bot.getStr(), bot.getDex(), bot.getInt(), bot.getLuk(),
+                bot.getHp(), bot.getCurrentMaxHp(),
+                bot.getMp(), bot.getCurrentMaxMp()));
+    }
+
+    private void reportRange(BotEntry entry, Character bot) {
         int watk   = bot.getTotalWatk();
         int maxDmg = Math.max(1, bot.calculateMaxBaseDamage(watk));
         int minDmg = Math.max(1, bot.calculateMinBaseDamage(watk));
+        queueBotSay(entry, String.format("my dmg is %d-%d, watk %d", minDmg, maxDmg, watk));
+    }
 
-        // Line 1: level / job / raw stats
-        String stats = String.format("lv%d %s | str %d dex %d int %d luk %d",
-                bot.getLevel(), jobDisplayName(bot.getJob()),
-                bot.getStr(), bot.getDex(), bot.getInt(), bot.getLuk());
-        queueBotSay(entry, stats);
+    private void reportBuild(BotEntry entry, Character bot) {
+        queueBotSay(entry, String.format("build: str %d / dex %d / int %d / luk %d, %d ap left",
+                bot.getStr(), bot.getDex(), bot.getInt(), bot.getLuk(),
+                bot.getRemainingAp()));
+    }
 
-        // Line 2: damage range + atk + hp
-        String dmg = String.format("dmg %d-%d | watk %d | hp %d/%d mp %d/%d",
-                minDmg, maxDmg, watk,
-                bot.getHp(), bot.getCurrentMaxHp(),
-                bot.getMp(), bot.getCurrentMaxMp());
-        queueBotSay(entry, dmg);
+    private void reportInventory(BotEntry entry, Character bot) {
+        int count = bot.getInventory(InventoryType.EQUIP).size();
+        queueBotSay(entry, "I have " + count + " item" + (count != 1 ? "s" : "") + " in my equip inventory");
+    }
 
-        // Line 3: active skills in the cache
-        StringBuilder skills = new StringBuilder("skills: ");
-        boolean anySkill = false;
-        if (entry.attackSkillId != 0) {
-            skills.append("atk ").append(entry.attackSkillId)
-                  .append(" lv").append(bot.getSkillLevel(entry.attackSkillId));
-            anySkill = true;
+    private void reportScrolls(BotEntry entry, Character bot) {
+        int count = 0;
+        for (Item item : bot.getInventory(InventoryType.USE).list()) {
+            int id = item.getItemId();
+            if (id >= 2040000 && id < 2050000) count += item.getQuantity();
         }
-        if (entry.aoeSkillId != 0) {
-            if (anySkill) skills.append(", ");
-            skills.append("aoe ").append(entry.aoeSkillId)
-                  .append(" lv").append(bot.getSkillLevel(entry.aoeSkillId));
-            anySkill = true;
-        }
-        for (int id : entry.buffSkillIds) {
-            if (anySkill) skills.append(", ");
-            skills.append("buff ").append(id).append(" lv").append(bot.getSkillLevel(id));
-            anySkill = true;
-        }
-        if (!anySkill) skills.append("none (basic attack only)");
-        queueBotSay(entry, skills.toString());
+        queueBotSay(entry, count > 0
+                ? "I have " + count + " scroll" + (count != 1 ? "s" : "") + " on me"
+                : "no scrolls on me");
     }
 
     /** Returns the next job-advancement prompt (updating jobPromptSent), or null if none pending. */
