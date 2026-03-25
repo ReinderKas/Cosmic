@@ -587,9 +587,12 @@ class BotMovementManager {
             if (vy > 0) { // descending — use prevY as search origin (mirrors tickAirborne)
                 Point floor = bot.getMap().getPointBelow(new Point(x, prevY));
                 if (floor != null && floor.y <= y && floor.y < from.y) {
-                    // Any upward Y gain is useful. Reject only if the arc overshoots target X.
-                    boolean overshoot = stepX != 0
-                            && ((stepX > 0 && x > targetX) || (stepX < 0 && x < targetX));
+                    // Overshoot: only reject if landing is near targetY AND bot crosses over targetX.
+                    // Backward jumps that gain Y (landing far from targetY) are always allowed.
+                    boolean nearTargetY  = Math.abs(floor.y - targetY) <= 100;
+                    boolean crossedX     = (from.x < targetX && x > targetX)
+                                        || (from.x > targetX && x < targetX);
+                    boolean overshoot    = stepX != 0 && nearTargetY && crossedX;
                     return !overshoot;
                 }
             }
