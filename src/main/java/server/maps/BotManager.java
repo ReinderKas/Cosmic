@@ -168,6 +168,10 @@ public class BotManager {
     private static final Pattern GREETING_PATTERN = Pattern.compile(
             "\\b(hi+|hey+|hello|sup|yo+|howdy|hiya|whats up|what's up|wassup)\\b",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern STATS_PATTERN = Pattern.compile(
+            "\\b(stats?|damage|dmg|build|inventory|inv|equips?|what (do you have|are (your|ur) stats?)|"
+            + "how (strong|good) are you|show (me )?(your|ur) (stats?|build|gear))\\b",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern AP_PURE_STR_PATTERN = Pattern.compile(
             "\\bpure str\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern AP_FIXED_DEX_PATTERN = Pattern.compile(
@@ -375,6 +379,11 @@ public class BotManager {
                 setApBuild(entry, new ApBuild(dexTarget),
                         "ok! keeping dex at " + dexTarget + ", rest into str");
             }
+        }
+
+        // Stats request
+        if (STATS_PATTERN.matcher(message).find()) {
+            TimerManager.getInstance().schedule(() -> buildStatsReport(entry, entry.bot), 1000);
         }
 
         // Job advancement — check if message contains a valid job selection
@@ -1466,6 +1475,47 @@ public class BotManager {
         if (jobPrompt != null) queueBotSay(entry, jobPrompt);
         String apPrompt = buildApPrompt(entry, bot);
         if (apPrompt != null) queueBotSay(entry, apPrompt);
+    }
+
+    private void buildStatsReport(BotEntry entry, Character bot) {
+        int watk   = bot.getTotalWatk();
+        int maxDmg = Math.max(1, bot.calculateMaxBaseDamage(watk));
+        int minDmg = Math.max(1, bot.calculateMinBaseDamage(watk));
+
+        // Line 1: level / job / raw stats
+        String stats = String.format("lv%d %s | str %d dex %d int %d luk %d",
+                bot.getLevel(), jobDisplayName(bot.getJob()),
+                bot.getStr(), bot.getDex(), bot.getInt(), bot.getLuk());
+        queueBotSay(entry, stats);
+
+        // Line 2: damage range + atk + hp
+        String dmg = String.format("dmg %d-%d | watk %d | hp %d/%d mp %d/%d",
+                minDmg, maxDmg, watk,
+                bot.getHp(), bot.getCurrentMaxHp(),
+                bot.getMp(), bot.getCurrentMaxMp());
+        queueBotSay(entry, dmg);
+
+        // Line 3: active skills in the cache
+        StringBuilder skills = new StringBuilder("skills: ");
+        boolean anySkill = false;
+        if (entry.attackSkillId != 0) {
+            skills.append("atk ").append(entry.attackSkillId)
+                  .append(" lv").append(bot.getSkillLevel(entry.attackSkillId));
+            anySkill = true;
+        }
+        if (entry.aoeSkillId != 0) {
+            if (anySkill) skills.append(", ");
+            skills.append("aoe ").append(entry.aoeSkillId)
+                  .append(" lv").append(bot.getSkillLevel(entry.aoeSkillId));
+            anySkill = true;
+        }
+        for (int id : entry.buffSkillIds) {
+            if (anySkill) skills.append(", ");
+            skills.append("buff ").append(id).append(" lv").append(bot.getSkillLevel(id));
+            anySkill = true;
+        }
+        if (!anySkill) skills.append("none (basic attack only)");
+        queueBotSay(entry, skills.toString());
     }
 
     /** Returns the next job-advancement prompt (updating jobPromptSent), or null if none pending. */
