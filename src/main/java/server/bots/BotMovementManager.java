@@ -15,6 +15,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 class BotMovementManager {
+    private static final int BASE_SIM_TICK_MS = 50;
+
     static class Config {
         // Tick
         public int   TICK_MS      = 50;   // ms between movement simulation ticks
@@ -78,6 +80,44 @@ class BotMovementManager {
             return 0;
         }
         return Math.max(0, durationMs - cfg.TICK_MS);
+    }
+
+    static int scaleDistanceForTick(int distanceAtBaseTick) {
+        if (distanceAtBaseTick <= 0) {
+            return 0;
+        }
+        return Math.max(1, Math.round(distanceAtBaseTick * (cfg.TICK_MS / (float) BASE_SIM_TICK_MS)));
+    }
+
+    static float scaleDistanceForTick(float distanceAtBaseTick) {
+        if (distanceAtBaseTick <= 0f) {
+            return 0f;
+        }
+        return distanceAtBaseTick * (cfg.TICK_MS / (float) BASE_SIM_TICK_MS);
+    }
+
+    static int walkStep() {
+        return scaleDistanceForTick(cfg.STEP);
+    }
+
+    static float gravityPerTick() {
+        return scaleDistanceForTick(cfg.GRAVITY);
+    }
+
+    static float maxFallPerTick() {
+        return scaleDistanceForTick(cfg.MAX_FALL);
+    }
+
+    static float jumpForcePerTick() {
+        return scaleDistanceForTick(cfg.JUMP_FORCE);
+    }
+
+    static float downJumpForcePerTick() {
+        return scaleDistanceForTick(cfg.JUMP_FORCE_DOWNWARD);
+    }
+
+    static float ropeJumpForcePerTick() {
+        return scaleDistanceForTick(cfg.JUMP_FORCE_ROPE);
     }
 
     static void resetEntryState(BotEntry entry) {
@@ -162,13 +202,14 @@ class BotMovementManager {
         Config cfg = BotMovementManager.cfg;
         entry.climbing        = false;
         entry.inAir           = true;
-        entry.velY            = -cfg.JUMP_FORCE_ROPE;
+        entry.velY            = -ropeJumpForcePerTick();
         entry.seekingRope     = false;
-        entry.airVelX         = dx > 0 ? cfg.STEP : dx < 0 ? -cfg.STEP : 0;
+        int walkStep = walkStep();
+        entry.airVelX         = dx > 0 ? walkStep : dx < 0 ? -walkStep : 0;
         entry.ropeGrabCooldownMs = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS + 200); // stay off rope long enough to clear it
         entry.jumpCooldownMs    = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS);
         bot.setStance(dx >= 0 ? 6 : 7);
-        int jumpVelY = (int) -cfg.JUMP_FORCE_ROPE;
+        int jumpVelY = (int) -ropeJumpForcePerTick();
         broadcastMovement(bot, dx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, jumpVelY);
     }
 
@@ -205,7 +246,7 @@ class BotMovementManager {
             }
         }
 
-        entry.velY = Math.min(entry.velY + cfg.GRAVITY, cfg.MAX_FALL);
+        entry.velY = Math.min(entry.velY + gravityPerTick(), maxFallPerTick());
         int newY   = botPos.y + (int) entry.velY;
 
         // Landing check — search strictly below current Y to avoid immediately re-landing
@@ -299,7 +340,7 @@ class BotMovementManager {
                     return;
                 }
                 // Walk one step toward the rope X
-                int stepToWp = Math.min(Math.abs(wdx), cfg.STEP) * (wdx >= 0 ? 1 : -1);
+                int stepToWp = Math.min(Math.abs(wdx), walkStep()) * (wdx >= 0 ? 1 : -1);
                 int walkX    = botPos.x + stepToWp;
                 Point snapped = bot.getMap().getPointBelow(new Point(walkX, botPos.y - cfg.MAX_SLOPE_UP));
                 if (snapped != null && snapped.y <= botPos.y + cfg.MAX_SNAP_DROP) {
@@ -320,7 +361,7 @@ class BotMovementManager {
             entry.downJumpPending = false;
             entry.downJumpGracePeriodMS = 300L;
             entry.inAir           = true;
-            entry.velY            = -cfg.JUMP_FORCE_DOWNWARD; // slight upward force before gravity pulls through floor
+            entry.velY            = -downJumpForcePerTick(); // slight upward force before gravity pulls through floor
             entry.airVelX         = 0;
             entry.jumpCooldownMs  = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS);
             bot.setPosition(new Point(botPos.x, botPos.y));
@@ -333,9 +374,9 @@ class BotMovementManager {
         if (dy > cfg.JUMP_Y_THRESH * 3 && dy > Math.abs(dx) && entry.jumpCooldownMs == 0) {
             // Prefer walking off a natural terrain drop — sample position-only, no foothold connectivity
             if (Math.abs(dx) > cfg.STOP_DIST) {
-                int sampleDir = dx > 0 ? cfg.STEP : -cfg.STEP;
+                int sampleDir = dx > 0 ? walkStep() : -walkStep();
                 int dropStepX = 0;
-                for (int i = 1; i * cfg.STEP <= cfg.LEDGE_SEEK_X; i++) {
+                for (int i = 1; i * walkStep() <= cfg.LEDGE_SEEK_X; i++) {
                     Point sp = bot.getMap().getPointBelow(
                             new Point(botPos.x + sampleDir * i, botPos.y - cfg.MAX_SLOPE_UP));
                     if (sp == null || sp.y > botPos.y + cfg.MAX_SNAP_DROP) {
@@ -385,7 +426,7 @@ class BotMovementManager {
                 // Prefer a direct platform jump over walking to a distant rope.
                 // If any arc (toward target, away, or vertical) lands on a higher platform, skip rope.
                 if (entry.jumpCooldownMs == 0) {
-                    int arcStep = dx >= 0 ? cfg.STEP : -cfg.STEP;
+                    int arcStep = dx >= 0 ? walkStep() : -walkStep();
                     boolean jumpWorks = arcCheckJump(bot, botPos, arcStep, targetPos.x, targetPos.y)
                             || arcCheckJump(bot, botPos, -arcStep, targetPos.x, targetPos.y)
                             || arcCheckJump(bot, botPos, 0, targetPos.x, targetPos.y);
@@ -393,14 +434,14 @@ class BotMovementManager {
                         // Fall through to proactive jump section which will handle it
                     } else {
                         // No jumpable platform — commit to rope approach
-                        int maxHTravel = cfg.STEP * (int) (2 * cfg.JUMP_FORCE / cfg.GRAVITY);
+                        int maxHTravel = walkStep() * (int) (2 * jumpForcePerTick() / gravityPerTick());
                         if (Math.abs(rdx) <= maxHTravel) {
                             entry.jumpCooldownMs = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS);
                             initiateRopeJump(entry, bot, rdx);
                             return;
                         }
                         // Rope too far for a direct jump — walk toward it
-                        int stepToRope = Math.min(Math.abs(rdx), cfg.STEP) * (rdx >= 0 ? 1 : -1);
+                        int stepToRope = Math.min(Math.abs(rdx), walkStep()) * (rdx >= 0 ? 1 : -1);
                         int newX = botPos.x + stepToRope;
                         Point snapped = bot.getMap().getPointBelow(new Point(newX, botPos.y - cfg.MAX_SLOPE_UP));
                         if (snapped != null && snapped.y <= botPos.y + cfg.MAX_SNAP_DROP) {
@@ -412,7 +453,7 @@ class BotMovementManager {
                     }
                 } else {
                     // On jump cooldown — walk toward rope X to align horizontally
-                    int stepToRope = Math.min(Math.abs(rdx), cfg.STEP) * (rdx >= 0 ? 1 : -1);
+                    int stepToRope = Math.min(Math.abs(rdx), walkStep()) * (rdx >= 0 ? 1 : -1);
                     int newX = botPos.x + stepToRope;
                     Point snapped = bot.getMap().getPointBelow(new Point(newX, botPos.y - cfg.MAX_SLOPE_UP));
                     if (snapped != null && snapped.y <= botPos.y + cfg.MAX_SNAP_DROP) {
@@ -431,7 +472,7 @@ class BotMovementManager {
             boolean blocked  = stepX == 0 || !isPathWalkable(bot, botPos, stepX);
             boolean farAbove = dy < -cfg.JUMP_Y_THRESH * 2; // owner is clearly on a higher platform
             if (blocked) {
-                int arcStep  = stepX != 0 ? stepX : (dx >= 0 ? cfg.STEP : -cfg.STEP);
+                int arcStep  = stepX != 0 ? stepX : (dx >= 0 ? walkStep() : -walkStep());
                 int maxJumpH = (int) calculateMaxJumpHeight();
                 // Track the winning jump direction so initiateJump uses the correct airVelX
                 int winDir = Integer.MIN_VALUE; // sentinel: no winner yet
@@ -534,7 +575,8 @@ class BotMovementManager {
 
     static float calculateMaxJumpHeight() {
         Config cfg = BotMovementManager.cfg;
-        return cfg.JUMP_FORCE * cfg.JUMP_FORCE / (2 * cfg.GRAVITY);
+        float jumpForce = jumpForcePerTick();
+        return jumpForce * jumpForce / (2 * gravityPerTick());
     }
 
     // -------------------------------------------------------------------------
@@ -558,7 +600,7 @@ class BotMovementManager {
             return 0; // inside dead zone — don't start until sufficiently far
         }
         entry.wasMovingX = true;
-        return Math.min(absDx, cfg.STEP) * (dx >= 0 ? 1 : -1);
+        return Math.min(absDx, walkStep()) * (dx >= 0 ? 1 : -1);
     }
 
     /**
@@ -576,17 +618,18 @@ class BotMovementManager {
 
     static void initiateJump(BotEntry entry, Character bot, int dx) {
         Config cfg = BotMovementManager.cfg;
-        entry.velY        = -cfg.JUMP_FORCE;
+        entry.velY        = -jumpForcePerTick();
         entry.inAir       = true;
         entry.seekingRope = false;
-        int jumpVelY = (int) -cfg.JUMP_FORCE;
+        int jumpVelY = (int) -jumpForcePerTick();
         if (dx == 0) {
             // Vertical jump — only when explicitly 0 (winDir=0 or owner directly above)
             entry.airVelX = 0;
             bot.setStance(6);
             broadcastMovement(bot, 0, jumpVelY);
         } else {
-            entry.airVelX = dx >= 0 ? cfg.STEP : -cfg.STEP;
+            int walkStep = walkStep();
+            entry.airVelX = dx >= 0 ? walkStep : -walkStep;
             bot.setStance(dx >= 0 ? 6 : 7);
             broadcastMovement(bot, dx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, jumpVelY);
         }
@@ -594,12 +637,13 @@ class BotMovementManager {
 
     static void initiateRopeJump(BotEntry entry, Character bot, int dx) {
         Config cfg = BotMovementManager.cfg;
-        entry.velY        = -cfg.JUMP_FORCE;
+        entry.velY        = -jumpForcePerTick();
         entry.inAir       = true;
         entry.seekingRope = true;
-        entry.airVelX     = dx > 0 ? cfg.STEP : dx < 0 ? -cfg.STEP : 0;
+        int walkStep = walkStep();
+        entry.airVelX     = dx > 0 ? walkStep : dx < 0 ? -walkStep : 0;
         bot.setStance(dx >= 0 ? 6 : 7);
-        int jumpVelY  = -(int) ((cfg.JUMP_FORCE - cfg.GRAVITY) * (1000f / cfg.TICK_MS));
+        int jumpVelY  = -(int) ((jumpForcePerTick() - gravityPerTick()) * (1000f / cfg.TICK_MS));
         int velXBcast = dx > 0 ? cfg.WALK_VEL : dx < 0 ? -cfg.WALK_VEL : 0;
         broadcastMovement(bot, velXBcast, jumpVelY);
     }
@@ -651,11 +695,11 @@ class BotMovementManager {
      */
     static boolean arcCheckJump(Character bot, Point from, int stepX, int targetX, int targetY) {
         Config cfg = BotMovementManager.cfg;
-        float vy = -cfg.JUMP_FORCE;
+        float vy = -jumpForcePerTick();
         int x = from.x, y = from.y;
         for (int t = 0; t < 40; t++) {
             int prevY = y;
-            vy = Math.min(vy + cfg.GRAVITY, cfg.MAX_FALL);
+            vy = Math.min(vy + gravityPerTick(), maxFallPerTick());
             x += stepX;
             y += (int) vy;
             if (vy > 0) { // descending — use prevY as search origin (mirrors tickAirborne)
