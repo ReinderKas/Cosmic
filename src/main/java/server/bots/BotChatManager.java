@@ -209,20 +209,31 @@ class BotChatManager {
             }, 1000);
         }
 
-        // AP build selection (pure str / fixed dex / change build)
+        // AP build selection — "change build" always triggers a re-prompt;
+        // "pure str" / "X dex" only apply when bot is actively waiting for the answer (apPromptSent=true)
         if (AP_CHANGE_BUILD_PATTERN.matcher(message).find()) {
             entry.apBuild      = null;
             entry.apPromptSent = false;
             String prompt = BotBuildManager.buildApPrompt(entry, entry.bot);
             if (prompt != null) BotManager.getInstance().botSay(entry.bot, prompt);
-        } else if (AP_PURE_STR_PATTERN.matcher(message).find()) {
-            BotBuildManager.setApBuild(entry, new BotBuildManager.ApBuild(0), "pure str it is! dumping everything into str");
-        } else {
-            Matcher m = AP_FIXED_DEX_PATTERN.matcher(message);
-            if (m.find()) {
-                int dexTarget = Integer.parseInt(m.group(1));
-                BotBuildManager.setApBuild(entry, new BotBuildManager.ApBuild(dexTarget),
-                        "ok! keeping dex at " + dexTarget + ", rest into str");
+        } else if (entry.apPromptSent) {
+            if (AP_PURE_STR_PATTERN.matcher(message).find()) {
+                if (entry.apBuild != null && entry.apBuild.dexTarget == 0) {
+                    BotManager.getInstance().botSay(entry.bot, "already doing pure str!");
+                } else {
+                    BotBuildManager.setApBuild(entry, new BotBuildManager.ApBuild(0), "pure str it is! dumping everything into str");
+                }
+            } else {
+                Matcher m = AP_FIXED_DEX_PATTERN.matcher(message);
+                if (m.find()) {
+                    int dexTarget = Integer.parseInt(m.group(1));
+                    if (entry.apBuild != null && entry.apBuild.dexTarget == dexTarget) {
+                        BotManager.getInstance().botSay(entry.bot, "already doing " + dexTarget + " dex build!");
+                    } else {
+                        BotBuildManager.setApBuild(entry, new BotBuildManager.ApBuild(dexTarget),
+                                "ok! keeping dex at " + dexTarget + ", rest into str");
+                    }
+                }
             }
         }
 
