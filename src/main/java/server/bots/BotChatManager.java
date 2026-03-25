@@ -15,10 +15,10 @@ import java.util.regex.Pattern;
 class BotChatManager {
 
     // --- helper prefix used in several info patterns ---
-    // matches optional preamble: "what's / what is / tell me / show me / check / how's"
-    // followed by "your/ur" — glued before each info keyword
+    // optional preamble: "what's/tell me/check … your/ur" or nothing at all
+    // \\b at end ensures word boundary when no prefix is present
     private static final String INFO_PFX =
-            "(?:(?:what.?s?|what\\s+is|tell\\s+me|show\\s+me|check|how.?s?)\\s+)?(?:your|ur)\\s+";
+            "(?:(?:(?:what.?s?|what\\s+is|tell\\s+me|show\\s+me|check|how.?s?)\\s+)?(?:your|ur)\\s+)?\\b";
 
     private static final Pattern FOLLOW_PATTERN = Pattern.compile(
             "\\b(follow(\\s+(me|here|pls|please|now))?|come(\\s+(here|to\\s+me|with\\s+me|closer|on|back))?|"
@@ -45,7 +45,9 @@ class BotChatManager {
             "\\b(go\\s+|start\\s+|begin\\s+|let.?s\\s+)?(farm(ing)?|grind(ing)?|hunt(ing)?|train(ing)?)\\b"
             + "|\\b(kill|fight)\\s+(mobs?|monsters?|stuff)\\b"
             + "|\\btime\\s+to\\s+(farm|grind|hunt)\\b"
-            + "|\\bgo\\s+get\\s+(exp|xp)\\b",
+            + "|\\bgo\\s+get\\s+(exp|xp)\\b"
+            + "|\\b(auto|attack)\\s*(on|mode)?\\b"
+            + "|\\bstart\\s+(killing|attacking)\\b",
             Pattern.CASE_INSENSITIVE);
 
     private static final Pattern JOB_SELECT_PATTERN = Pattern.compile(
@@ -92,14 +94,15 @@ class BotChatManager {
             "\\b(any|do\\s+(you|u)\\s+have(\\s+any)?|got(\\s+any)?|"
             + "carrying(\\s+any)?|you\\s+got(\\s+any)?)\\s+scrolls?\\b"
             + "|\\bhow\\s+many\\s+scrolls?\\b"
-            + "|\\bscrolls?\\s+on\\s+(you|u|ya)\\b",
+            + "|\\bscrolls?\\s+on\\s+(you|u|ya)\\b"
+            + "|\\b(your|ur)\\s+scrolls?\\b"
+            + "|^\\s*scrolls?\\s*\\??\\s*$",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern POTIONS_PATTERN = Pattern.compile(
             INFO_PFX + "(pots?|potions?|hp\\s+pots?|mp\\s+pots?|supplies)\\b"
             + "|\\b(any|do\\s+(you|u)\\s+have(\\s+any)?|got(\\s+any)?|how\\s+many)"
             +   "\\s+(pots?|potions?|hp\\s+pots?|mp\\s+pots?)\\b"
-            + "|\\b(pots?|potions?)\\s+left\\b"
-            + "|\\bur\\s+(pots?|potions?|supplies)\\b",
+            + "|\\b(pots?|potions?)\\s+left\\b",
             Pattern.CASE_INSENSITIVE);
 
     private static final Pattern AP_PURE_STR_PATTERN = Pattern.compile(
