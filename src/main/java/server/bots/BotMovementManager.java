@@ -15,8 +15,6 @@ import java.util.HashMap;
 import java.util.Map;
 
 class BotMovementManager {
-    private static final int LEGACY_TICK_MS = 100;
-
     static class Config {
         // Tick
         public int   TICK_MS      = 50;   // ms between movement simulation ticks
@@ -35,8 +33,8 @@ class BotMovementManager {
         public float MAX_FALL     = 50f;
 
         // Jump control
-        public int   JUMP_Y_THRESH  = 30;
-        public int   JUMP_COOLDOWN  = 10;
+        public int   JUMP_Y_THRESH    = 30;
+        public int   JUMP_COOLDOWN_MS = 1000;
         public int   ARC_LEAD_STEPS = 3;
         public int   MAX_SNAP_DROP  = 16;
         public int   MAX_SLOPE_UP   = 26;
@@ -55,25 +53,31 @@ class BotMovementManager {
         public int   LEDGE_SEEK_X = 150;
 
         // Stuck recovery
-        public int   STUCK_CHECK_INTERVAL = 30;
-        public int   STUCK_CHASE_TICKS    = 60;
+        public int   STUCK_CHECK_INTERVAL_MS = 3000;
+        public int   STUCK_CHASE_MS         = 6000;
         public int   STUCK_MIN_MOVE       = 20;
         public int   STUCK_WALKBACK_LIMIT = 200;
 
         // Waypoint
-        public int   WAYPOINT_SEEK_X  = 1000;
-        public int   WAYPOINT_TIMEOUT = 80;
-        public int   WAYPOINT_MIN_DY  = 400;
+        public int   WAYPOINT_SEEK_X    = 1000;
+        public int   WAYPOINT_TIMEOUT_MS = 8000;
+        public int   WAYPOINT_MIN_DY    = 400;
     }
 
     static Config cfg = new Config();
 
-    static int scaleLegacyTicks(int legacyTickCount) {
-        if (legacyTickCount <= 0) {
+    static int tickDown(int remainingMs) {
+        if (remainingMs <= 0) {
             return 0;
         }
+        return Math.max(0, remainingMs - cfg.TICK_MS);
+    }
 
-        return Math.max(1, (legacyTickCount * LEGACY_TICK_MS + cfg.TICK_MS - 1) / cfg.TICK_MS);
+    static int delayAfterCurrentTick(int durationMs) {
+        if (durationMs <= 0) {
+            return 0;
+        }
+        return Math.max(0, durationMs - cfg.TICK_MS);
     }
 
     static void resetEntryState(BotEntry entry) {
@@ -83,14 +87,14 @@ class BotMovementManager {
         entry.airVelX           = 0;
         entry.wasMovingX        = false;
         entry.seekingRope       = false;
-        entry.ropeGrabCooldown  = 0;
+        entry.ropeGrabCooldownMs = 0;
         entry.downJumpPending   = false;
-        entry.rawChaseTicks     = 0;
-        entry.stuckCheckTimer   = 0;
+        entry.rawChaseMs        = 0;
+        entry.stuckCheckElapsedMs = 0;
         entry.lastStuckCheckPos = null;
         entry.waypointRope      = null;
         entry.grindTarget       = null;
-        entry.attackCooldown    = 0;
+        entry.attackCooldownMs  = 0;
     }
 
     // -------------------------------------------------------------------------
@@ -104,10 +108,10 @@ class BotMovementManager {
         int dy      = targetPos.y - botPos.y;
         int dxOwner = targetPos.x - entry.climbRope.x();
 
-        if (entry.jumpCooldown > 0) entry.jumpCooldown--;
+        entry.jumpCooldownMs = tickDown(entry.jumpCooldownMs);
 
         // Jump off rope if owner is too far horizontally and below
-        if (Math.abs(dxOwner) > cfg.FOLLOW_DIST && entry.jumpCooldown == 0 && entry.climbRope.bottomY() < targetPos.y) {
+        if (Math.abs(dxOwner) > cfg.FOLLOW_DIST && entry.jumpCooldownMs == 0 && entry.climbRope.bottomY() < targetPos.y) {
             jumpOffRope(entry, bot, dxOwner);
             return;
         }
@@ -161,8 +165,8 @@ class BotMovementManager {
         entry.velY            = -cfg.JUMP_FORCE_ROPE;
         entry.seekingRope     = false;
         entry.airVelX         = dx > 0 ? cfg.STEP : dx < 0 ? -cfg.STEP : 0;
-        entry.ropeGrabCooldown = scaleLegacyTicks(cfg.JUMP_COOLDOWN + 2); // stay off rope long enough to clear it
-        entry.jumpCooldown    = scaleLegacyTicks(cfg.JUMP_COOLDOWN);
+        entry.ropeGrabCooldownMs = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS + 200); // stay off rope long enough to clear it
+        entry.jumpCooldownMs    = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS);
         bot.setStance(dx >= 0 ? 6 : 7);
         int jumpVelY = (int) -cfg.JUMP_FORCE_ROPE;
         broadcastMovement(bot, dx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, jumpVelY);
@@ -183,8 +187,8 @@ class BotMovementManager {
         int newX      = botPos.x + entry.airVelX;
 
         // Mid-air rope catch — only when we intentionally jumped for a rope
-        if (entry.ropeGrabCooldown > 0) entry.ropeGrabCooldown--;
-        if (entry.seekingRope && entry.ropeGrabCooldown == 0) {
+        entry.ropeGrabCooldownMs = tickDown(entry.ropeGrabCooldownMs);
+        if (entry.seekingRope && entry.ropeGrabCooldownMs == 0) {
             for (Rope rope : bot.getMap().getRopes()) {
                 if (Math.abs(rope.x() - botPos.x) <= cfg.ROPE_GRAB_X
                         && botPos.y >= rope.topY() && botPos.y <= rope.bottomY()) {
@@ -212,7 +216,7 @@ class BotMovementManager {
             if (floorPt != null && floorPt.y <= newY) {
                 entry.inAir       = false;
                 entry.velY        = 0f;
-                entry.jumpCooldown = 0;
+                entry.jumpCooldownMs = 0;
                 entry.seekingRope = false;
                 entry.airVelX     = 0;
                 bot.setPosition(new Point(newX, floorPt.y));
@@ -251,31 +255,33 @@ class BotMovementManager {
             return;
         }
 
-        if (entry.jumpCooldown > 0) entry.jumpCooldown--;
+        entry.jumpCooldownMs = tickDown(entry.jumpCooldownMs);
 
         // Stuck detection — check every STUCK_CHECK_INTERVAL ticks whether we've moved enough
         if (entry.lastStuckCheckPos == null) entry.lastStuckCheckPos = botPos;
-        entry.stuckCheckTimer++;
-        if (entry.stuckCheckTimer >= scaleLegacyTicks(cfg.STUCK_CHECK_INTERVAL)) {
+        entry.stuckCheckElapsedMs += cfg.TICK_MS;
+        if (entry.stuckCheckElapsedMs >= cfg.STUCK_CHECK_INTERVAL_MS) {
             int moved = Math.abs(botPos.x - entry.lastStuckCheckPos.x)
                     + Math.abs(botPos.y - entry.lastStuckCheckPos.y);
             // Only flag stuck if we haven't moved AND owner is still far away
             if (moved < cfg.STUCK_MIN_MOVE && Math.abs(dx) > cfg.FOLLOW_DIST) {
-                entry.rawChaseTicks = scaleLegacyTicks(cfg.STUCK_CHASE_TICKS);
+                entry.rawChaseMs = cfg.STUCK_CHASE_MS;
             }
-            entry.stuckCheckTimer   = 0;
+            entry.stuckCheckElapsedMs = 0;
             entry.lastStuckCheckPos = botPos;
         }
-        if (entry.rawChaseTicks > 0) entry.rawChaseTicks--;
+        entry.rawChaseMs = tickDown(entry.rawChaseMs);
 
         // Waypoint navigation — walk to a rope that was outside normal detection range
         if (entry.waypointRope != null) {
             if (dy >= -cfg.JUMP_Y_THRESH * 2) {
                 entry.waypointRope = null; // owner no longer far above — situation resolved
-            } else if (--entry.waypointTimer <= 0) {
-                entry.waypointRope = null; // timed out
             } else {
-                Rope wp  = entry.waypointRope;
+                entry.waypointTimerMs = tickDown(entry.waypointTimerMs);
+                if (entry.waypointTimerMs == 0) {
+                    entry.waypointRope = null; // timed out
+                } else {
+                    Rope wp  = entry.waypointRope;
                 int  wdx = wp.x() - botPos.x;
                 if (Math.abs(wdx) < cfg.ROPE_GRAB_X) {
                     // Reached the rope — grab directly or jump to it
@@ -287,7 +293,7 @@ class BotMovementManager {
                         bot.setStance(entry.climbRope.isLadder() ? 17 : 16);
                         broadcastMovement(bot, 0, 0);
                     } else {
-                        entry.jumpCooldown = scaleLegacyTicks(cfg.JUMP_COOLDOWN);
+                        entry.jumpCooldownMs = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS);
                         initiateRopeJump(entry, bot, wdx);
                     }
                     return;
@@ -305,6 +311,7 @@ class BotMovementManager {
                 // Path blocked — redirect targetPos to waypoint rope so the proactive jump section handles it
                 targetPos = new Point(wp.x(), wp.topY());
                 // fall through to proactive jump below
+                }
             }
         }
 
@@ -315,7 +322,7 @@ class BotMovementManager {
             entry.inAir           = true;
             entry.velY            = -cfg.JUMP_FORCE_DOWNWARD; // slight upward force before gravity pulls through floor
             entry.airVelX         = 0;
-            entry.jumpCooldown    = scaleLegacyTicks(cfg.JUMP_COOLDOWN);
+            entry.jumpCooldownMs  = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS);
             bot.setPosition(new Point(botPos.x, botPos.y));
             bot.setStance(dx >= 0 ? 6 : 7);
             broadcastMovement(bot, 0, (int) entry.velY);
@@ -323,7 +330,7 @@ class BotMovementManager {
         }
 
         // Down-jump: owner is clearly below AND primarily below (not just diagonal separation)
-        if (dy > cfg.JUMP_Y_THRESH * 3 && dy > Math.abs(dx) && entry.jumpCooldown == 0) {
+        if (dy > cfg.JUMP_Y_THRESH * 3 && dy > Math.abs(dx) && entry.jumpCooldownMs == 0) {
             // Prefer walking off a natural terrain drop — sample position-only, no foothold connectivity
             if (Math.abs(dx) > cfg.STOP_DIST) {
                 int sampleDir = dx > 0 ? cfg.STEP : -cfg.STEP;
@@ -377,7 +384,7 @@ class BotMovementManager {
                 }
                 // Prefer a direct platform jump over walking to a distant rope.
                 // If any arc (toward target, away, or vertical) lands on a higher platform, skip rope.
-                if (entry.jumpCooldown == 0) {
+                if (entry.jumpCooldownMs == 0) {
                     int arcStep = dx >= 0 ? cfg.STEP : -cfg.STEP;
                     boolean jumpWorks = arcCheckJump(bot, botPos, arcStep, targetPos.x, targetPos.y)
                             || arcCheckJump(bot, botPos, -arcStep, targetPos.x, targetPos.y)
@@ -388,7 +395,7 @@ class BotMovementManager {
                         // No jumpable platform — commit to rope approach
                         int maxHTravel = cfg.STEP * (int) (2 * cfg.JUMP_FORCE / cfg.GRAVITY);
                         if (Math.abs(rdx) <= maxHTravel) {
-                            entry.jumpCooldown = scaleLegacyTicks(cfg.JUMP_COOLDOWN);
+                            entry.jumpCooldownMs = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS);
                             initiateRopeJump(entry, bot, rdx);
                             return;
                         }
@@ -419,7 +426,7 @@ class BotMovementManager {
         }
 
         // Proactive jump — path blocked, same X, or owner is significantly above (y-chase priority)
-        if (dy < -cfg.JUMP_Y_THRESH && entry.jumpCooldown == 0) {
+        if (dy < -cfg.JUMP_Y_THRESH && entry.jumpCooldownMs == 0) {
             int stepX    = calcStepX(entry, botPos.x, targetPos.x);
             boolean blocked  = stepX == 0 || !isPathWalkable(bot, botPos, stepX);
             boolean farAbove = dy < -cfg.JUMP_Y_THRESH * 2; // owner is clearly on a higher platform
@@ -452,32 +459,32 @@ class BotMovementManager {
                     }
                 }
                 if (winDir != Integer.MIN_VALUE) {
-                    entry.jumpCooldown = scaleLegacyTicks(cfg.JUMP_COOLDOWN);
+                    entry.jumpCooldownMs = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS);
                     initiateJump(entry, bot, winDir);
                     return;
                 }
                 // Stuck recovery: try jumping backward if there's a platform behind us that's higher
-                if (entry.rawChaseTicks > 0) {
+                if (entry.rawChaseMs > 0) {
                     int backStep = -arcStep;
                     if (Math.abs(dx) <= cfg.STUCK_WALKBACK_LIMIT
                             && arcCheckJump(bot, botPos, backStep, targetPos.x, targetPos.y)) {
-                        entry.jumpCooldown = scaleLegacyTicks(cfg.JUMP_COOLDOWN);
+                        entry.jumpCooldownMs = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS);
                         initiateJump(entry, bot, backStep);
                         return;
                     }
                 }
                 // No reachable platform — try setting a waypoint to a rope outside normal range.
                 // Only trigger when target is significantly above (WAYPOINT_MIN_DY), not just farAbove.
-                if (farAbove && -dy >= cfg.WAYPOINT_MIN_DY && entry.waypointRope == null && entry.jumpCooldown == 0) {
+                if (farAbove && -dy >= cfg.WAYPOINT_MIN_DY && entry.waypointRope == null && entry.jumpCooldownMs == 0) {
                     Rope wp = findWaypointRope(bot, botPos);
                     if (wp != null) {
                         entry.waypointRope  = wp;
-                        entry.waypointTimer = scaleLegacyTicks(cfg.WAYPOINT_TIMEOUT);
+                        entry.waypointTimerMs = delayAfterCurrentTick(cfg.WAYPOINT_TIMEOUT_MS);
                     }
                 }
-                entry.jumpCooldown = entry.rawChaseTicks > 0
-                        ? scaleLegacyTicks(cfg.JUMP_COOLDOWN)
-                        : scaleLegacyTicks(cfg.JUMP_COOLDOWN * 3);
+                entry.jumpCooldownMs = entry.rawChaseMs > 0
+                        ? delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS)
+                        : delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS * 3);
             }
         }
 
@@ -502,7 +509,7 @@ class BotMovementManager {
                 entry.inAir  = true;
                 entry.airVelX = stepX;
                 entry.velY   = 0f;
-            } else if (entry.jumpCooldown == 0 && stepX != 0
+            } else if (entry.jumpCooldownMs == 0 && stepX != 0
                     && arcCheckJump(bot, botPos, stepX, targetPos.x, targetPos.y)) {
                 // Arc would reach a useful platform — jump instead of falling
                 initiateJump(entry, bot, dx);

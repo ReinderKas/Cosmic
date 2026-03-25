@@ -27,7 +27,7 @@ class BotDropManager {
             startTradeTransfer(category, entry, bot);
         } else {
             dropCategory(category, entry, bot);
-            entry.lootInhibitTicks = BotMovementManager.scaleLegacyTicks(200); // ~20s: prevents bot re-looting its own floor drops
+            entry.lootInhibitMs = BotMovementManager.delayAfterCurrentTick(20_000); // ~20s: prevents bot re-looting its own floor drops
         }
     }
 
@@ -83,7 +83,7 @@ class BotDropManager {
         }
         entry.pendingTradeItems    = items.size() > 9 ? new ArrayList<>(items.subList(0, 9)) : items;
         entry.pendingTradeIdx      = 0;
-        entry.pendingTradeTick     = 0;
+        entry.pendingTradeTimerMs  = 0;
         entry.pendingTradeAllAdded = false;
         entry.pendingTradeBotDone  = false;
         Trade.startTrade(bot);
@@ -91,7 +91,7 @@ class BotDropManager {
         BotManager.getInstance().botSay(bot, "trade request sent!");
     }
 
-    /** Called every bot tick (100 ms) while a trade sequence is in progress. */
+    /** Called every bot simulation tick while a trade sequence is in progress. */
     static void tickTrade(BotEntry entry, Character bot) {
         if (entry.pendingTradeCategory == null) return;
 
@@ -99,7 +99,10 @@ class BotDropManager {
 
         // ── PAUSE between batches (items == null) ──────────────────────────
         if (entry.pendingTradeItems == null) {
-            if (entry.pendingTradeTick > 0) { entry.pendingTradeTick--; return; }
+            if (entry.pendingTradeTimerMs > 0) {
+                entry.pendingTradeTimerMs = BotMovementManager.tickDown(entry.pendingTradeTimerMs);
+                return;
+            }
             // Start next batch
             List<Item> next = collectItems(entry.pendingTradeCategory, bot);
             if (next.isEmpty()) {
@@ -118,7 +121,7 @@ class BotDropManager {
                 entry.pendingTradeItems    = null;
                 entry.pendingTradeAllAdded = false;
                 entry.pendingTradeBotDone  = false;
-                entry.pendingTradeTick     = 10; // 1 s pause then try next batch
+                entry.pendingTradeTimerMs  = BotMovementManager.delayAfterCurrentTick(1_000); // 1 s pause then try next batch
             } else if (entry.pendingTradeAllAdded) {
                 // Owner cancelled after items were added (items returned to bot)
                 BotManager.getInstance().botSay(bot, "trade cancelled");
@@ -133,8 +136,8 @@ class BotDropManager {
 
         // ── WAITING FOR ACCEPT ────────────────────────────────────────────
         if (!trade.isFullTrade()) {
-            entry.pendingTradeTick++;
-            if (entry.pendingTradeTick > 300) {
+            entry.pendingTradeTimerMs += BotMovementManager.cfg.TICK_MS;
+            if (entry.pendingTradeTimerMs > 30_000) {
                 BotManager.getInstance().botSay(bot, "trade request timed out");
                 Trade.cancelTrade(bot, Trade.TradeResult.NO_RESPONSE);
                 resetTradeState(entry);
@@ -144,7 +147,10 @@ class BotDropManager {
 
         // ── ADDING ITEMS ──────────────────────────────────────────────────
         if (!entry.pendingTradeAllAdded) {
-            if (entry.pendingTradeTick > 0) { entry.pendingTradeTick--; return; }
+            if (entry.pendingTradeTimerMs > 0) {
+                entry.pendingTradeTimerMs = BotMovementManager.tickDown(entry.pendingTradeTimerMs);
+                return;
+            }
 
             List<Item> items = entry.pendingTradeItems;
             int idx = entry.pendingTradeIdx;
@@ -152,7 +158,7 @@ class BotDropManager {
             if (idx >= items.size()) {
                 // All items added — say so in trade chat and wait for owner OK
                 entry.pendingTradeAllAdded = true;
-                entry.pendingTradeTick     = 0;
+                entry.pendingTradeTimerMs  = 0;
                 String msg = ALL_DONE_MSGS[ThreadLocalRandom.current().nextInt(ALL_DONE_MSGS.length)];
                 trade.chat(msg);
                 return;
@@ -161,7 +167,7 @@ class BotDropManager {
             // Add next item
             Item item = items.get(idx);
             entry.pendingTradeIdx++;
-            entry.pendingTradeTick = 5; // 500 ms before next
+            entry.pendingTradeTimerMs = BotMovementManager.delayAfterCurrentTick(500); // 500 ms before next
 
             InventoryType invType = item.getInventoryType();
             Inventory inv = bot.getInventory(invType);
@@ -185,12 +191,12 @@ class BotDropManager {
 
         // ── WAITING FOR OWNER TO CLICK OK ─────────────────────────────────
         if (!entry.pendingTradeBotDone) {
-            entry.pendingTradeTick++;
+            entry.pendingTradeTimerMs += BotMovementManager.cfg.TICK_MS;
             if (trade.isPartnerConfirmed()) {
                 Trade.completeTrade(bot);
                 entry.pendingTradeBotDone = true;
-                entry.pendingTradeTick    = 0;
-            } else if (entry.pendingTradeTick > 600) { // 60 s timeout
+                entry.pendingTradeTimerMs = 0;
+            } else if (entry.pendingTradeTimerMs > 60_000) { // 60 s timeout
                 BotManager.getInstance().botSay(bot, "trade timed out, cancelling");
                 Trade.cancelTrade(bot, Trade.TradeResult.NO_RESPONSE);
                 resetTradeState(entry);
@@ -209,7 +215,7 @@ class BotDropManager {
         entry.pendingTradeCategory = null;
         entry.pendingTradeItems    = null;
         entry.pendingTradeIdx      = 0;
-        entry.pendingTradeTick     = 0;
+        entry.pendingTradeTimerMs  = 0;
         entry.pendingTradeAllAdded = false;
         entry.pendingTradeBotDone  = false;
     }

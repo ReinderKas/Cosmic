@@ -41,10 +41,10 @@ class BotCombatManager {
         final int direction;
         final int rangedDirection;
         final int speed;
-        final int cooldownTicks;
+        final int cooldownMs;
 
         AttackPlan(int skillId, int skillLevel, int numDamage, Rectangle hitBox, List<Monster> targets,
-                   AttackRoute route, int display, int direction, int rangedDirection, int speed, int cooldownTicks) {
+                   AttackRoute route, int display, int direction, int rangedDirection, int speed, int cooldownMs) {
             this.skillId = skillId;
             this.skillLevel = skillLevel;
             this.numDamage = numDamage;
@@ -55,7 +55,7 @@ class BotCombatManager {
             this.direction = direction;
             this.rangedDirection = rangedDirection;
             this.speed = speed;
-            this.cooldownTicks = cooldownTicks;
+            this.cooldownMs = cooldownMs;
         }
 
         boolean hasHitBox() {
@@ -84,7 +84,7 @@ class BotCombatManager {
         // Mob damage
         public int   MOB_TOUCH_HALF_W = 40;
         public int   MOB_TOUCH_HALF_H = 30;
-        public int   MOB_HIT_COOLDOWN = 15;
+        public int   MOB_HIT_COOLDOWN_MS = 1500;
         public long  BOT_DEAD_MS      = 10_000L;
     }
 
@@ -96,7 +96,10 @@ class BotCombatManager {
 
     /** Check every alive monster on the map; if bot is inside its bounding box, apply a hit. */
     static void tickMobDamage(BotEntry entry, Character bot) {
-        if (entry.mobHitCooldown > 0) { entry.mobHitCooldown--; return; }
+        if (entry.mobHitCooldownMs > 0) {
+            entry.mobHitCooldownMs = BotMovementManager.tickDown(entry.mobHitCooldownMs);
+            return;
+        }
         if (bot.getHp() <= 0) return;
 
         Point botPos = bot.getPosition();
@@ -143,7 +146,7 @@ class BotCombatManager {
         int velYBcast = (int) (-entry.velY * (1000f / mc.TICK_MS));
         BotMovementManager.broadcastMovement(bot, velXBcast, velYBcast);
 
-        entry.mobHitCooldown = BotMovementManager.scaleLegacyTicks(cc.MOB_HIT_COOLDOWN);
+        entry.mobHitCooldownMs = BotMovementManager.delayAfterCurrentTick(cc.MOB_HIT_COOLDOWN_MS);
 
         if (bot.getHp() <= 0) {
             bot.setStance(mc.DEAD_STANCE);
@@ -258,7 +261,7 @@ class BotCombatManager {
         BasicAttackData basicAttackData = buildBasicAttackData(bot, target);
         return new AttackPlan(0, 0, 1, basicAttackData.hitBox, List.of(target), determineBasicAttackRoute(bot),
                 basicAttackData.display, basicAttackData.direction, basicAttackData.rangedDirection,
-                basicAttackData.speed, basicAttackData.cooldownTicks);
+                basicAttackData.speed, basicAttackData.cooldownMs);
     }
 
     static boolean isTargetInAttackRange(AttackPlan attackPlan, Character bot, Monster target) {
@@ -279,7 +282,10 @@ class BotCombatManager {
     }
 
     static void attackMonster(BotEntry entry, Character bot, AttackPlan attackPlan) {
-        if (entry.attackCooldown > 0) { entry.attackCooldown--; return; }
+        if (entry.attackCooldownMs > 0) {
+            entry.attackCooldownMs = BotMovementManager.tickDown(entry.attackCooldownMs);
+            return;
+        }
 
         int watk = bot.getTotalWatk();
         int maxDmg = Math.max(1, bot.calculateMaxBaseDamage(watk));
@@ -307,7 +313,7 @@ class BotCombatManager {
         }
 
         applyAttackRoute(attackPlan.route, attack, bot);
-        entry.attackCooldown = attackPlan.cooldownTicks;
+        entry.attackCooldownMs = attackPlan.cooldownMs;
     }
 
     private static AttackPlan planAoeAttack(BotEntry entry, Character bot, Monster primaryTarget) {
@@ -336,7 +342,7 @@ class BotCombatManager {
         int direction = primaryTarget.getPosition().x < bot.getPosition().x ? 17 : 6;
         return new AttackPlan(entry.aoeSkillId, skillLevel, attackCount, hitBox, targets,
                 determineSkillRoute(bot, entry.aoeSkillId), 0, direction, direction,
-                resolveWeaponAttackSpeed(bot), toCooldownTicks(resolveSkillAttackDelayMillis(skill)));
+                resolveWeaponAttackSpeed(bot), toCooldownMs(resolveSkillAttackDelayMillis(skill)));
     }
 
     private static AttackPlan planSingleTargetSkill(BotEntry entry, Character bot, Monster primaryTarget) {
@@ -360,7 +366,7 @@ class BotCombatManager {
         int direction = primaryTarget.getPosition().x < bot.getPosition().x ? 17 : 6;
         return new AttackPlan(entry.attackSkillId, skillLevel, attackCount, hitBox, List.of(primaryTarget),
                 determineSkillRoute(bot, entry.attackSkillId), 0, direction, direction,
-                resolveWeaponAttackSpeed(bot), toCooldownTicks(resolveSkillAttackDelayMillis(skill)));
+                resolveWeaponAttackSpeed(bot), toCooldownMs(resolveSkillAttackDelayMillis(skill)));
     }
 
     private static Rectangle calculateSkillHitBox(StatEffect effect, Character bot, Monster primaryTarget) {
@@ -491,7 +497,7 @@ class BotCombatManager {
         };
     }
 
-    private record BasicAttackData(Rectangle hitBox, int display, int direction, int rangedDirection, int speed, int cooldownTicks) {
+    private record BasicAttackData(Rectangle hitBox, int display, int direction, int rangedDirection, int speed, int cooldownMs) {
         private static BasicAttackData fromProfile(BotAttackDataProvider.NormalAttackProfile profile, Rectangle hitBox, boolean facingLeft) {
             int baseDirection = profile.getAttack();
             if (baseDirection <= 0) {
@@ -505,7 +511,7 @@ class BotCombatManager {
             int effectiveAttackSpeed = resolveEffectiveAttackSpeed(profile.getAttackSpeed(), null);
             return new BasicAttackData(hitBox, display, direction, direction,
                     effectiveAttackSpeed,
-                    toCooldownTicks(adjustAttackDelayMillis(profile.getAttackDelayMillis(), profile.getAttackSpeed(), effectiveAttackSpeed)));
+                    toCooldownMs(adjustAttackDelayMillis(profile.getAttackDelayMillis(), profile.getAttackSpeed(), effectiveAttackSpeed)));
         }
 
         private static BasicAttackData fallback(boolean facingLeft) {
@@ -540,13 +546,8 @@ class BotCombatManager {
         return Math.max(0, skill.getAnimationTime());
     }
 
-    private static int toCooldownTicks(int attackDelayMillis) {
-        if (attackDelayMillis <= 0) {
-            return 0;
-        }
-
-        int tickMs = BotMovementManager.cfg.TICK_MS;
-        return Math.max(0, (attackDelayMillis + tickMs - 1) / tickMs - 1);
+    private static int toCooldownMs(int attackDelayMillis) {
+        return BotMovementManager.delayAfterCurrentTick(Math.max(0, attackDelayMillis));
     }
 
     private static int resolveWeaponAttackSpeed(Character bot) {

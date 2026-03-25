@@ -45,13 +45,13 @@ public class BotManager {
         public int   AI_TICK_MS       = 100;   // ms between heavier bot decision passes
 
         // Passive loot
-        public int   LOOT_RADIUS      = 100;   // px; pickup items within this box radius
-        public int   INV_FULL_WARN_CD = 100;   // legacy 100ms ticks between "inventory full" complaints
+        public int   LOOT_RADIUS         = 100;   // px; pickup items within this box radius
+        public int   INV_FULL_WARN_CD_MS = 10_000;
 
         // Potion management
-        public int   POT_LOW_WARN     = 100;   // warn on grind start below this count
-        public int   POT_STOP         = 10;    // stop grinding below this HP pot count
-        public int   POT_CHECK_TICKS  = 20;    // legacy 100ms ticks between potion recount/rebind
+        public int   POT_LOW_WARN          = 100;   // warn on grind start below this count
+        public int   POT_STOP              = 10;    // stop grinding below this HP pot count
+        public int   POT_CHECK_INTERVAL_MS = 2_000;
         public float AUTOPOT_HP_THRESH = 0.7f; // use HP pot when HP falls below this ratio
         public float AUTOPOT_MP_THRESH = 0.5f; // use MP pot when MP falls below this ratio
     }
@@ -259,7 +259,10 @@ public class BotManager {
             if (e.bot.getId() == botCharId) { entry = e; break; }
         }
         if (entry == null) return;
-        if (entry.skipTicks > 0) { entry.skipTicks--; return; }
+        if (entry.skipDelayMs > 0) {
+            entry.skipDelayMs = BotMovementManager.tickDown(entry.skipDelayMs);
+            return;
+        }
         Character bot = entry.bot;
         boolean runAiTick = consumeAiTick(entry);
 
@@ -374,7 +377,7 @@ public class BotManager {
                 } else if (attackPlan.skillId == 0
                         && !entry.inAir
                         && BotCombatManager.isTargetJumpable(botPos, tp)
-                        && entry.jumpCooldown == 0) {
+                        && entry.jumpCooldownMs == 0) {
                     // Target is above but within jump height — jump toward it
                     BotMovementManager.initiateJump(entry, bot, tp.x - botPos.x);
                     return;
@@ -475,7 +478,7 @@ public class BotManager {
 
     /**
      * Binds the best HP/MP potions from inventory to autopot keymap slots 91/92.
-     * Called on grind start and every POT_CHECK_TICKS to handle type depletion.
+     * Called on grind start and every POT_CHECK_INTERVAL_MS to handle type depletion.
      */
     void setupAutopotForBot(Character bot) {
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
@@ -528,9 +531,12 @@ public class BotManager {
 
     /** Picks up lootable drops within LOOT_RADIUS — runs every tick in all modes. */
     private void tickPassiveLoot(BotEntry entry, Character bot) {
-        if (entry.lootInhibitTicks > 0) { entry.lootInhibitTicks--; return; }
+        if (entry.lootInhibitMs > 0) {
+            entry.lootInhibitMs = BotMovementManager.tickDown(entry.lootInhibitMs);
+            return;
+        }
         if (entry.pendingTradeCategory != null) return; // don't loot while trading — keeps inventory state consistent
-        if (entry.invFullWarnCooldown > 0) entry.invFullWarnCooldown--;
+        entry.invFullWarnCooldownMs = BotMovementManager.tickDown(entry.invFullWarnCooldownMs);
         Point botPos = bot.getPosition();
         for (MapItem drop : bot.getMap().getDroppedItems()) {
             if (!drop.canBePickedBy(bot)) continue;
@@ -542,9 +548,9 @@ public class BotManager {
                 InventoryType type = ItemConstants.getInventoryType(drop.getItemId());
                 Inventory inv = bot.getInventory(type);
                 if (inv != null && inv.isFull()) {
-                    if (entry.invFullWarnCooldown <= 0) {
+                    if (entry.invFullWarnCooldownMs <= 0) {
                         botSay(bot, type.name().toLowerCase() + " inventory is full!");
-                        entry.invFullWarnCooldown = BotMovementManager.scaleLegacyTicks(cfg.INV_FULL_WARN_CD);
+                        entry.invFullWarnCooldownMs = BotMovementManager.delayAfterCurrentTick(cfg.INV_FULL_WARN_CD_MS);
                     }
                     continue;
                 }
@@ -559,8 +565,11 @@ public class BotManager {
 
     /** Periodically rebinds autopot and stops grinding when HP pots are critically low. */
     private void tickPotionCheck(BotEntry entry, Character bot) {
-        if (entry.potCheckTimer > 0) { entry.potCheckTimer--; return; }
-        entry.potCheckTimer = BotMovementManager.scaleLegacyTicks(cfg.POT_CHECK_TICKS);
+        if (entry.potCheckTimerMs > 0) {
+            entry.potCheckTimerMs = BotMovementManager.tickDown(entry.potCheckTimerMs);
+            return;
+        }
+        entry.potCheckTimerMs = BotMovementManager.delayAfterCurrentTick(cfg.POT_CHECK_INTERVAL_MS);
 
         setupAutopotForBot(bot);
 

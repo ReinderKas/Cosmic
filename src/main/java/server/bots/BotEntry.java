@@ -24,7 +24,7 @@ class BotEntry {
     // Physics
     float velY      = 0f;
     boolean inAir   = false;
-    int jumpCooldown = 0;
+    int jumpCooldownMs = 0;
 
     // Rope climbing
     boolean climbing  = false;
@@ -38,25 +38,25 @@ class BotEntry {
 
     // Rope state
     boolean seekingRope     = false; // only grab a rope mid-air when we intentionally jumped for one
-    int     ropeGrabCooldown = 0;    // ticks before rope-grab is re-enabled after leaving a rope
+    int     ropeGrabCooldownMs = 0;  // ms before rope-grab is re-enabled after leaving a rope
 
     // Down-jump: true when prone was shown last tick, jump fires this tick
     boolean downJumpPending = false;
     long downJumpGracePeriodMS = 0;
 
     // Stuck recovery
-    int   stuckCheckTimer     = 0;
+    int   stuckCheckElapsedMs = 0;
     Point lastStuckCheckPos   = null;
-    int   rawChaseTicks       = 0;
+    int   rawChaseMs          = 0;
 
     // Waypoint — navigate to a rope outside normal detection range
     Rope  waypointRope  = null;
-    int   waypointTimer = 0;
+    int   waypointTimerMs = 0;
 
     // Grind mode
     volatile boolean grinding = false;
     Monster grindTarget    = null;
-    int     attackCooldown = 0;
+    int     attackCooldownMs = 0;
 
     // Skill cache — rebuilt on job or level change
     int          cachedSkillJob   = -1;
@@ -70,11 +70,11 @@ class BotEntry {
 
     // Damage taken
     long deadUntil      = 0;  // ms timestamp when bot may respawn; 0 = alive
-    int  mobHitCooldown = 0;  // ticks until next mob hit is allowed
+    int  mobHitCooldownMs = 0;
 
     // Loot & potions
-    int  potCheckTimer      = 0;
-    int  invFullWarnCooldown = 0;
+    int  potCheckTimerMs      = 0;
+    int  invFullWarnCooldownMs = 0;
 
     // Job advancement: 0=none, 8=lv8 mage prompt, 10=lv10 1st job, 30=2nd, 70=3rd, 120=4th
     int jobPromptSent  = 0;
@@ -91,13 +91,13 @@ class BotEntry {
     // Pending two-step action: null, "logout", "relog", or "item_choice"
     String pendingAction       = null;
     String pendingDropCategory = null; // set when pendingAction="item_choice": "scrolls","pots","equips","etc","name:<x>"
-    int    lootInhibitTicks    = 0;    // prevents bot re-looting its own drops after a give/drop command
+    int    lootInhibitMs       = 0;    // prevents bot re-looting its own drops after a give/drop command
 
     // Trade queue — driven by BotDropManager.tickTrade; null category = idle
     String     pendingTradeCategory = null;  // category being traded across the whole sequence
     List<Item> pendingTradeItems    = null;  // current batch (≤9); null while pausing between trades
     int        pendingTradeIdx      = 0;     // next item index in current batch
-    int        pendingTradeTick     = 0;     // context-dependent tick counter (reset on state change)
+    int        pendingTradeTimerMs  = 0;     // context-dependent timer (reset on state change)
     boolean    pendingTradeAllAdded = false; // all items in batch added; waiting for owner OK
     boolean    pendingTradeBotDone  = false; // bot has called completeTrade this batch
 
@@ -116,8 +116,8 @@ class BotEntry {
 
     // Human-like spacing: random horizontal offset so multiple bots don't stack on top of each other
     final int followOffsetX = ThreadLocalRandom.current().nextInt(-100, 101);
-    // Staggered tick start: skip first N ticks so bots don't all move in lockstep
-    int skipTicks = ThreadLocalRandom.current().nextInt(0, 5);
+    // Staggered tick start: skip the first few hundred ms so bots don't all move in lockstep
+    int skipDelayMs = ThreadLocalRandom.current().nextInt(0, 501);
     int aiTickAccumulatorMs = 0;
 
     BotEntry(Character bot, Character owner, ScheduledFuture<?> task) {
