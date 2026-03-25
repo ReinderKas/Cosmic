@@ -44,6 +44,11 @@ public enum EquipSlot {
         return name;
     }
 
+    /** Returns the primary (first) allowed slot number, or 0 if none. */
+    public int getPrimarySlot() {
+        return (allowed != null && allowed.length > 0) ? allowed[0] : 0;
+    }
+
     public boolean isAllowed(int slot, boolean cash) {
         if (slot < 0) {
             if (allowed != null) {

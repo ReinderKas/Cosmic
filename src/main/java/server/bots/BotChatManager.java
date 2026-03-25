@@ -105,6 +105,12 @@ class BotChatManager {
             + "|\\b(pots?|potions?)\\s+left\\b",
             Pattern.CASE_INSENSITIVE);
 
+    // SP variant selection — only matched when spVariantPromptSent=true and spVariant=null
+    private static final Pattern SP_1H_PATTERN = Pattern.compile(
+            "\\b1h\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SP_2H_PATTERN = Pattern.compile(
+            "\\b2h\\b", Pattern.CASE_INSENSITIVE);
+
     private static final Pattern AP_PURE_STR_PATTERN = Pattern.compile(
             "\\bpure\\s+str\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern AP_FIXED_DEX_PATTERN = Pattern.compile(
@@ -193,12 +199,14 @@ class BotChatManager {
         if (FOLLOW_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
                 entry.grinding = false;
+                BotEquipManager.autoEquip(entry.bot);
                 BotManager.getInstance().botSay(entry.bot, BotManager.randomReply(FOLLOW_REPLIES));
                 TimerManager.getInstance().schedule(() -> entry.following = true, 250);
             }, 1500);
         } else if (GRIND_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
                 entry.following = false;
+                BotEquipManager.autoEquip(entry.bot);
                 BotManager.getInstance().setupAutopotForBot(entry.bot);
                 BotManager.getInstance().botSay(entry.bot, BotManager.getInstance().grindStartMessage(entry.bot));
                 TimerManager.getInstance().schedule(() -> {
@@ -210,6 +218,7 @@ class BotChatManager {
             TimerManager.getInstance().schedule(() -> {
                 entry.following = false;
                 entry.grinding  = false;
+                BotEquipManager.autoEquip(entry.bot);
                 TimerManager.getInstance().schedule(() -> BotManager.getInstance().botSay(entry.bot, BotManager.randomReply(STOP_REPLIES)), 1500);
             }, 1000);
         } else if (GREETING_PATTERN.matcher(message).find()) {
@@ -217,6 +226,19 @@ class BotChatManager {
                 queueBotSay(entry, BotManager.randomReply(GREETING_REPLIES));
                 checkBotStatus(entry, entry.bot);
             }, 1000);
+        }
+
+        // SP build variant selection — only matched when waiting for an answer (Hero 1h vs 2h)
+        if (entry.spVariantPromptSent && entry.spVariant == null) {
+            if (SP_1H_PATTERN.matcher(message).find()) {
+                entry.spVariant = "1h";
+                BotManager.getInstance().botSay(entry.bot, "ok! going 1h sword build, Brandish first");
+                BotBuildManager.autoAssignSp(entry, entry.bot);
+            } else if (SP_2H_PATTERN.matcher(message).find()) {
+                entry.spVariant = "2h";
+                BotManager.getInstance().botSay(entry.bot, "ok! going 2h build, interleaving AC early for faster charges");
+                BotBuildManager.autoAssignSp(entry, entry.bot);
+            }
         }
 
         // AP build selection — "change build" always triggers a re-prompt;
@@ -306,6 +328,8 @@ class BotChatManager {
     static void checkBotStatus(BotEntry entry, Character bot) {
         String jobPrompt = BotBuildManager.buildJobPrompt(entry, bot);
         if (jobPrompt != null) queueBotSay(entry, jobPrompt);
+        String spPrompt = BotBuildManager.buildSpVariantPrompt(entry, bot);
+        if (spPrompt != null) queueBotSay(entry, spPrompt);
         String apPrompt = BotBuildManager.buildApPrompt(entry, bot);
         if (apPrompt != null) queueBotSay(entry, apPrompt);
     }
