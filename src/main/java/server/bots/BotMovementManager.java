@@ -761,8 +761,8 @@ class BotMovementManager {
 
     /**
      * Simulates the jump arc from {@code from} stepping {@code stepX} per tick.
-     * Returns true if the bot would land on a foothold meaningfully higher than
-     * its current position (gaining at least JUMP_Y_THRESH px of height).
+     * Returns true if the bot would land on a foothold that usefully advances
+     * it toward the target, either by gaining height or by crossing a gap.
      *
      * Uses the same prevY→newY crossing pattern as tickAirborne's landing check
      * so platforms are never missed due to arc position quantisation.
@@ -781,12 +781,10 @@ class BotMovementManager {
             int intY = (int) Math.round(physY);
             if (vy > 0) { // descending — mirrors tickAirborne landing check
                 Point floor = bot.getMap().getPointBelow(new Point(x, prevIntY + 1));
-                if (floor != null && floor.y <= intY && floor.y < from.y) {
-                    boolean nearTargetY = Math.abs(floor.y - targetY) <= 100;
-                    boolean crossedX    = (from.x < targetX && x > targetX)
-                                       || (from.x > targetX && x < targetX);
-                    boolean overshoot   = stepX != 0 && nearTargetY && crossedX;
-                    return !overshoot;
+                if (floor != null && floor.y <= intY) {
+                    if (isUsefulJumpLanding(cfg, from, floor, targetX, targetY, stepX)) {
+                        return true;
+                    }
                 }
             }
             prevIntY = intY;
@@ -796,12 +794,49 @@ class BotMovementManager {
 
     // ─── Movement broadcast ───────────────────────────────────────────────────
 
+    // A jump landing is useful if it improves horizontal progress and lands at a sensible height.
+    private static boolean isUsefulJumpLanding(Config cfg, Point from, Point landing, int targetX, int targetY, int stepX) {
+        if (!movesTowardTargetX(from.x, landing.x, targetX, stepX)) {
+            return false;
+        }
+
+        boolean targetAbove = targetY < from.y - cfg.JUMP_Y_THRESH;
+        boolean gainsEnoughHeight = landing.y <= from.y - cfg.JUMP_Y_THRESH;
+        boolean nearTargetY = Math.abs(landing.y - targetY) <= 100;
+        if (targetAbove) {
+            return gainsEnoughHeight || nearTargetY;
+        }
+
+        return landing.y <= from.y + cfg.MAX_SNAP_DROP || nearTargetY;
+    }
+
+    private static boolean movesTowardTargetX(int startX, int landingX, int targetX, int stepX) {
+        if (stepX == 0) {
+            return Math.abs(targetX - landingX) < Math.abs(targetX - startX);
+        }
+
+        if (landingX == startX) {
+            return false;
+        }
+
+        int moveDir = Integer.compare(landingX, startX);
+        int targetDir = Integer.compare(targetX, startX);
+        if (targetDir != 0 && moveDir != targetDir) {
+            return false;
+        }
+
+        return Math.abs(targetX - landingX) < Math.abs(targetX - startX)
+                || crossedTargetX(startX, landingX, targetX);
+    }
+
+    private static boolean crossedTargetX(int startX, int endX, int targetX) {
+        return (startX <= targetX && endX >= targetX)
+                || (startX >= targetX && endX <= targetX);
+    }
+
     /**
      * Broadcasts a MOVE_PLAYER packet with real velocity values so the client
-     * smoothly interpolates over TICK_MS ms — matching how real player packets work.
-     *
-     * AbsoluteLifeMovement layout (15 bytes total):
-     *   numCmds(1) cmd(1) x(2) y(2) xv(2) yv(2) fh(2) stance(1) duration(2)
+     * smoothly interpolates over TICK_MS ms, matching how real player packets work.
      */
     static void broadcastMovement(Character bot, int velX, int velY) {
         Config cfg = BotMovementManager.cfg;
