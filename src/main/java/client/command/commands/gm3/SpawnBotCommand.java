@@ -6,6 +6,7 @@ import client.Client;
 import client.DefaultDates;
 import client.command.Command;
 import client.creator.BotCreator;
+import net.server.world.Party;
 import server.bots.BotManager;
 import server.maps.MapleMap;
 import tools.BCrypt;
@@ -54,6 +55,7 @@ public class SpawnBotCommand extends Command {
                 return;
             }
             teleportBotToPlayer(existingChr, adminMap, adminPos);
+            joinBotToPlayerParty(player, existingChr);
             player.yellowMessage("Bot '" + botName + "' teleported to your position.");
             return;
         }
@@ -116,6 +118,7 @@ public class SpawnBotCommand extends Command {
             botChar.broadcastStance(); // fix floating on spawn
 
             BotManager.getInstance().registerBot(player.getId(), player, botChar);
+            joinBotToPlayerParty(player, botChar);
             player.yellowMessage("Bot '" + botName + "' spawned. Say 'follow me' or 'stop' to control it.");
         } catch (SQLException e) {
             player.yellowMessage("Failed to load bot character '" + botName + "'.");
@@ -133,6 +136,30 @@ public class SpawnBotCommand extends Command {
         }
         bot.setPosition(snappedPos);
         bot.broadcastStance();
+    }
+
+    private void joinBotToPlayerParty(Character player, Character bot) {
+        if (bot.getParty() != null) {
+            return;
+        }
+
+        Party playerParty = player.getParty();
+        if (playerParty == null) {
+            if (!Party.createParty(player, true)) {
+                player.yellowMessage("Bot spawned, but your party could not be created.");
+                return;
+            }
+            playerParty = player.getParty();
+        }
+
+        if (playerParty == null) {
+            player.yellowMessage("Bot spawned, but you are not in a party.");
+            return;
+        }
+
+        if (!Party.joinParty(bot, playerParty.getId(), true)) {
+            player.yellowMessage("Bot spawned, but it could not join your party.");
+        }
     }
 
     private int getCharacterId(String name) {
