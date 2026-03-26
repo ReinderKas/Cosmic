@@ -70,8 +70,7 @@ class BotCombatManager {
     static class Config {
         // Physics (combat use only)
         // OpenStory Player::damage applies vforce -= 3.5 on knockback at an 8 ms timestep.
-        // Our bot physics runs at 16 ms, so the equivalent launch is 7 px/tick.
-        public float KNOCKBACK_RISE = 7f;
+        public float KNOCKBACK_RISE = 3.5f;
 
         // Basic attack fallback when weapon data cannot produce a real normal-attack hit box.
         public int   ATTACK_RANGE_X  = 80;
