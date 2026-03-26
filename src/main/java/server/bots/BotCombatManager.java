@@ -13,6 +13,7 @@ import net.server.channel.handlers.MagicDamageHandler;
 import net.server.channel.handlers.RangedAttackHandler;
 import server.StatEffect;
 import server.life.Monster;
+import server.maps.Foothold;
 import tools.PacketCreator;
 
 import java.awt.*;
@@ -236,6 +237,7 @@ class BotCombatManager {
     static Monster findGrindTarget(Character bot) {
         Point botPos = bot.getPosition();
         double rangeSq = (double) BotCombatManager.cfg.GRIND_SEEK_RANGE * BotCombatManager.cfg.GRIND_SEEK_RANGE;
+        Foothold botFoothold = findGroundFoothold(botPos, bot);
         List<Monster> candidates = new ArrayList<>();
         for (Monster m : bot.getMap().getAllMonsters()) {
             if (m.isAlive() && m.getPosition().distanceSq(botPos) <= rangeSq) {
@@ -244,7 +246,7 @@ class BotCombatManager {
         }
         if (candidates.isEmpty()) return null;
 
-        candidates.sort((a, b) -> Double.compare(a.getPosition().distanceSq(botPos), b.getPosition().distanceSq(botPos)));
+        candidates.sort((a, b) -> compareGrindTargets(bot, botPos, botFoothold, a, b));
         return candidates.get(ThreadLocalRandom.current().nextInt(Math.min(3, candidates.size())));
     }
 
@@ -423,6 +425,44 @@ class BotCombatManager {
         boolean inHRange = dx <= BotCombatManager.cfg.ATTACK_RANGE_X;
         boolean inVRange = dy >= -BotCombatManager.cfg.ATTACK_DOWN_MAX && dy <= BotCombatManager.cfg.ATTACK_RANGE_Y;
         return inHRange && inVRange;
+    }
+
+    private static int compareGrindTargets(Character bot, Point botPos, Foothold botFoothold, Monster left, Monster right) {
+        long leftScore = grindTargetScore(bot, botPos, botFoothold, left);
+        long rightScore = grindTargetScore(bot, botPos, botFoothold, right);
+        if (leftScore != rightScore) {
+            return Long.compare(leftScore, rightScore);
+        }
+
+        return Double.compare(left.getPosition().distanceSq(botPos), right.getPosition().distanceSq(botPos));
+    }
+
+    private static long grindTargetScore(Character bot, Point botPos, Foothold botFoothold, Monster target) {
+        Point targetPos = target.getPosition();
+        Foothold targetFoothold = findGroundFoothold(targetPos, bot);
+
+        int dx = Math.abs(targetPos.x - botPos.x);
+        int dy = Math.abs(targetPos.y - botPos.y);
+        boolean sameFoothold = botFoothold != null && targetFoothold != null && botFoothold.getId() == targetFoothold.getId();
+        boolean nearSameLevel = dy <= BotCombatManager.cfg.ATTACK_RANGE_Y;
+
+        long score = dx;
+        score += (long) dy * 8L;
+        if (!nearSameLevel) {
+            score += 600L;
+        }
+        if (!sameFoothold) {
+            score += 1200L;
+        }
+        return score;
+    }
+
+    private static Foothold findGroundFoothold(Point position, Character bot) {
+        if (position == null || bot == null || bot.getMap() == null) {
+            return null;
+        }
+
+        return bot.getMap().getFootholds().findBelow(new Point(position.x, position.y - BotMovementManager.cfg.MAX_SLOPE_UP));
     }
 
     private static boolean isMobTouchingBot(Character bot, Monster mob) {
