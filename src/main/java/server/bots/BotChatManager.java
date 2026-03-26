@@ -364,8 +364,8 @@ class BotChatManager {
                 entry.grinding = false;
                 BotEquipManager.autoEquip(entry.bot);
                 BotManager.getInstance().botSay(entry.bot, BotManager.randomReply(FOLLOW_REPLIES));
-                TimerManager.getInstance().schedule(() -> entry.following = true, 250);
-            }, 1500);
+                TimerManager.getInstance().schedule(() -> entry.following = true, 250 + ThreadLocalRandom.current().nextInt(0, 500));
+            }, 1500 + ThreadLocalRandom.current().nextInt(0, 500));
         } else if (GRIND_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
                 entry.following = false;
@@ -375,8 +375,8 @@ class BotChatManager {
                 TimerManager.getInstance().schedule(() -> {
                     entry.grinding = true;
                     checkBotStatus(entry, entry.bot);
-                }, 250);
-            }, 1500);
+                }, 250 + ThreadLocalRandom.current().nextInt(0, 500));
+            }, 1500 + ThreadLocalRandom.current().nextInt(0, 500));
         } else if (STOP_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
                 entry.following = false;
