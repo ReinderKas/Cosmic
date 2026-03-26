@@ -226,8 +226,8 @@ public class Character extends AbstractCharacterObject {
     private int omokwins, omokties, omoklosses, matchcardwins, matchcardties, matchcardlosses;
     private int owlSearch;
     private long lastfametime, lastUsedCashItem, lastExpression = 0, lastHealed, lastDeathtime, jailExpiration = -1;
-    private transient int localstr, localdex, localluk, localint_, localmagic, localwatk;
-    private transient int equipmaxhp, equipmaxmp, equipstr, equipdex, equipluk, equipint_, equipmagic, equipwatk, localchairhp, localchairmp;
+    private transient int localstr, localdex, localluk, localint_, localmagic, localwatk, localwdef, localmdef;
+    private transient int equipmaxhp, equipmaxmp, equipstr, equipdex, equipluk, equipint_, equipmagic, equipwatk, equipwdef, equipmdef, localchairhp, localchairmp;
     private int localchairrate;
     private boolean hidden, equipchanged = true, berserk, hasMerchant, hasSandboxItem = false, whiteChat = false, canRecvPartySearchInvite = true;
     private boolean equippedMesoMagnet = false, equippedItemPouch = false, equippedPetItemIgnore = false;
@@ -5346,6 +5346,14 @@ public class Character extends AbstractCharacterObject {
         return localwatk;
     }
 
+    public int getTotalWdef() {
+        return localwdef;
+    }
+
+    public int getTotalMdef() {
+        return localmdef;
+    }
+
     public int getMaxClassLevel() {
         return isCygnus() ? 250 : 255;
     }
@@ -7653,6 +7661,8 @@ public class Character extends AbstractCharacterObject {
             equipluk = 0;
             equipmagic = 0;
             equipwatk = 0;
+            equipwdef = 0;
+            equipmdef = 0;
             //equipspeed = 0;
             //equipjump = 0;
 
@@ -7667,6 +7677,8 @@ public class Character extends AbstractCharacterObject {
                 equipluk += equip.getLuk();
                 equipmagic += equip.getMatk() + equip.getInt();
                 equipwatk += equip.getWatk();
+                equipwdef += equip.getWdef();
+                equipmdef += equip.getMdef();
                 //equipspeed += equip.getSpeed();
                 //equipjump += equip.getJump();
             }
@@ -7682,6 +7694,8 @@ public class Character extends AbstractCharacterObject {
         localluk += equipluk;
         localmagic += equipmagic;
         localwatk += equipwatk;
+        localwdef += equipwdef;
+        localmdef += equipmdef;
     }
 
     private void reapplyLocalStats() {
@@ -7697,6 +7711,8 @@ public class Character extends AbstractCharacterObject {
             localluk = getLuk();
             localmagic = localint_;
             localwatk = 0;
+            localwdef = 0;
+            localmdef = 0;
             localchairrate = -1;
 
             recalcEquipStats();
@@ -7755,6 +7771,14 @@ public class Character extends AbstractCharacterObject {
             Integer matkbuff = getBuffedValue(BuffStat.MATK);
             if (matkbuff != null) {
                 localmagic += matkbuff.intValue();
+            }
+            Integer wdefbuff = getBuffedValue(BuffStat.WDEF);
+            if (wdefbuff != null) {
+                localwdef += wdefbuff.intValue();
+            }
+            Integer mdefbuff = getBuffedValue(BuffStat.MDEF);
+            if (mdefbuff != null) {
+                localmdef += mdefbuff.intValue();
             }
 
             /*

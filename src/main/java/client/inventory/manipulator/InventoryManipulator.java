@@ -520,6 +520,23 @@ public class InventoryManipulator {
         c.sendPacket(PacketCreator.modifyInventory(true, mods));
     }
 
+    public static void handleItemMove(Client c, InventoryType type, short src, short action, short quantity) {
+        if (src < 0 && action > 0) {
+            unequip(c, src, action);
+            return;
+        }
+        if (action < 0) {
+            equip(c, src, action);
+            return;
+        }
+        if (action == 0) {
+            drop(c, type, src, quantity);
+            return;
+        }
+
+        move(c, type, src, action);
+    }
+
     public static void equip(Client c, short src, short dst) {
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
 
@@ -599,17 +616,7 @@ public class InventoryManipulator {
         source = (Equip) eqpInv.getItem(src);
         eqpInv.removeSlot(src);
 
-        Equip target;
-        eqpdInv.lockInventory();
-        try {
-            target = (Equip) eqpdInv.getItem(dst);
-            if (target != null) {
-                chr.unequippedItem(target);
-                eqpdInv.removeSlot(dst);
-            }
-        } finally {
-            eqpdInv.unlockInventory();
-        }
+        Equip target = removeEquippedTarget(chr, eqpdInv, dst);
 
         final List<ModifyInventory> mods = new ArrayList<>();
         if (itemChanged) {
@@ -631,8 +638,7 @@ public class InventoryManipulator {
         }
 
         if (target != null) {
-            target.setPosition(src);
-            eqpInv.addItemFromDB(target);
+            restoreSwappedEquip(eqpInv, target, src, dst, mods);
         }
         if (chr.getBuffedValue(BuffStat.BOOSTER) != null && ItemConstants.isWeapon(source.getItemId())) {
             chr.cancelBuffStats(BuffStat.BOOSTER);
@@ -683,6 +689,39 @@ public class InventoryManipulator {
         }
         c.sendPacket(PacketCreator.modifyInventory(true, Collections.singletonList(new ModifyInventory(2, source, src))));
         chr.equipChanged();
+    }
+
+    private static Equip removeEquippedTarget(Character chr, Inventory eqpdInv, short dst) {
+        eqpdInv.lockInventory();
+        try {
+            Equip target = (Equip) eqpdInv.getItem(dst);
+            if (target == null) {
+                return null;
+            }
+
+            if (target.getRingId() > -1) {
+                chr.getRingById(target.getRingId()).unequip();
+            }
+            chr.unequippedItem(target);
+            eqpdInv.removeSlot(dst);
+            return target;
+        } finally {
+            eqpdInv.unlockInventory();
+        }
+    }
+
+    private static void restoreSwappedEquip(Inventory eqpInv, Equip target, short preferredSlot, short oldPos, List<ModifyInventory> mods) {
+        short returnSlot = preferredSlot;
+        if (eqpInv.getItem(returnSlot) != null) {
+            returnSlot = eqpInv.getNextFreeSlot();
+        }
+        if (returnSlot < 0) {
+            throw new IllegalStateException("No free EQUIP slot available while restoring swapped equip " + target.getItemId());
+        }
+
+        target.setPosition(returnSlot);
+        eqpInv.addItemFromDB(target);
+        mods.add(new ModifyInventory(2, target, oldPos));
     }
 
     private static boolean isDisappearingItemDrop(Item it) {

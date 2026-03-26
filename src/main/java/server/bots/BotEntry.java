@@ -23,9 +23,10 @@ class BotEntry {
 
     // Physics
     float  velY  = 0f;
-    double hspeed = 0.0;   // horizontal velocity in px/tick (OpenStory inertia model)
+    double hspeed = 0.0;   // horizontal velocity in px per 8 ms client physics step
     double physX  = 0.0;   // sub-pixel accumulated X position
     double physY  = 0.0;   // sub-pixel accumulated Y position
+    double groundPhysicsCarryMs = 0.0;
     boolean inAir = false;
     int jumpCooldownMs = 0;
 

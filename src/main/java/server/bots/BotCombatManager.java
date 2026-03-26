@@ -119,15 +119,12 @@ class BotCombatManager {
 
     /**
      * Apply one physical hit from {@code mob} to the bot.
-     * Damage = PADamage +/- 15% (v83 mob attack approximation; no server-side WDEF available).
+     * Uses the bot's shared character WDEF cache instead of ignoring defense entirely.
      */
     static void applyMobHit(BotEntry entry, Character bot, Monster mob) {
         Config cc = BotCombatManager.cfg;
         BotMovementManager.Config mc = BotMovementManager.cfg;
-        int pa  = mob.getPADamage();
-        int max = Math.max(1, pa * 115 / 100);
-        int min = Math.max(1, pa * 85 / 100);
-        int dmg = min < max ? ThreadLocalRandom.current().nextInt(min, max + 1) : max;
+        int dmg = rollPhysicalMobDamage(bot, mob);
 
         bot.addMPHP(-dmg, 0);
 
@@ -143,7 +140,7 @@ class BotCombatManager {
         bot.setPosition(new Point(kbX, bp.y));
         BotMovementManager.resetEntryState(entry);
         entry.velY = -cc.KNOCKBACK_RISE;
-        entry.airVelX = (dir == 0 ? 1 : -1) * BotMovementManager.walkStep();
+        entry.airVelX = (dir == 0 ? 1 : -1) * BotMovementManager.walkStep(bot.getMap());
         int velXBcast = entry.airVelX * (1000 / mc.TICK_MS);
         int velYBcast = (int) (-entry.velY * (1000f / mc.TICK_MS));
         BotMovementManager.broadcastMovement(bot, velXBcast, velYBcast);
@@ -157,6 +154,23 @@ class BotCombatManager {
             entry.deadUntil = System.currentTimeMillis() + cc.BOT_DEAD_MS;
             BotMovementManager.resetEntryState(entry);
         }
+    }
+
+    private static int rollPhysicalMobDamage(Character bot, Monster mob) {
+        int attack = mob.getPADamage();
+        int levelGap = Math.max(0, mob.getLevel() - bot.getLevel());
+        double levelPenalty = Math.max(0.0, 1.0 - (levelGap * 0.01));
+        int wdef = bot.getTotalWdef();
+
+        int maxDamage = Math.max(1, (int) Math.floor(attack * levelPenalty - (wdef * 0.5)));
+        int minDamage = Math.max(1, (int) Math.floor(attack * 0.85 * levelPenalty - (wdef * 0.6)));
+        if (minDamage > maxDamage) {
+            minDamage = maxDamage;
+        }
+
+        return minDamage < maxDamage
+                ? ThreadLocalRandom.current().nextInt(minDamage, maxDamage + 1)
+                : maxDamage;
     }
 
     static void rebuildSkillCacheIfNeeded(BotEntry entry, Character bot) {

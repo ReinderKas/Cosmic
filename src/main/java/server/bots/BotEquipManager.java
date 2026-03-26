@@ -63,7 +63,7 @@ class BotEquipManager {
             Equip current = (Equip) eqdInv.getItem(slot);
             Equip best = findBest(bot, ii, weaponType, current, bySlot.get(slot));
             if (best != null && best != current) {
-                InventoryManipulator.equip(bot.getClient(), best.getPosition(), slot);
+                InventoryManipulator.handleItemMove(bot.getClient(), InventoryType.EQUIP, best.getPosition(), slot, (short) 1);
                 if (slot == -11) weaponType = currentWeaponType(bot, ii);
             }
         }
@@ -84,7 +84,7 @@ class BotEquipManager {
                     .collect(Collectors.toList());
             Equip best = findBest(bot, ii, wt, current, eligible);
             if (best != null && best != current) {
-                InventoryManipulator.equip(bot.getClient(), best.getPosition(), rs);
+                InventoryManipulator.handleItemMove(bot.getClient(), InventoryType.EQUIP, best.getPosition(), rs, (short) 1);
                 pool.remove(best);
             }
         }

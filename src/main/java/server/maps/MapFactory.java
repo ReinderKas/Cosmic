@@ -312,6 +312,10 @@ public class MapFactory {
         map.setClock(mapData.getChildByPath("clock") != null);
         map.setEverlast(DataTool.getIntConvert("everlast", infoData, 0) != 0); // thanks davidlafriniere for noticing value 0 accounting as true
         map.setTown(DataTool.getIntConvert("town", infoData, 0) != 0);
+        Data footholdSpeedData = infoData.getChildByPath("fs");
+        if (footholdSpeedData != null) {
+            map.setFootholdSpeed(DataTool.getFloat(footholdSpeedData));
+        }
         map.setHPDec(DataTool.getIntConvert("decHP", infoData, 0));
         map.setHPDecProtect(DataTool.getIntConvert("protectItem", infoData, 0));
         map.setForcedReturnMap(DataTool.getInt(infoData.getChildByPath("forcedReturn"), MapId.NONE));

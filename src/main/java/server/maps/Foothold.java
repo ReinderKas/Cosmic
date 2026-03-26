@@ -58,6 +58,13 @@ public class Foothold implements Comparable<Foothold> {
         return p2.y;
     }
 
+    public double slope() {
+        if (isWall()) {
+            return 0.0;
+        }
+        return (double) (p2.y - p1.y) / (double) (p2.x - p1.x);
+    }
+
     // XXX may need more precision
     public int calculateFooting(int x) {
         if (p1.y == p2.y) {

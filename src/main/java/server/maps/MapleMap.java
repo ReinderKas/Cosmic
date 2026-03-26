@@ -155,6 +155,7 @@ public class MapleMap {
     private String onFirstUserEnter;
     private String onUserEnter;
     private int fieldType;
+    private float footholdSpeed = 1.0f;
     private int fieldLimit = 0;
     private int mobCapacity = -1;
     private MonsterAggroCoordinator aggroMonitor = null;   // aggroMonitor activity in sync with itemMonitor
@@ -3660,6 +3661,14 @@ public class MapleMap {
 
     public void setRecovery(float recRate) {
         recovery = recRate;
+    }
+
+    public void setFootholdSpeed(float footholdSpeed) {
+        this.footholdSpeed = footholdSpeed;
+    }
+
+    public float getFootholdSpeed() {
+        return footholdSpeed;
     }
 
     private int hasBoat() {

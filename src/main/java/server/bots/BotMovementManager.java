@@ -15,6 +15,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 class BotMovementManager {
+    private static final double CLIENT_GROUND_STEP_MS = 8.0;
+    private static final double CLIENT_GROUND_STEP_S = CLIENT_GROUND_STEP_MS / 1000.0;
 
     static class Config {
         // Tick — the only tick-coupled value; everything else is in real-world units
@@ -103,22 +105,68 @@ class BotMovementManager {
     // Accelerations (px/s²) → px/tick: quadratic scaling (a·t²)
     static float gravityPerTick() { float t = tickS(); return cfg.GRAVITY_PXS2 * t * t; }
 
-    // OpenStory inertia-based ground physics
-    // hforce per tick = HFORCE_PXS * t; drag = (FRICTION+SLOPEFACTOR) * hspeed/GROUNDSLIP
-    static double hForcePerTick() { return cfg.HFORCE_PXS * tickS(); }
-    // Theoretical max hspeed: hforce = drag → hspeed_max = hforce * GROUNDSLIP / (FRICTION+SLOPEFACTOR)
-    static double maxHSpeed()     { return hForcePerTick() * cfg.GROUNDSLIP / (cfg.FRICTION + cfg.SLOPEFACTOR); }
-    static int   walkStep()       { return Math.max(1, (int) Math.round(maxHSpeed())); }
+    static double hForcePerClientStep() { return cfg.HFORCE_PXS * CLIENT_GROUND_STEP_S; }
 
-    static void applyGroundPhysics(BotEntry entry, int desiredDir) {
-        double hforce = desiredDir * hForcePerTick();
-        // Stop threshold: if no input and barely moving, snap to zero (scaled from OpenStory 8ms)
-        if (hforce == 0.0 && Math.abs(entry.hspeed) < 0.1 * cfg.TICK_MS / 8.0) {
+    static double maxHSpeedPerClientStep() {
+        return hForcePerClientStep() * cfg.GROUNDSLIP / (cfg.FRICTION + cfg.SLOPEFACTOR);
+    }
+
+    static double mapGroundSpeedScale(MapleMap map) {
+        float footholdSpeed = map.getFootholdSpeed();
+        if (footholdSpeed <= 0.0f) {
+            return 1.0;
+        }
+        return footholdSpeed;
+    }
+
+    static int walkStep(MapleMap map) {
+        double step = maxHSpeedPerClientStep() * cfg.TICK_MS * mapGroundSpeedScale(map) / CLIENT_GROUND_STEP_MS;
+        return Math.max(1, (int) Math.round(step));
+    }
+
+    static int velocityFromDeltaX(double deltaX) {
+        return (int) Math.round(deltaX * (1000.0 / cfg.TICK_MS));
+    }
+
+    static int groundPhysicsSteps(BotEntry entry, MapleMap map) {
+        entry.groundPhysicsCarryMs += cfg.TICK_MS * mapGroundSpeedScale(map);
+        int steps = (int) (entry.groundPhysicsCarryMs / CLIENT_GROUND_STEP_MS);
+        entry.groundPhysicsCarryMs -= steps * CLIENT_GROUND_STEP_MS;
+        return steps;
+    }
+
+    static double clampedSlope(Foothold foothold) {
+        if (foothold == null) {
+            return 0.0;
+        }
+        return Math.max(-0.5, Math.min(0.5, foothold.slope()));
+    }
+
+    static void applyGroundPhysicsStep(BotEntry entry, Foothold foothold, int desiredDir) {
+        double hforce = desiredDir * hForcePerClientStep();
+        if (hforce == 0.0 && Math.abs(entry.hspeed) < 0.1) {
             entry.hspeed = 0.0;
             return;
         }
+
         double inertia = entry.hspeed / cfg.GROUNDSLIP;
-        entry.hspeed += hforce - (cfg.FRICTION + cfg.SLOPEFACTOR) * inertia;
+        double slopef = clampedSlope(foothold);
+        double drag = (cfg.FRICTION + cfg.SLOPEFACTOR * (1.0 + slopef * -inertia)) * inertia;
+        entry.hspeed += hforce - drag;
+    }
+
+    static double applyGroundPhysics(BotEntry entry, MapleMap map, Foothold foothold, int desiredDir) {
+        int steps = groundPhysicsSteps(entry, map);
+        if (steps == 0) {
+            return 0.0;
+        }
+
+        double startX = entry.physX;
+        for (int i = 0; i < steps; i++) {
+            applyGroundPhysicsStep(entry, foothold, desiredDir);
+            entry.physX += entry.hspeed;
+        }
+        return entry.physX - startX;
     }
 
     static void stopGroundMotion(BotEntry entry) {
@@ -132,6 +180,7 @@ class BotMovementManager {
         entry.hspeed            = 0.0;
         entry.physX             = 0.0;
         entry.physY             = 0.0;
+        entry.groundPhysicsCarryMs = 0.0;
         entry.airVelX           = 0;
         entry.wasMovingX        = false;
         entry.seekingRope       = false;
@@ -218,13 +267,13 @@ class BotMovementManager {
         entry.velY            = -ropeJumpForcePerTick();
         stopGroundMotion(entry);
         entry.seekingRope     = false;
-        int walkStep = walkStep();
+        int walkStep = walkStep(bot.getMap());
         entry.airVelX         = dx > 0 ? walkStep : dx < 0 ? -walkStep : 0;
         entry.ropeGrabCooldownMs = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS + 200); // stay off rope long enough to clear it
         entry.jumpCooldownMs    = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS);
         bot.setStance(dx >= 0 ? 6 : 7);
         int jumpVelY = Math.round(-cfg.JUMP_ROPE_PXS);
-        broadcastMovement(bot, dx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, jumpVelY);
+        broadcastMovement(bot, velocityFromDeltaX(entry.airVelX), jumpVelY);
     }
 
     // -------------------------------------------------------------------------
@@ -291,7 +340,7 @@ class BotMovementManager {
         entry.physY = newY; // keep in sync after rounding
         bot.setPosition(new Point(newX, newY));
         // Use locked airVelX for stance + broadcast — not the owner direction (which can flip mid-arc)
-        int velXBcast = entry.airVelX > 0 ? cfg.WALK_VEL : entry.airVelX < 0 ? -cfg.WALK_VEL : 0;
+        int velXBcast = velocityFromDeltaX(entry.airVelX);
         bot.setStance(entry.airVelX >= 0 ? 6 : 7);
         int velYBcast = (int) (entry.velY * (1000f / cfg.TICK_MS));
         broadcastMovement(bot, velXBcast, velYBcast);
@@ -383,13 +432,13 @@ class BotMovementManager {
                         }
                         return;
                     }
-                    int stepToWp = Math.min(Math.abs(wdx), walkStep()) * (wdx >= 0 ? 1 : -1);
+                    int stepToWp = Math.min(Math.abs(wdx), walkStep(bot.getMap())) * (wdx >= 0 ? 1 : -1);
                     int walkX    = botPos.x + stepToWp;
                     Point snappedWp = bot.getMap().getPointBelow(new Point(walkX, botPos.y - cfg.MAX_SLOPE_UP));
                     if (snappedWp != null && snappedWp.y <= botPos.y + cfg.MAX_SNAP_DROP) {
                         bot.setPosition(new Point(walkX, snappedWp.y));
                         bot.setStance(wdx >= 0 ? 2 : 3);
-                        broadcastMovement(bot, wdx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, 0);
+                        broadcastMovement(bot, velocityFromDeltaX(stepToWp), 0);
                         return;
                     }
                     targetPos = new Point(wp.x(), wp.topY()); // redirect for proactive jump below
@@ -399,9 +448,10 @@ class BotMovementManager {
             // Down-jump initiation
             if (dy > cfg.JUMP_Y_THRESH * 3 && dy > Math.abs(dx) && entry.jumpCooldownMs == 0) {
                 if (Math.abs(dx) > cfg.STOP_DIST) {
-                    int sampleDir = dx > 0 ? walkStep() : -walkStep();
+                    int stepLimit = walkStep(bot.getMap());
+                    int sampleDir = dx > 0 ? stepLimit : -stepLimit;
                     int dropStepX = 0;
-                    for (int i = 1; i * walkStep() <= cfg.LEDGE_SEEK_X; i++) {
+                    for (int i = 1; i * stepLimit <= cfg.LEDGE_SEEK_X; i++) {
                         Point sp = bot.getMap().getPointBelow(
                                 new Point(botPos.x + sampleDir * i, botPos.y - cfg.MAX_SLOPE_UP));
                         if (sp == null || sp.y > botPos.y + cfg.MAX_SNAP_DROP) {
@@ -416,7 +466,7 @@ class BotMovementManager {
                         if (walkSnapped != null && walkSnapped.y <= botPos.y + cfg.MAX_SNAP_DROP) {
                             bot.setPosition(new Point(walkX, walkSnapped.y));
                             bot.setStance(dropStepX > 0 ? 2 : 3);
-                            broadcastMovement(bot, dropStepX > 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, 0);
+                            broadcastMovement(bot, velocityFromDeltaX(dropStepX), 0);
                         } else {
                             entry.inAir   = true;
                             stopGroundMotion(entry);
@@ -448,35 +498,36 @@ class BotMovementManager {
                         return;
                     }
                     if (entry.jumpCooldownMs == 0) {
-                        int arcStep = dx >= 0 ? walkStep() : -walkStep();
+                        int stepLimit = walkStep(bot.getMap());
+                        int arcStep = dx >= 0 ? stepLimit : -stepLimit;
                         boolean jumpWorks = arcCheckJump(bot, botPos, arcStep, targetPos.x, targetPos.y)
                                 || arcCheckJump(bot, botPos, -arcStep, targetPos.x, targetPos.y)
                                 || arcCheckJump(bot, botPos, 0, targetPos.x, targetPos.y);
                         if (!jumpWorks) {
-                            int maxHTravel = walkStep() * (int) (2 * jumpForcePerTick() / gravityPerTick());
+                            int maxHTravel = stepLimit * (int) (2 * jumpForcePerTick() / gravityPerTick());
                             if (Math.abs(rdx) <= maxHTravel) {
                                 entry.jumpCooldownMs = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS);
                                 initiateRopeJump(entry, bot, rdx);
                                 return;
                             }
-                            int stepToRope = Math.min(Math.abs(rdx), walkStep()) * (rdx >= 0 ? 1 : -1);
+                            int stepToRope = Math.min(Math.abs(rdx), stepLimit) * (rdx >= 0 ? 1 : -1);
                             int newXr = botPos.x + stepToRope;
                             Point snappedR = bot.getMap().getPointBelow(new Point(newXr, botPos.y - cfg.MAX_SLOPE_UP));
                             if (snappedR != null && snappedR.y <= botPos.y + cfg.MAX_SNAP_DROP) {
                                 bot.setPosition(new Point(newXr, snappedR.y));
                                 bot.setStance(rdx >= 0 ? 2 : 3);
-                                broadcastMovement(bot, rdx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, 0);
+                                broadcastMovement(bot, velocityFromDeltaX(stepToRope), 0);
                                 return;
                             }
                         }
                     } else {
-                        int stepToRope = Math.min(Math.abs(rdx), walkStep()) * (rdx >= 0 ? 1 : -1);
+                        int stepToRope = Math.min(Math.abs(rdx), walkStep(bot.getMap())) * (rdx >= 0 ? 1 : -1);
                         int newXr = botPos.x + stepToRope;
                         Point snappedR = bot.getMap().getPointBelow(new Point(newXr, botPos.y - cfg.MAX_SLOPE_UP));
                         if (snappedR != null && snappedR.y <= botPos.y + cfg.MAX_SNAP_DROP) {
                             bot.setPosition(new Point(newXr, snappedR.y));
                             bot.setStance(rdx >= 0 ? 2 : 3);
-                            broadcastMovement(bot, rdx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, 0);
+                            broadcastMovement(bot, velocityFromDeltaX(stepToRope), 0);
                             return;
                         }
                     }
@@ -485,11 +536,11 @@ class BotMovementManager {
 
             // Proactive jump
             if (dy < -cfg.JUMP_Y_THRESH && entry.jumpCooldownMs == 0) {
-                int stepXai   = calcStepX(entry, botPos.x, targetPos.x);
+                int stepXai   = calcStepX(entry, bot.getMap(), botPos.x, targetPos.x);
                 boolean blocked  = stepXai == 0 || !isPathWalkable(bot, botPos, stepXai);
                 boolean farAbove = dy < -cfg.JUMP_Y_THRESH * 2;
                 if (blocked) {
-                    int arcStep = stepXai != 0 ? stepXai : (dx >= 0 ? walkStep() : -walkStep());
+                    int arcStep = stepXai != 0 ? stepXai : (dx >= 0 ? walkStep(bot.getMap()) : -walkStep(bot.getMap()));
                     int winDir  = Integer.MIN_VALUE;
                     if (arcCheckJump(bot, botPos, arcStep, targetPos.x, targetPos.y)) {
                         winDir = arcStep;
@@ -546,23 +597,23 @@ class BotMovementManager {
                 entry.wasMovingX          = false;
                 entry.lastDesiredDirection = 0;
             } else {
-                entry.lastDesiredDirection = Integer.compare(calcStepX(entry, botPos.x, targetPos.x), 0);
+                entry.lastDesiredDirection = Integer.compare(calcStepX(entry, bot.getMap(), botPos.x, targetPos.x), 0);
             }
         } // end runAiTick
 
         // ── Always: apply walk step using cached direction ────────────────────
-        applyGroundPhysics(entry, entry.lastDesiredDirection);
-        entry.physX += entry.hspeed;
+        double deltaPhysX = applyGroundPhysics(entry, bot.getMap(), currentFh, entry.lastDesiredDirection);
         int newXPhys = (int) Math.round(entry.physX);
         int stepX = newXPhys - botPos.x;
-        if (entry.lastDesiredDirection == 0 && stepX == 0) {
+        int velX = velocityFromDeltaX(deltaPhysX);
+        if (entry.lastDesiredDirection == 0 && stepX == 0 && velX == 0) {
             bot.setStance(5);
             broadcastMovement(bot, 0, 0);
             return;
         }
-        if (entry.lastDesiredDirection != 0 && stepX == 0) {
-            bot.setStance(entry.lastDesiredDirection > 0 ? 2 : 3);
-            broadcastMovement(bot, entry.lastDesiredDirection > 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, 0);
+        if (stepX == 0 && velX != 0) {
+            bot.setStance(velX > 0 ? 2 : 3);
+            broadcastMovement(bot, velX, 0);
             return;
         }
         Point snapped = bot.getMap().getPointBelow(new Point(newXPhys, botPos.y - cfg.MAX_SLOPE_UP));
@@ -584,11 +635,10 @@ class BotMovementManager {
             }
             return;
         }
-        int velX;
         int newStance;
-        if (stepX > 0)      { newStance = 2; velX =  cfg.WALK_VEL; }
-        else if (stepX < 0) { newStance = 3; velX = -cfg.WALK_VEL; }
-        else                 { newStance = 5; velX = 0; }
+        if (stepX > 0)      { newStance = 2; }
+        else if (stepX < 0) { newStance = 3; }
+        else                 { newStance = 5; }
         bot.setPosition(new Point(newXPhys, snapped.y));
         bot.setStance(newStance);
         broadcastMovement(bot, velX, 0);
@@ -608,7 +658,7 @@ class BotMovementManager {
      * Returns the X step toward targetX, with hysteresis to prevent jitter:
      * only starts moving once distance exceeds FOLLOW_DIST, stops at STOP_DIST.
      */
-    static int calcStepX(BotEntry entry, int botX, int targetX) {
+    static int calcStepX(BotEntry entry, MapleMap map, int botX, int targetX) {
         Config cfg = BotMovementManager.cfg;
         int dx   = targetX - botX;
         int absDx = Math.abs(dx);
@@ -621,7 +671,7 @@ class BotMovementManager {
             return 0; // inside dead zone — don't start until sufficiently far
         }
         entry.wasMovingX = true;
-        return Math.min(absDx, walkStep()) * (dx >= 0 ? 1 : -1);
+        return Math.min(absDx, walkStep(map)) * (dx >= 0 ? 1 : -1);
     }
 
     /**
@@ -653,10 +703,10 @@ class BotMovementManager {
             bot.setStance(6);
             broadcastMovement(bot, 0, jumpVelY);
         } else {
-            int walkStep = walkStep();
+            int walkStep = walkStep(bot.getMap());
             entry.airVelX = dx >= 0 ? walkStep : -walkStep;
             bot.setStance(dx >= 0 ? 6 : 7);
-            broadcastMovement(bot, dx >= 0 ? cfg.WALK_VEL : -cfg.WALK_VEL, jumpVelY);
+            broadcastMovement(bot, velocityFromDeltaX(entry.airVelX), jumpVelY);
         }
     }
 
@@ -669,11 +719,11 @@ class BotMovementManager {
         entry.velY        = -jumpForcePerTick();
         entry.inAir       = true;
         entry.seekingRope = true;
-        int walkStep = walkStep();
+        int walkStep = walkStep(bot.getMap());
         entry.airVelX     = dx > 0 ? walkStep : dx < 0 ? -walkStep : 0;
         bot.setStance(dx >= 0 ? 6 : 7);
         int jumpVelY  = -(int) ((jumpForcePerTick() - gravityPerTick()) * (1000f / cfg.TICK_MS));
-        int velXBcast = dx > 0 ? cfg.WALK_VEL : dx < 0 ? -cfg.WALK_VEL : 0;
+        int velXBcast = velocityFromDeltaX(entry.airVelX);
         broadcastMovement(bot, velXBcast, jumpVelY);
     }
 
