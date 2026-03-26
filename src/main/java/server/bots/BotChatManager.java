@@ -564,7 +564,7 @@ class BotChatManager {
     private static void reportSkills(BotEntry entry, Character bot) {
         Map<Integer, List<LearnedSkill>> skillTrees = collectLearnedSkillTrees(bot);
         if (skillTrees.isEmpty()) {
-            queueBotSay(entry, "no job skills yet");
+            queueBotSay(entry, "no job skills yet " + bot.getRemainingSp() + " SP left");
             return;
         }
 

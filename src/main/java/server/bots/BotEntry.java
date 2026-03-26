@@ -46,7 +46,7 @@ class BotEntry {
 
     // Down-jump: true when prone was shown last tick, jump fires this tick
     boolean downJumpPending = false;
-    long downJumpGracePeriodMS = 500;
+    long downJumpGracePeriodMS = 0;
 
     // Stuck recovery
     int   stuckCheckElapsedMs = 0;

@@ -377,7 +377,7 @@ class BotMovementManager {
         // Always: complete a pending down-jump (prone shown last logic tick)
         if (entry.downJumpPending) {
             entry.downJumpPending    = false;
-            entry.downJumpGracePeriodMS = 300L;
+            entry.downJumpGracePeriodMS = 350L;
             startAirborneMotion(entry, bot, -downJumpForcePerTick(), 0, false);
             entry.jumpCooldownMs     = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS);
             bot.setPosition(new Point(botPos.x, botPos.y));

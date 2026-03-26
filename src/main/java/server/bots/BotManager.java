@@ -412,9 +412,9 @@ public class BotManager {
         }
 
         // Shift target by bot's personal offset so multiple bots spread out (follow + grind)
-        if (entry.following || entry.grinding) {
-            targetPos = new Point(targetPos.x + entry.followOffsetX, targetPos.y);
-        }
+//        if (entry.following || entry.grinding) {
+//            targetPos = new Point(targetPos.x + entry.followOffsetX, targetPos.y);
+//        }
 
         if (entry.climbing) {
             BotMovementManager.tickClimbing(entry, targetPos, runAiTick);
