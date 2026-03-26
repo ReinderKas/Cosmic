@@ -178,8 +178,8 @@ class BotMovementManager {
         entry.climbing          = false;
         entry.velY              = 0f;
         entry.hspeed            = 0.0;
-        entry.physX             = 0.0;
-        entry.physY             = 0.0;
+        entry.physX             = entry.bot.getPosition().x;
+        entry.physY             = entry.bot.getPosition().y;
         entry.groundPhysicsCarryMs = 0.0;
         entry.airVelX           = 0;
         entry.wasMovingX        = false;
