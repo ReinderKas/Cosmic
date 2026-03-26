@@ -13,6 +13,7 @@ import constants.inventory.ItemConstants;
 import constants.skills.Crusader;
 import constants.skills.DawnWarrior;
 import constants.skills.Magician;
+import constants.skills.Warrior;
 import constants.skills.WhiteKnight;
 import net.server.Server;
 import org.slf4j.Logger;
@@ -60,6 +61,7 @@ public class BotManager {
         public int   POT_STOP              = 10;    // stop grinding below this HP pot count
         public int   POT_CHECK_INTERVAL_MS = 2_000;
         public int   MP_RECOVERY_INTERVAL_MS = 10_000;
+        public int   BASE_HP_RECOVERY = 10;
         public int   BASE_MP_RECOVERY = 3;
         public float AUTOPOT_HP_THRESH = 0.7f; // use HP pot when HP falls below this ratio
         public float AUTOPOT_MP_THRESH = 0.5f; // use MP pot when MP falls below this ratio
@@ -629,7 +631,9 @@ public class BotManager {
     }
 
     private void tickPassiveMpRecovery(BotEntry entry, Character bot) {
-        if (bot.getMp() >= bot.getCurrentMaxMp()) {
+        boolean hpFull = bot.getHp() >= bot.getCurrentMaxHp();
+        boolean mpFull = bot.getMp() >= bot.getCurrentMaxMp();
+        if (hpFull && mpFull) {
             entry.mpRecoveryTimerMs = 0;
             return;
         }
@@ -640,12 +644,23 @@ public class BotManager {
 
         entry.mpRecoveryTimerMs = BotMovementManager.delayAfterCurrentTick(cfg.MP_RECOVERY_INTERVAL_MS);
 
-        int recovery = calculatePassiveMpRecovery(entry, bot);
-        if (recovery <= 0) {
+        int hpRecovery = hpFull ? 0 : calculatePassiveHpRecovery(entry, bot);
+        int mpRecovery = mpFull ? 0 : calculatePassiveMpRecovery(entry, bot);
+        if (hpRecovery <= 0 && mpRecovery <= 0) {
             return;
         }
 
-        bot.addMP(recovery);
+        bot.addMPHP(hpRecovery, mpRecovery);
+    }
+
+    private int calculatePassiveHpRecovery(BotEntry entry, Character bot) {
+        int recovery = cfg.BASE_HP_RECOVERY;
+        if (!isStandingStillForRecovery(entry, bot)) {
+            return recovery;
+        }
+
+        recovery += getFlatHpRecoveryBonus(bot, Warrior.IMPROVED_HPREC);
+        return recovery;
     }
 
     private int calculatePassiveMpRecovery(BotEntry entry, Character bot) {
@@ -667,6 +682,20 @@ public class BotManager {
         }
 
         return entry.lastDesiredDirection == 0 && bot.getStance() == BotMovementManager.cfg.STAND_STANCE;
+    }
+
+    private int getFlatHpRecoveryBonus(Character bot, int skillId) {
+        Skill skill = SkillFactory.getSkill(skillId);
+        if (skill == null) {
+            return 0;
+        }
+
+        int level = bot.getSkillLevel(skill);
+        if (level <= 0) {
+            return 0;
+        }
+
+        return skill.getEffect(level).getHp();
     }
 
     private int getFlatMpRecoveryBonus(Character bot, int skillId) {

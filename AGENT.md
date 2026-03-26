@@ -4,3 +4,6 @@ Key consideration / guidelines
 - Keep methods short and readable, use extract method refactoring, extract low-level logic code if it gets too large, even if nothing else share the code.
 - Prefers early exits over nested ifs
 - If multiple options/solutions is available with tradeoffs, propose and ask for selection, if multiple options are available but certain solution is obviously objectively superior to you then just proceed and no need to ask
+
+Reference if need to look at client code (open source client, may not be 1:1 to real client but good enough reimplementation)
+(up 1 folder)\OpenStory
