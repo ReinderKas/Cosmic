@@ -677,8 +677,14 @@ class BotMovementManager {
 
     static Point advanceAirbornePosition(BotEntry entry) {
         entry.physX += entry.airVelX;
-        entry.velY = Math.min(entry.velY + gravityPerTick(), maxFallPerTick());
-        entry.physY += entry.velY;
+
+        float aPerTick = gravityPerTick(); // px/tick^2
+
+        // exact discrete displacement for one tick when velY is velocity at tick start
+        entry.physY += entry.velY + 0.5f * aPerTick;
+
+        entry.velY = Math.min(entry.velY + aPerTick, maxFallPerTick());
+
         return roundedAirPosition(entry);
     }
 
@@ -769,17 +775,26 @@ class BotMovementManager {
      */
     static boolean arcCheckJump(Character bot, Point from, int stepX, int targetX, int targetY) {
         Config cfg = BotMovementManager.cfg;
-        float  vy    = -jumpForcePerTick();
+
+        float vy = -jumpForcePerTick(); // velocity at start of tick
         double physX = from.x;
         double physY = from.y;
-        int    prevIntY = from.y;
+        int prevIntY = from.y;
+
         for (int t = 0; t < (1500 / cfg.TICK_MS); t++) {
             physX += stepX;
-            vy = Math.min(vy + gravityPerTick(), maxFallPerTick());
-            physY += vy;
+            float aPerTick = gravityPerTick();
+
+            // exact discrete displacement for one tick using start-of-tick velocity
+            physY += vy + 0.5f * aPerTick;
+
+            // advance velocity to end-of-tick
+            vy = Math.min(vy + aPerTick, maxFallPerTick());
+
             int x = (int) Math.round(physX);
             int intY = (int) Math.round(physY);
-            if (vy > 0) { // descending — mirrors tickAirborne landing check
+
+            if (vy > 0) { // descending — mirrors airborne landing logic
                 Point floor = bot.getMap().getPointBelow(new Point(x, prevIntY + 1));
                 if (floor != null && floor.y <= intY) {
                     if (isUsefulJumpLanding(cfg, from, floor, targetX, targetY, stepX)) {
@@ -787,8 +802,10 @@ class BotMovementManager {
                     }
                 }
             }
+
             prevIntY = intY;
         }
+
         return false;
     }
 

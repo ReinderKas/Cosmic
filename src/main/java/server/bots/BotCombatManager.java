@@ -70,7 +70,7 @@ class BotCombatManager {
     static class Config {
         // Physics (combat use only)
         // OpenStory Player::damage applies vforce -= 3.5 on knockback at an 8 ms timestep.
-        public float KNOCKBACK_RISE = 3.5f;
+        public float KNOCKBACK_RISE = 3.5f / 0.008f * (BotMovementManager.cfg.TICK_MS / 1000f);
 
         // Basic attack fallback when weapon data cannot produce a real normal-attack hit box.
         public int   ATTACK_RANGE_X  = 80;
@@ -139,7 +139,7 @@ class BotCombatManager {
         bot.setPosition(new Point(kbX, bp.y));
         BotMovementManager.resetEntryState(entry);
         int airVelX = (dir == 0 ? 1 : -1) * BotMovementManager.walkStep(bot.getMap());
-        BotMovementManager.startAirborneMotion(entry, bot, -cc.KNOCKBACK_RISE, airVelX, false);
+        BotMovementManager.startAirborneMotion(entry, bot, -cfg.KNOCKBACK_RISE, airVelX, false);
         int velXBcast = entry.airVelX * (1000 / mc.TICK_MS);
         int velYBcast = (int) (-entry.velY * (1000f / mc.TICK_MS));
         BotMovementManager.broadcastMovement(bot, velXBcast, velYBcast);
