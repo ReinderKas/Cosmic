@@ -704,10 +704,10 @@ public class BotManager {
 
         if (!entry.grinding) return;
         int[] pots = countPotions(bot);
-        if (pots[0] < cfg.POT_STOP && bot.getHp() < bot.getMaxHp() * 0.5f) {
+        if (pots[0] < cfg.POT_STOP && bot.getHp() < bot.getMaxHp() * 0.4f) {
             entry.grinding = false;
             entry.following = true;
-            botSay(bot, "out of HP pots!! walking to you");
+            botSay(bot, "low on pots!! walking to you");
         }
     }
 

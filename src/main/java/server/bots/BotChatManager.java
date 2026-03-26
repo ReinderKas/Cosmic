@@ -562,6 +562,11 @@ class BotChatManager {
     }
 
     private static void reportSkills(BotEntry entry, Character bot) {
+        if (bot.isBeginnerJob()) {
+            reportBeginnerSkills(entry, bot);
+            return;
+        }
+
         Map<Integer, List<LearnedSkill>> skillTrees = collectLearnedSkillTrees(bot);
         if (skillTrees.isEmpty()) {
             queueBotSay(entry, "no job skills yet " + bot.getRemainingSp() + " SP left");
@@ -576,6 +581,28 @@ class BotChatManager {
 
         entry.pendingAction = SKILL_TREE_CHOICE_ACTION;
         queueBotSay(entry, skillTreeChoicePrompt(skillTrees));
+    }
+
+    private static void reportBeginnerSkills(BotEntry entry, Character bot) {
+        List<LearnedSkill> beginnerSkills = collectLearnedBeginnerSkills(bot);
+        int beginnerSpLeft = getRemainingBeginnerSp(bot);
+
+        if (beginnerSkills.isEmpty()) {
+            queueBotSay(entry, "no learned beginner skills yet " + beginnerSpLeft + " beginner SP left");
+            return;
+        }
+
+        StringBuilder line = new StringBuilder("beginner: ");
+        for (int i = 0; i < beginnerSkills.size(); i++) {
+            if (i > 0) {
+                line.append(", ");
+            }
+
+            LearnedSkill skill = beginnerSkills.get(i);
+            line.append(skill.name()).append(" lv").append(skill.level());
+        }
+        line.append(" | ").append(beginnerSpLeft).append(" beginner SP left");
+        queueBotSay(entry, line.toString());
     }
 
     private static void reportInventory(BotEntry entry, Character bot) {
@@ -671,6 +698,40 @@ class BotChatManager {
             skills.sort(Comparator.comparingInt(LearnedSkill::id));
         }
         return skillTrees;
+    }
+
+    private static List<LearnedSkill> collectLearnedBeginnerSkills(Character bot) {
+        List<LearnedSkill> beginnerSkills = new ArrayList<>();
+        for (Map.Entry<Skill, Character.SkillEntry> entry : bot.getSkills().entrySet()) {
+            Skill skill = entry.getKey();
+            Character.SkillEntry skillEntry = entry.getValue();
+            if (skill == null || skillEntry == null || skillEntry.skillevel <= 0) {
+                continue;
+            }
+
+            int skillId = skill.getId();
+            if (!skill.isBeginnerSkill() || GameConstants.isHiddenSkills(skillId)) {
+                continue;
+            }
+
+            beginnerSkills.add(new LearnedSkill(skillId, skillName(skillId), skillEntry.skillevel));
+        }
+
+        beginnerSkills.sort(Comparator.comparingInt(LearnedSkill::id));
+        return beginnerSkills;
+    }
+
+    private static int getRemainingBeginnerSp(Character bot) {
+        int usedBeginnerSp = 0;
+        int beginnerSkillBase = bot.getJobType() * 10000000 + 1000;
+        for (int i = 0; i < 3; i++) {
+            Skill skill = SkillFactory.getSkill(beginnerSkillBase + i);
+            if (skill != null) {
+                usedBeginnerSp += bot.getSkillLevel(skill);
+            }
+        }
+
+        return Math.max(0, Math.min(bot.getLevel() - 1, 6) - usedBeginnerSp);
     }
 
     private static void queueSkillTreeReport(BotEntry entry, int treeId, List<LearnedSkill> skills) {
