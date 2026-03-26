@@ -111,6 +111,7 @@ import server.Storage;
 import server.ThreadManager;
 import server.TimerManager;
 import server.Trade;
+import server.bots.BotManager;
 import server.events.Events;
 import server.events.RescueGaga;
 import server.events.gm.Fitness;
@@ -7485,6 +7486,7 @@ public class Character extends AbstractCharacterObject {
                         if (qs.getInfoNumber() > 0) {
                             announceUpdateQuest(DelayedQuestUpdate.UPDATE, qs, true);
                         }
+                        BotManager.getInstance().syncPartyBotsQuestProgress(this, qs.getQuest().getId(), id, qs.getProgress(id));
                     }
                 }
             }
@@ -9516,6 +9518,7 @@ public class Character extends AbstractCharacterObject {
         if (qs.getInfoNumber() > 0) {
             announceUpdateQuest(DelayedQuestUpdate.UPDATE, qs, true);
         }
+        BotManager.getInstance().syncPartyBotsQuestProgress(this, id, infoNumber, progress);
     }
 
     public void awardQuestPoint(int awardedPoints) {

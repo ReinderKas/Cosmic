@@ -2,6 +2,7 @@ package server.bots;
 
 import client.BotClient;
 import client.Character;
+import client.QuestStatus;
 import client.Skill;
 import client.SkillFactory;
 import client.inventory.Inventory;
@@ -24,10 +25,12 @@ import server.TimerManager;
 import server.life.Monster;
 import server.maps.MapItem;
 import server.maps.MapleMap;
+import server.quest.Quest;
 import tools.PacketCreator;
 
 import java.awt.*;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -200,6 +203,44 @@ public class BotManager {
         return (entries != null && !entries.isEmpty()) ? entries.get(0).bot : null;
     }
 
+    public void syncPartyBotsQuestStart(Character source, Quest quest, int npc) {
+        if (quest == null) {
+            return;
+        }
+
+        for (Character bot : getPartyBots(source)) {
+            if (bot.getQuest(quest).getStatus() == QuestStatus.Status.STARTED) {
+                continue;
+            }
+            quest.forceStartWithActions(bot, resolveQuestNpc(source, quest, npc));
+        }
+    }
+
+    public void syncPartyBotsQuestProgress(Character source, int questId, int infoNumber, String progress) {
+        if (progress == null) {
+            return;
+        }
+
+        Quest quest = Quest.getInstance(questId);
+        int npc = resolveQuestNpc(source, quest, source.getQuest(quest).getNpc());
+        for (Character bot : getPartyBots(source)) {
+            ensureQuestStarted(bot, quest, npc);
+            bot.setQuestProgress(questId, infoNumber, progress);
+        }
+    }
+
+    public void syncPartyBotsQuestComplete(Character source, Quest quest, int npc, Integer selection) {
+        if (quest == null) {
+            return;
+        }
+
+        int resolvedNpc = resolveQuestNpc(source, quest, npc);
+        for (Character bot : getPartyBots(source)) {
+            ensureQuestStarted(bot, quest, resolvedNpc);
+            quest.forceCompleteWithActions(bot, resolvedNpc, selection);
+        }
+    }
+
     public String manualTradeGreeting() {
         return randomReply(List.of(
                 "?",
@@ -208,6 +249,46 @@ public class BotManager {
                 "trade?",
                 "show me",
                 "lets see"));
+    }
+
+    private List<Character> getPartyBots(Character source) {
+        if (source == null || source.getParty() == null || source.getClient() instanceof BotClient) {
+            return List.of();
+        }
+
+        List<Character> partyBots = new ArrayList<>();
+        for (Character member : source.getPartyMembersOnline()) {
+            if (member == null || member.getId() == source.getId()) {
+                continue;
+            }
+            if (member.getClient() instanceof BotClient) {
+                partyBots.add(member);
+            }
+        }
+        return partyBots;
+    }
+
+    private void ensureQuestStarted(Character bot, Quest quest, int npc) {
+        if (bot.getQuest(quest).getStatus() == QuestStatus.Status.STARTED) {
+            return;
+        }
+
+        quest.forceStartWithActions(bot, npc);
+    }
+
+    private int resolveQuestNpc(Character source, Quest quest, int fallbackNpc) {
+        if (fallbackNpc > 0) {
+            return fallbackNpc;
+        }
+
+        if (source != null) {
+            int sourceNpc = source.getQuest(quest).getNpc();
+            if (sourceNpc > 0) {
+                return sourceNpc;
+            }
+        }
+
+        return constants.id.NpcId.MAPLE_ADMINISTRATOR;
     }
 
     public void handleChat(Character owner, String message) {

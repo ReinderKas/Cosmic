@@ -90,6 +90,15 @@ public class ItemAction extends AbstractQuestAction {
 
     @Override
     public void run(Character chr, Integer extSelection) {
+        runInternal(chr, extSelection, false);
+    }
+
+    @Override
+    public void forceRun(Character chr, Integer extSelection) {
+        runInternal(chr, extSelection, true);
+    }
+
+    private void runInternal(Character chr, Integer extSelection, boolean tolerateMissingTakeItems) {
         List<ItemData> takeItem = new LinkedList<>();
         List<ItemData> giveItem = new LinkedList<>();
 
@@ -101,6 +110,7 @@ public class ItemAction extends AbstractQuestAction {
         }
 
         int extNum = 0;
+        int resolvedSelection = extSelection != null ? extSelection : 0;
         if (props > 0) {
             rndProps = Randomizer.nextInt(props);
         }
@@ -111,7 +121,7 @@ public class ItemAction extends AbstractQuestAction {
 
             if (iEntry.getProp() != null) {
                 if (iEntry.getProp() == -1) {
-                    if (extSelection != extNum++) {
+                    if (resolvedSelection != extNum++) {
                         continue;
                     }
                 } else {
@@ -136,21 +146,13 @@ public class ItemAction extends AbstractQuestAction {
 
         for (ItemData iEntry : takeItem) {
             int itemid = iEntry.getId(), count = iEntry.getCount();
-
-            InventoryType type = ItemConstants.getInventoryType(itemid);
             int quantity = count * -1; // Invert
-            if (type.equals(InventoryType.EQUIP)) {
-                if (chr.getInventory(type).countById(itemid) < quantity) {
-                    // Not enough in the equip inventoty, so check Equipped...
-                    if (chr.getInventory(InventoryType.EQUIPPED).countById(itemid) > quantity) {
-                        // Found it equipped, so change the type to equipped.
-                        type = InventoryType.EQUIPPED;
-                    }
-                }
+            int removed = tolerateMissingTakeItems
+                    ? removeAvailableQuantity(chr, itemid, quantity)
+                    : removeExactQuantity(chr, itemid, quantity);
+            if (removed > 0) {
+                chr.sendPacket(PacketCreator.getShowItemGain(itemid, (short) (-removed), true));
             }
-
-            InventoryManipulator.removeById(chr.getClient(), type, itemid, quantity, true, false);
-            chr.sendPacket(PacketCreator.getShowItemGain(itemid, (short) count, true));
         }
 
         for (ItemData iEntry : giveItem) {
@@ -159,6 +161,40 @@ public class ItemAction extends AbstractQuestAction {
             InventoryManipulator.addById(chr.getClient(), itemid, (short) count, "", -1, period > 0 ? (System.currentTimeMillis() + MINUTES.toMillis(period)) : -1);
             chr.sendPacket(PacketCreator.getShowItemGain(itemid, (short) count, true));
         }
+    }
+
+    private int removeExactQuantity(Character chr, int itemid, int quantity) {
+        InventoryType type = resolveRemovalType(chr, itemid, quantity);
+        InventoryManipulator.removeById(chr.getClient(), type, itemid, quantity, true, false);
+        return quantity;
+    }
+
+    private int removeAvailableQuantity(Character chr, int itemid, int quantity) {
+        InventoryType type = ItemConstants.getInventoryType(itemid);
+        int removed = removeAvailableQuantity(chr, type, itemid, quantity);
+        if (type == InventoryType.EQUIP && removed < quantity) {
+            removed += removeAvailableQuantity(chr, InventoryType.EQUIPPED, itemid, quantity - removed);
+        }
+        return removed;
+    }
+
+    private int removeAvailableQuantity(Character chr, InventoryType type, int itemid, int quantity) {
+        int available = chr.getInventory(type).countById(itemid);
+        int toRemove = Math.min(quantity, available);
+        if (toRemove > 0) {
+            InventoryManipulator.removeById(chr.getClient(), type, itemid, toRemove, true, false);
+        }
+        return toRemove;
+    }
+
+    private InventoryType resolveRemovalType(Character chr, int itemid, int quantity) {
+        InventoryType type = ItemConstants.getInventoryType(itemid);
+        if (type.equals(InventoryType.EQUIP)
+                && chr.getInventory(type).countById(itemid) < quantity
+                && chr.getInventory(InventoryType.EQUIPPED).countById(itemid) > quantity) {
+            return InventoryType.EQUIPPED;
+        }
+        return type;
     }
 
     @Override

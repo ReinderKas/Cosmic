@@ -32,6 +32,7 @@ import provider.DataProvider;
 import provider.DataProviderFactory;
 import provider.DataTool;
 import provider.wz.WZFiles;
+import server.bots.BotManager;
 import server.quest.actions.AbstractQuestAction;
 import server.quest.actions.BuffAction;
 import server.quest.actions.ExpAction;
@@ -324,7 +325,8 @@ public class Quest {
             for (AbstractQuestAction a : acts) {
                 a.run(chr, null);
             }
-            forceStart(chr, npc);
+            forceStart(chr, npc, false);
+            BotManager.getInstance().syncPartyBotsQuestStart(chr, this, npc);
         }
     }
 
@@ -340,13 +342,14 @@ public class Quest {
                     return;
                 }
             }
-            forceComplete(chr, npc);
+            forceComplete(chr, npc, false);
             for (AbstractQuestAction a : acts) {
                 a.run(chr, selection);
             }
             if (!this.hasNextQuestAction()) {
                 chr.announceUpdateQuest(Character.DelayedQuestUpdate.INFO, chr.getQuest(this));
             }
+            BotManager.getInstance().syncPartyBotsQuestComplete(chr, this, npc, selection);
         }
     }
 
@@ -369,6 +372,10 @@ public class Quest {
     }
 
     public boolean forceStart(Character chr, int npc) {
+        return forceStart(chr, npc, true);
+    }
+
+    private boolean forceStart(Character chr, int npc, boolean syncPartyBots) {
         QuestStatus newStatus = new QuestStatus(this, QuestStatus.Status.STARTED, npc);
 
         QuestStatus oldStatus = chr.getQuest(this.getId());
@@ -400,11 +407,18 @@ public class Quest {
         }
 
         chr.updateQuestStatus(newStatus);
+        if (syncPartyBots) {
+            BotManager.getInstance().syncPartyBotsQuestStart(chr, this, npc);
+        }
 
         return true;
     }
 
     public boolean forceComplete(Character chr, int npc) {
+        return forceComplete(chr, npc, true);
+    }
+
+    private boolean forceComplete(Character chr, int npc, boolean syncPartyBots) {
         if (timeLimit > 0) {
             chr.sendPacket(PacketCreator.removeQuestTimeLimit(id));
         }
@@ -417,7 +431,27 @@ public class Quest {
 
         chr.sendPacket(PacketCreator.showSpecialEffect(9)); // Quest completion
         chr.getMap().broadcastMessage(chr, PacketCreator.showForeignEffect(chr.getId(), 9), false); //use 9 instead of 12 for both
+        if (syncPartyBots) {
+            BotManager.getInstance().syncPartyBotsQuestComplete(chr, this, npc, null);
+        }
         return true;
+    }
+
+    public void forceStartWithActions(Character chr, int npc) {
+        for (AbstractQuestAction action : startActs.values()) {
+            action.forceRun(chr, null);
+        }
+        forceStart(chr, npc, false);
+    }
+
+    public void forceCompleteWithActions(Character chr, int npc, Integer selection) {
+        forceComplete(chr, npc, false);
+        for (AbstractQuestAction action : completeActs.values()) {
+            action.forceRun(chr, selection);
+        }
+        if (!this.hasNextQuestAction()) {
+            chr.announceUpdateQuest(Character.DelayedQuestUpdate.INFO, chr.getQuest(this));
+        }
     }
 
     public short getId() {
