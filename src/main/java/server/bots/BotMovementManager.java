@@ -192,6 +192,8 @@ class BotMovementManager {
         entry.waypointRope      = null;
         entry.grindTarget       = null;
         entry.attackCooldownMs  = 0;
+        entry.navTargetPos      = null;
+        entry.navEdge           = null;
     }
 
     // -------------------------------------------------------------------------
@@ -841,6 +843,57 @@ class BotMovementManager {
             return true;
         }
         return towardStep != 0 && arcCheckJump(bot, botPos, -towardStep, targetPos.x, targetPos.y);
+    }
+
+    static final class JumpLanding {
+        private final Point point;
+        private final Foothold foothold;
+
+        JumpLanding(Point point, Foothold foothold) {
+            this.point = point;
+            this.foothold = foothold;
+        }
+
+        Point point() {
+            return point;
+        }
+
+        Foothold foothold() {
+            return foothold;
+        }
+    }
+
+    static JumpLanding simulateJumpLanding(MapleMap map, Point from, int stepX) {
+        Config cfg = BotMovementManager.cfg;
+
+        float vy = -jumpForcePerTick();
+        double physX = from.x;
+        double physY = from.y;
+        int prevIntY = from.y;
+
+        for (int t = 0; t < (1500 / cfg.TICK_MS); t++) {
+            physX += stepX;
+            float aPerTick = gravityPerTick();
+            physY += vy + 0.5f * aPerTick;
+            vy = Math.min(vy + aPerTick, maxFallPerTick());
+
+            int x = (int) Math.round(physX);
+            int intY = (int) Math.round(physY);
+            if (vy > 0) {
+                Point probe = new Point(x, prevIntY + 1);
+                Point floor = map.getPointBelow(probe);
+                if (floor != null && floor.y <= intY) {
+                    Foothold foothold = map.getFootholds().findBelow(probe);
+                    if (foothold != null) {
+                        return new JumpLanding(new Point(x, floor.y), foothold);
+                    }
+                }
+            }
+
+            prevIntY = intY;
+        }
+
+        return null;
     }
 
     /**

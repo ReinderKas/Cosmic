@@ -499,6 +499,12 @@ public class BotManager {
 //            targetPos = new Point(targetPos.x + entry.followOffsetX, targetPos.y);
 //        }
 
+        BotNavigationManager.NavigationDirective navDirective = BotNavigationManager.resolveTarget(entry, targetPos, runAiTick);
+        if (navDirective.consumedTick) {
+            return;
+        }
+        targetPos = navDirective.targetPos;
+
         if (entry.climbing) {
             BotMovementManager.tickClimbing(entry, targetPos, runAiTick);
         } else if (entry.inAir) {
