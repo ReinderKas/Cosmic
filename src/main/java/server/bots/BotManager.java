@@ -325,9 +325,13 @@ public class BotManager {
         BotChatManager.tickAfkCheck(entry, owner);
         BotDropManager.tickTrade(entry, bot);
         BotDropManager.tickManualTrade(entry, bot);
+        BotCombatManager.tickActionLock(entry);
         if (runAiTick) {
             BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
             BotCombatManager.tickBuffs(entry, bot);
+        }
+        if (tickActionLocked(entry, targetPos)) {
+            return;
         }
 
         if (!entry.following && !entry.grinding) {
@@ -419,6 +423,16 @@ public class BotManager {
         } else {
             BotMovementManager.tickGrounded(entry, targetPos, runAiTick);
         }
+    }
+
+    private boolean tickActionLocked(BotEntry entry, Point targetPos) {
+        if (entry.attackCooldownMs <= 0) {
+            return false;
+        }
+        if (entry.inAir) {
+            BotMovementManager.tickAirborne(entry, targetPos);
+        }
+        return true;
     }
 
 

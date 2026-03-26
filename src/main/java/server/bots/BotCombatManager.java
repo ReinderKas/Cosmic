@@ -222,6 +222,7 @@ class BotCombatManager {
     }
 
     static void tickBuffs(BotEntry entry, Character bot) {
+        if (entry.attackCooldownMs > 0) return;
         if (!entry.following && !entry.grinding) return;
         if (entry.buffSkillIds.isEmpty()) return;
         if (bot.getMap().getAllMonsters().stream().noneMatch(Monster::isAlive)) return;
@@ -240,9 +241,11 @@ class BotCombatManager {
 
             long dur = fx.getDuration();
             entry.nextBuffAt.put(skillId, now + (long) (dur * 0.9));
+            entry.attackCooldownMs = Math.max(entry.attackCooldownMs, toCooldownMs(resolveSkillAttackDelayMillis(skill)));
             if (fx.getCooldown() > 0) {
                 bot.addCooldown(skillId, now, fx.getCooldown() * 1000L);
             }
+            return;
         }
     }
 
@@ -298,7 +301,6 @@ class BotCombatManager {
 
     static void attackMonster(BotEntry entry, Character bot, AttackPlan attackPlan) {
         if (entry.attackCooldownMs > 0) {
-            entry.attackCooldownMs = BotMovementManager.tickDown(entry.attackCooldownMs);
             return;
         }
 
@@ -328,7 +330,14 @@ class BotCombatManager {
         }
 
         applyAttackRoute(attackPlan.route, attack, bot);
-        entry.attackCooldownMs = attackPlan.cooldownMs;
+        entry.attackCooldownMs = Math.max(entry.attackCooldownMs, attackPlan.cooldownMs);
+    }
+
+    static void tickActionLock(BotEntry entry) {
+        if (entry.attackCooldownMs <= 0) {
+            return;
+        }
+        entry.attackCooldownMs = BotMovementManager.tickDown(entry.attackCooldownMs);
     }
 
     private static AttackPlan planAoeAttack(BotEntry entry, Character bot, Monster primaryTarget) {
