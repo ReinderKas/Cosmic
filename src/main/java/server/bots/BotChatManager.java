@@ -228,7 +228,6 @@ class BotChatManager {
 
     private enum TransferMode {
         TRADE,
-        DROP_CONFIRM,
         CHOICE
     }
 
@@ -293,20 +292,6 @@ class BotChatManager {
                 }
                 return;
             }
-            if ("drop_confirm".equals(entry.pendingAction)) {
-                String category = entry.pendingDropCategory;
-                entry.pendingAction = null;
-                entry.pendingDropCategory = null;
-                if (LOGOUT_CONFIRM_PATTERN.matcher(message).find()) {
-                    TimerManager.getInstance().schedule(
-                            () -> BotDropManager.executeChoice(category, false, entry, entry.bot), 500);
-                } else {
-                    TimerManager.getInstance().schedule(
-                            () -> BotManager.getInstance().botSay(entry.bot, "ok! keeping them"), 500);
-                }
-                return;
-            }
-
             if (LOGOUT_CONFIRM_PATTERN.matcher(message).find()) {
                 String action = entry.pendingAction;
                 entry.pendingAction = null;
@@ -602,12 +587,6 @@ class BotChatManager {
         switch (transferCommand.mode) {
             case TRADE -> TimerManager.getInstance().schedule(
                     () -> BotDropManager.startTradeTransfer(category, entry, entry.bot), 600);
-            case DROP_CONFIRM -> {
-                entry.pendingAction = "drop_confirm";
-                entry.pendingDropCategory = category;
-                TimerManager.getInstance().schedule(
-                        () -> BotManager.getInstance().botSay(entry.bot, confirmDropPrompt(category)), 600);
-            }
             case CHOICE -> {
                 entry.pendingAction = "item_choice";
                 entry.pendingDropCategory = category;
@@ -621,11 +600,6 @@ class BotChatManager {
         String tradeCategory = matchTradeCategory(message);
         if (tradeCategory != null) {
             return new TransferCommand(TransferMode.TRADE, tradeCategory);
-        }
-
-        String dropCategory = matchDropCategory(message);
-        if (dropCategory != null) {
-            return new TransferCommand(TransferMode.DROP_CONFIRM, dropCategory);
         }
 
         String choiceCategory = matchChoiceCategory(message);
@@ -647,18 +621,15 @@ class BotChatManager {
         return matcher.find() ? "name:" + matcher.group(1).trim() : null;
     }
 
-    private static String matchDropCategory(String message) {
+    private static String matchChoiceCategory(String message) {
         if (DROP_SCROLLS_COMMAND_PATTERN.matcher(message).find()) return "scrolls";
         if (DROP_POTS_COMMAND_PATTERN.matcher(message).find()) return "pots";
         if (DROP_USE_COMMAND_PATTERN.matcher(message).find()) return "use";
         if (DROP_EQUIPS_COMMAND_PATTERN.matcher(message).find()) return "equips";
         if (DROP_ETC_COMMAND_PATTERN.matcher(message).find()) return "etc";
+        Matcher dropMatcher = DROP_ITEM_COMMAND_PATTERN.matcher(message);
+        if (dropMatcher.find()) return "name:" + dropMatcher.group(1).trim();
 
-        Matcher matcher = DROP_ITEM_COMMAND_PATTERN.matcher(message);
-        return matcher.find() ? "name:" + matcher.group(1).trim() : null;
-    }
-
-    private static String matchChoiceCategory(String message) {
         if (ASK_SCROLLS_COMMAND_PATTERN.matcher(message).find()) return "scrolls";
         if (ASK_POTS_COMMAND_PATTERN.matcher(message).find()) return "pots";
         if (ASK_USE_COMMAND_PATTERN.matcher(message).find()) return "use";
@@ -688,18 +659,6 @@ class BotChatManager {
         };
         String fmt = DROP_OR_TRADE_PROMPTS[ThreadLocalRandom.current().nextInt(DROP_OR_TRADE_PROMPTS.length)];
         return String.format(fmt, what);
-    }
-
-    private static String confirmDropPrompt(String category) {
-        String what = switch (category) {
-            case "scrolls" -> "scrolls";
-            case "pots"    -> "pots";
-            case "use"     -> "use items";
-            case "equips"  -> "equips";
-            case "etc"     -> "etc items";
-            default        -> category.startsWith("name:") ? "'" + category.substring(5) + "'" : "those items";
-        };
-        return "drop my " + what + "? say yes to confirm";
     }
 
     /** Maps a chat keyword to the correct next Job given bot's current job and level. Returns null if not valid. */
