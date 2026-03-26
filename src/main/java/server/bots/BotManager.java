@@ -2,11 +2,18 @@ package server.bots;
 
 import client.BotClient;
 import client.Character;
+import client.Skill;
+import client.SkillFactory;
 import client.inventory.Inventory;
 import client.inventory.InventoryType;
 import client.inventory.Item;
+import client.processor.action.PetAutopotProcessor;
 import client.keybind.KeyBinding;
 import constants.inventory.ItemConstants;
+import constants.skills.Crusader;
+import constants.skills.DawnWarrior;
+import constants.skills.Magician;
+import constants.skills.WhiteKnight;
 import net.server.Server;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,6 +59,8 @@ public class BotManager {
         public int   POT_LOW_WARN          = 100;   // warn on grind start below this count
         public int   POT_STOP              = 10;    // stop grinding below this HP pot count
         public int   POT_CHECK_INTERVAL_MS = 2_000;
+        public int   MP_RECOVERY_INTERVAL_MS = 10_000;
+        public int   BASE_MP_RECOVERY = 3;
         public float AUTOPOT_HP_THRESH = 0.7f; // use HP pot when HP falls below this ratio
         public float AUTOPOT_MP_THRESH = 0.5f; // use MP pot when MP falls below this ratio
     }
@@ -311,6 +320,7 @@ public class BotManager {
         BotCombatManager.tickMobDamage(entry, bot);
         tickPassiveLoot(entry, bot);
         tickPotionCheck(entry, bot);
+        tickPassiveMpRecovery(entry, bot);
         BotBuildManager.checkLevelUp(entry, bot);
         BotChatManager.tickAfkCheck(entry, owner);
         BotDropManager.tickTrade(entry, bot);
@@ -500,8 +510,18 @@ public class BotManager {
             StatEffect eff;
             try { eff = ii.getItemEffect(item.getItemId()); } catch (Exception e) { continue; }
             if (eff == null) continue;
-            if (eff.getHp() > bestHp) { bestHp = eff.getHp(); hpItemId = item.getItemId(); }
-            if (eff.getMp() > bestMp) { bestMp = eff.getMp(); mpItemId = item.getItemId(); }
+
+            int hpGain = resolveEffectiveRecoveryAmount(bot, eff, true);
+            if (hpGain > bestHp) {
+                bestHp = hpGain;
+                hpItemId = item.getItemId();
+            }
+
+            int mpGain = resolveEffectiveRecoveryAmount(bot, eff, false);
+            if (mpGain > bestMp) {
+                bestMp = mpGain;
+                mpItemId = item.getItemId();
+            }
         }
         if (hpItemId > 0) {
             bot.changeKeybinding(91, new KeyBinding(2, hpItemId));
@@ -583,6 +603,7 @@ public class BotManager {
         entry.potCheckTimerMs = BotMovementManager.delayAfterCurrentTick(cfg.POT_CHECK_INTERVAL_MS);
 
         setupAutopotForBot(bot);
+        triggerAutopotIfNeeded(bot);
 
         if (!entry.grinding) return;
         int[] pots = countPotions(bot);
@@ -591,6 +612,128 @@ public class BotManager {
             entry.following = true;
             botSay(bot, "out of HP pots!! walking to you");
         }
+    }
+
+    private void tickPassiveMpRecovery(BotEntry entry, Character bot) {
+        if (bot.getMp() >= bot.getCurrentMaxMp()) {
+            entry.mpRecoveryTimerMs = 0;
+            return;
+        }
+        if (entry.mpRecoveryTimerMs > 0) {
+            entry.mpRecoveryTimerMs = BotMovementManager.tickDown(entry.mpRecoveryTimerMs);
+            return;
+        }
+
+        entry.mpRecoveryTimerMs = BotMovementManager.delayAfterCurrentTick(cfg.MP_RECOVERY_INTERVAL_MS);
+
+        int recovery = calculatePassiveMpRecovery(entry, bot);
+        if (recovery <= 0) {
+            return;
+        }
+
+        bot.addMP(recovery);
+    }
+
+    private int calculatePassiveMpRecovery(BotEntry entry, Character bot) {
+        int recovery = cfg.BASE_MP_RECOVERY;
+        if (!isStandingStillForRecovery(entry, bot)) {
+            return recovery;
+        }
+
+        recovery += getFlatMpRecoveryBonus(bot, Crusader.IMPROVING_MPREC);
+        recovery += getFlatMpRecoveryBonus(bot, WhiteKnight.IMPROVING_MP_RECOVERY);
+        recovery += getFlatMpRecoveryBonus(bot, DawnWarrior.INCREASED_MP_RECOVERY);
+        recovery += getMagicianMpRecoveryBonus(bot);
+        return recovery;
+    }
+
+    private boolean isStandingStillForRecovery(BotEntry entry, Character bot) {
+        if (entry.inAir || entry.climbing) {
+            return false;
+        }
+
+        return entry.lastDesiredDirection == 0 && bot.getStance() == BotMovementManager.cfg.STAND_STANCE;
+    }
+
+    private int getFlatMpRecoveryBonus(Character bot, int skillId) {
+        Skill skill = SkillFactory.getSkill(skillId);
+        if (skill == null) {
+            return 0;
+        }
+
+        int level = bot.getSkillLevel(skill);
+        if (level <= 0) {
+            return 0;
+        }
+
+        return skill.getEffect(level).getMp();
+    }
+
+    private int getMagicianMpRecoveryBonus(Character bot) {
+        Skill skill = SkillFactory.getSkill(Magician.IMPROVED_MP_RECOVERY);
+        if (skill == null) {
+            return 0;
+        }
+
+        int level = bot.getSkillLevel(skill);
+        if (level <= 0) {
+            return 0;
+        }
+
+        return Math.max(0, (bot.getInt() / 10) * level);
+    }
+
+    private void triggerAutopotIfNeeded(Character bot) {
+        triggerAutopotIfNeeded(bot, (byte) 91, bot.getAutopotHpAlert(), true);
+        triggerAutopotIfNeeded(bot, (byte) 92, bot.getAutopotMpAlert(), false);
+    }
+
+    private void triggerAutopotIfNeeded(Character bot, byte key, float threshold, boolean hp) {
+        if (threshold <= 0f) {
+            return;
+        }
+
+        int max = hp ? bot.getCurrentMaxHp() : bot.getCurrentMaxMp();
+        if (max <= 0) {
+            return;
+        }
+
+        int current = hp ? bot.getHp() : bot.getMp();
+        if (((float) current) / max > threshold) {
+            return;
+        }
+
+        KeyBinding binding = bot.getKeymap().get(key);
+        if (binding == null) {
+            return;
+        }
+
+        int itemId = binding.getAction();
+        Item item = bot.getInventory(InventoryType.USE).findById(itemId);
+        if (item == null) {
+            return;
+        }
+
+        PetAutopotProcessor.triggerAutopotAction(bot.getClient(), item.getPosition(), itemId);
+    }
+
+    private int resolveEffectiveRecoveryAmount(Character bot, StatEffect effect, boolean hp) {
+        if (effect == null) {
+            return 0;
+        }
+
+        int flat = hp ? effect.getHp() : effect.getMp();
+        if (flat > 0) {
+            return flat;
+        }
+
+        double rate = hp ? effect.getHpRate() : effect.getMpRate();
+        if (rate <= 0) {
+            return 0;
+        }
+
+        int max = hp ? bot.getCurrentMaxHp() : bot.getCurrentMaxMp();
+        return (int) Math.ceil(max * rate);
     }
 
     // -------------------------------------------------------------------------

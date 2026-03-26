@@ -26,9 +26,6 @@ import client.Client;
 import client.processor.action.PetAutopotProcessor;
 import net.AbstractPacketHandler;
 import net.packet.InPacket;
-import server.ItemInformationProvider;
-import server.StatEffect;
-
 public final class PetAutoPotHandler extends AbstractPacketHandler {
 
     @Override
@@ -39,15 +36,7 @@ public final class PetAutoPotHandler extends AbstractPacketHandler {
         short slot = p.readShort();
         int itemId = p.readInt();
 
-        Character chr = c.getPlayer();
-        StatEffect stat = ItemInformationProvider.getInstance().getItemEffect(itemId);
-
-        if (stat.getMp() > 0 || stat.getMpRate() > 0.0) {
-            float estimatedMp = ((float) chr.getMp()) / chr.getCurrentMaxMp();
-            chr.setAutopotMpAlert(Math.max(estimatedMp + 0.01f, chr.getAutopotMpAlert()));
-        }
-
-        PetAutopotProcessor.runAutopotAction(c, slot, itemId);
+        PetAutopotProcessor.triggerAutopotAction(c, slot, itemId);
     }
 
 }

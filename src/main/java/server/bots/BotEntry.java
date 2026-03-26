@@ -77,6 +77,7 @@ class BotEntry {
 
     // Loot & potions
     int  potCheckTimerMs      = 0;
+    int  mpRecoveryTimerMs    = 0;
     int  invFullWarnCooldownMs = 0;
 
     // Job advancement: 0=none, 8=lv8 mage prompt, 10=lv10 1st job, 30=2nd, 70=3rd, 120=4th
