@@ -1739,6 +1739,7 @@ public class ItemInformationProvider {
         }
         for (Item item : items) {
             Equip equip = (Equip) item;
+            Map<String, Integer> stats = getEquipStats(equip.getItemId());
             int reqLevel = getEquipLevelReq(equip.getItemId());
             if (highfivestamp) {
                 reqLevel -= 5;
@@ -1746,28 +1747,9 @@ public class ItemInformationProvider {
                     reqLevel = 0;
                 }
             }
-            /*
-             int reqJob = getEquipStats(equip.getItemId()).get("reqJob");
-             if (reqJob != 0) {
-             Really hard check, and not really needed in this one
-             Gm's should just be GM job, and players cannot change jobs.
-             }*/
-            if (reqLevel > chr.getLevel()) {
+            if (!EquipRequirementChecker.meetsRequirements(
+                    chr.getJob(), stats, chr.getLevel(), reqLevel, tdex, tstr, tint, tluk, fame)) {
                 continue;
-            } else if (getEquipStats(equip.getItemId()).get("reqDEX") > tdex) {
-                continue;
-            } else if (getEquipStats(equip.getItemId()).get("reqSTR") > tstr) {
-                continue;
-            } else if (getEquipStats(equip.getItemId()).get("reqLUK") > tluk) {
-                continue;
-            } else if (getEquipStats(equip.getItemId()).get("reqINT") > tint) {
-                continue;
-            }
-            int reqPOP = getEquipStats(equip.getItemId()).get("reqPOP");
-            if (reqPOP > 0) {
-                if (getEquipStats(equip.getItemId()).get("reqPOP") > fame) {
-                    continue;
-                }
             }
             equip.wear(true);
             itemz.add(equip);
@@ -1817,28 +1799,14 @@ public class ItemInformationProvider {
         int reqLevel = getEquipLevelReq(equip.getItemId());
         if (highfivestamp) {
             reqLevel -= 5;
-        }
-        int i = 0; //lol xD
-        //Removed job check. Shouldn't really be needed.
-        if (reqLevel > chr.getLevel()) {
-            i++;
-        } else if (getEquipStats(equip.getItemId()).get("reqDEX") > chr.getTotalDex()) {
-            i++;
-        } else if (getEquipStats(equip.getItemId()).get("reqSTR") > chr.getTotalStr()) {
-            i++;
-        } else if (getEquipStats(equip.getItemId()).get("reqLUK") > chr.getTotalLuk()) {
-            i++;
-        } else if (getEquipStats(equip.getItemId()).get("reqINT") > chr.getTotalInt()) {
-            i++;
-        }
-        int reqPOP = getEquipStats(equip.getItemId()).get("reqPOP");
-        if (reqPOP > 0) {
-            if (getEquipStats(equip.getItemId()).get("reqPOP") > chr.getFame()) {
-                i++;
+            if (reqLevel < 0) {
+                reqLevel = 0;
             }
         }
-
-        if (i > 0) {
+        Map<String, Integer> stats = getEquipStats(equip.getItemId());
+        if (!EquipRequirementChecker.meetsRequirements(
+                chr.getJob(), stats, chr.getLevel(), reqLevel,
+                chr.getTotalDex(), chr.getTotalStr(), chr.getTotalInt(), chr.getTotalLuk(), chr.getFame())) {
             equip.wear(false);
             return false;
         }
