@@ -116,6 +116,7 @@ class BotChatManager {
     private static final String USE_WORDS = "(?:use|use\\s+items?|consumables?)";
     private static final String EQUIP_WORDS = "(?:equips?|equipment|gear)";
     private static final String ETC_WORDS = "(?:etc|junk|misc(?:ellaneous)?)";
+    private static final String MESO_WORDS = "mesos?";
 
     private static final Pattern SCROLLS_PATTERN = Pattern.compile(
             "\\b(any|do\\s+(you|u)\\s+have(\\s+any)?|got(\\s+any)?|"
@@ -161,8 +162,26 @@ class BotChatManager {
     private static final String TRADE_CMD_VERB = "(?:trade(?:\\s+(?:me|us))?)";
     private static final String DROP_CMD_VERB = "(?:drop|toss)";
     private static final String ASK_CMD_VERB = "(?:give(?:\\s+(?:me|us))?|pass(?:\\s+me)?)";
+    private static final String MESO_CMD_VERB = "(?:trade(?:\\s+(?:me|us))?|give(?:\\s+(?:me|us))?|gimme|pass(?:\\s+me)?)";
     private static final String TRANSFER_OWNER = "(?:(?:your|ur|my|all)\\s+)?";
     private static final String TRANSFER_RECIPIENT = "(?:(?:me|us)\\s+)?";
+    private static final String MESO_AMOUNT_TOKEN = "\\d[\\d,]*(?:\\.\\d+)?\\s*[kmb]?";
+    private static final Pattern TRADE_MESOS_COMMAND_PATTERN = Pattern.compile(
+            "\\b" + MESO_CMD_VERB + "\\s+" + TRANSFER_RECIPIENT
+            + "(?:(all)\\s+)?"
+            + "(?:(?:your|ur|my)\\s+)?"
+            + "(?:(" + MESO_AMOUNT_TOKEN + ")\\s+)?"
+            + MESO_WORDS + "\\b",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern TRADE_MESOS_AFTER_WORD_COMMAND_PATTERN = Pattern.compile(
+            "\\b" + MESO_CMD_VERB + "\\s+" + TRANSFER_RECIPIENT
+            + "(?:(?:your|ur|my)\\s+)?"
+            + MESO_WORDS + "\\s+(" + MESO_AMOUNT_TOKEN + ")[?!.,]?\\s*$",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern TRADE_MESOS_AMOUNT_ONLY_COMMAND_PATTERN = Pattern.compile(
+            "\\b" + MESO_CMD_VERB + "\\s+" + TRANSFER_RECIPIENT
+            + "(?:(all)|(" + MESO_AMOUNT_TOKEN + "))[?!.,]?\\s*$",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern TRADE_SCROLLS_COMMAND_PATTERN = Pattern.compile(
             "\\b" + TRADE_CMD_VERB + "\\s+" + TRANSFER_RECIPIENT + TRANSFER_OWNER + SCROLL_WORDS + "\\b",
             Pattern.CASE_INSENSITIVE);
@@ -870,6 +889,12 @@ class BotChatManager {
 
     private static void handleTransferCommand(BotEntry entry, TransferCommand transferCommand) {
         String category = transferCommand.category;
+        if (transferCommand.mode == TransferMode.TRADE && BotDropManager.isMesoCategory(category)) {
+            TimerManager.getInstance().schedule(
+                    () -> BotDropManager.startTradeTransfer(category, entry, entry.bot), 600);
+            return;
+        }
+
         if (!BotDropManager.hasTransferableItems(category, entry.bot)) {
             TimerManager.getInstance().schedule(
                     () -> BotManager.getInstance().botSay(entry.bot, BotDropManager.noItemsReply(category)), 600);
@@ -902,7 +927,10 @@ class BotChatManager {
         return null;
     }
 
-    private static String matchTradeCategory(String message) {
+    static String matchTradeCategory(String message) {
+        String mesoCategory = matchTradeMesoCategory(message);
+        if (mesoCategory != null) return mesoCategory;
+
         if (TRADE_SCROLLS_COMMAND_PATTERN.matcher(message).find()) return "scrolls";
         if (TRADE_POTS_COMMAND_PATTERN.matcher(message).find()) return "pots";
         if (TRADE_USE_COMMAND_PATTERN.matcher(message).find()) return "use";
@@ -911,6 +939,68 @@ class BotChatManager {
 
         Matcher matcher = TRADE_ITEM_COMMAND_PATTERN.matcher(message);
         return matcher.find() ? "name:" + matcher.group(1).trim() : null;
+    }
+
+    private static String matchTradeMesoCategory(String message) {
+        Matcher matcher = TRADE_MESOS_AFTER_WORD_COMMAND_PATTERN.matcher(message);
+        if (matcher.find()) {
+            return "mesos:" + parseMesoAmount(matcher.group(1));
+        }
+
+        matcher = TRADE_MESOS_COMMAND_PATTERN.matcher(message);
+        if (matcher.find()) {
+            if (matcher.group(1) != null) {
+                return "mesos";
+            }
+
+            String amountToken = matcher.group(2);
+            if (amountToken == null || amountToken.isBlank()) {
+                return "mesos";
+            }
+
+            return "mesos:" + parseMesoAmount(amountToken);
+        }
+
+        matcher = TRADE_MESOS_AMOUNT_ONLY_COMMAND_PATTERN.matcher(message);
+        if (!matcher.find()) {
+            return null;
+        }
+
+        if (matcher.group(1) != null) {
+            return "mesos";
+        }
+
+        return "mesos:" + parseMesoAmount(matcher.group(2));
+    }
+
+    private static int parseMesoAmount(String amountToken) {
+        String normalized = amountToken.toLowerCase().replace(",", "").replaceAll("\\s+", "");
+        long multiplier = 1L;
+        if (!normalized.isEmpty()) {
+            char suffix = normalized.charAt(normalized.length() - 1);
+            if (suffix == 'k' || suffix == 'm' || suffix == 'b') {
+                multiplier = switch (suffix) {
+                    case 'k' -> 1_000L;
+                    case 'm' -> 1_000_000L;
+                    default -> 1_000_000_000L;
+                };
+                normalized = normalized.substring(0, normalized.length() - 1);
+            }
+        }
+
+        if (normalized.isEmpty()) {
+            return 0;
+        }
+
+        try {
+            long amount = Math.round(Double.parseDouble(normalized) * multiplier);
+            if (amount < 0) {
+                return 0;
+            }
+            return (int) Math.min(amount, Integer.MAX_VALUE);
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
     }
 
     private static String matchChoiceCategory(String message) {

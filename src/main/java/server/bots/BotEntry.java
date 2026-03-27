@@ -101,8 +101,10 @@ class BotEntry {
     // Trade queue — driven by BotDropManager.tickTrade; null category = idle
     String     pendingTradeCategory = null;  // category being traded across the whole sequence
     List<Item> pendingTradeItems    = null;  // current batch (≤9); null while pausing between trades
+    int        pendingTradeMeso     = 0;     // mesos to add to the current trade window
     int        pendingTradeIdx      = 0;     // next item index in current batch
     int        pendingTradeTimerMs  = 0;     // context-dependent timer (reset on state change)
+    boolean    pendingTradeMesoAdded = false; // mesos already added to the current trade window
     boolean    pendingTradeAllAdded = false; // all items in batch added; waiting for owner OK
     boolean    pendingTradeBotDone  = false; // bot has called completeTrade this batch
     // Message queue — sends with ~5s spacing between messages

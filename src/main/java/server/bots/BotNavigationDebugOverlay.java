@@ -24,9 +24,13 @@ public final class BotNavigationDebugOverlay {
     private static final int AUTO_CLEAR_MS = 30_000;
     private static final int MAX_MISTS = 900;
     private static final int NODE_SIZE = 10;
+    private static final int GRAPH_NODE_SIZE = 8;
     private static final int LINE_THICKNESS = 4;
     private static final int PATH_THICKNESS = 6;
     private static final int DOTTED_SPACING = 22;
+    private static final int GRAPH_EDGE_SPACING = 60;
+    private static final int GRAPH_REGION_SPACING = 90;
+    private static final int PATH_EDGE_SPACING = 28;
 
     private static final Map<Integer, OverlayState> overlaysByViewerId = new ConcurrentHashMap<>();
 
@@ -40,17 +44,11 @@ public final class BotNavigationDebugOverlay {
 
         OverlayBuilder overlay = new OverlayBuilder(viewer);
         BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(viewer.getMap());
-        Set<Point> nodes = new HashSet<>();
         Set<String> drawnEdges = new HashSet<>();
 
         for (BotNavigationGraph.Region region : graph.regions) {
-            for (BotNavigationGraph.Segment segment : region.segments) {
-                Point start = new Point(segment.x1, segment.y1);
-                Point end = new Point(segment.x2, segment.y2);
-                overlay.drawLine(start, end, OverlayType.REGION, LINE_THICKNESS);
-                nodes.add(start);
-                nodes.add(end);
-            }
+            overlay.drawApproxRegion(region, OverlayType.REGION);
+            overlay.drawNode(region.centerPoint(), OverlayType.NODE, GRAPH_NODE_SIZE);
         }
 
         for (BotNavigationGraph.Region region : graph.regions) {
@@ -64,14 +62,8 @@ public final class BotNavigationDebugOverlay {
                     continue;
                 }
 
-                overlay.drawLine(edge.startPoint, edge.endPoint, overlayTypeForEdge(edge.type), LINE_THICKNESS);
-                nodes.add(new Point(edge.startPoint));
-                nodes.add(new Point(edge.endPoint));
+                overlay.drawSparseLine(edge.startPoint, edge.endPoint, overlayTypeForEdge(edge.type), LINE_THICKNESS, GRAPH_EDGE_SPACING);
             }
-        }
-
-        for (Point node : nodes) {
-            overlay.drawNode(node, OverlayType.NODE, NODE_SIZE);
         }
 
         replaceOverlay(viewer, overlay.objectIds());
@@ -108,14 +100,13 @@ public final class BotNavigationDebugOverlay {
         if (targetRegionId != startRegionId) {
             drawRegion(overlay, graph.getRegion(targetRegionId), OverlayType.TRANSITION);
         }
+
         for (BotNavigationGraph.Edge edge : path) {
-            overlay.drawLine(edge.startPoint, edge.endPoint, OverlayType.PATH, PATH_THICKNESS);
-            overlay.drawNode(edge.startPoint, OverlayType.NODE, NODE_SIZE);
-            overlay.drawNode(edge.endPoint, OverlayType.NODE, NODE_SIZE);
+            overlay.drawSparseLine(edge.startPoint, edge.endPoint, OverlayType.PATH, PATH_THICKNESS, PATH_EDGE_SPACING);
         }
 
         if (entry.navEdge != null) {
-            overlay.drawLine(entry.navEdge.startPoint, entry.navEdge.endPoint, OverlayType.CURRENT_EDGE, PATH_THICKNESS + 2);
+            overlay.drawSparseLine(entry.navEdge.startPoint, entry.navEdge.endPoint, OverlayType.CURRENT_EDGE, PATH_THICKNESS + 2, PATH_EDGE_SPACING);
             overlay.drawNode(entry.navEdge.startPoint, OverlayType.CURRENT_EDGE, NODE_SIZE + 2);
             overlay.drawNode(entry.navEdge.endPoint, OverlayType.CURRENT_EDGE, NODE_SIZE + 2);
         }
@@ -140,9 +131,7 @@ public final class BotNavigationDebugOverlay {
         if (region == null) {
             return;
         }
-        for (BotNavigationGraph.Segment segment : region.segments) {
-            overlay.drawLine(new Point(segment.x1, segment.y1), new Point(segment.x2, segment.y2), type, LINE_THICKNESS);
-        }
+        overlay.drawApproxRegion(region, type);
     }
 
     private static BotEntry findBotEntry(Character viewer, String botName) {
@@ -297,14 +286,39 @@ public final class BotNavigationDebugOverlay {
                 return;
             }
 
+            drawSparseLine(start, end, type, thickness, DOTTED_SPACING);
+        }
+
+        private void drawSparseLine(Point start, Point end, OverlayType type, int thickness, int spacing) {
+            if (truncated) {
+                return;
+            }
+
+            int dx = end.x - start.x;
+            int dy = end.y - start.y;
             double distance = start.distance(end);
-            int steps = Math.max(1, (int) Math.ceil(distance / DOTTED_SPACING));
+            int steps = Math.max(1, (int) Math.ceil(distance / Math.max(1, spacing)));
             for (int i = 0; i <= steps && !truncated; i++) {
                 double t = i / (double) steps;
                 int x = (int) Math.round(start.x + dx * t);
                 int y = (int) Math.round(start.y + dy * t);
                 drawNode(new Point(x, y), type, thickness + 2);
             }
+        }
+
+        private void drawApproxRegion(BotNavigationGraph.Region region, OverlayType type) {
+            if (region == null) {
+                return;
+            }
+
+            Point left = region.leftPoint();
+            Point right = region.rightPoint();
+            if (left.distance(right) <= Math.max(40, GRAPH_REGION_SPACING / 2.0)) {
+                drawLine(left, right, type, LINE_THICKNESS);
+                return;
+            }
+
+            drawSparseLine(left, right, type, LINE_THICKNESS, GRAPH_REGION_SPACING);
         }
 
         private void drawRect(Rectangle rectangle, OverlayType type) {

@@ -5,6 +5,7 @@ import client.inventory.Inventory;
 import client.inventory.InventoryType;
 import client.inventory.Item;
 import client.inventory.manipulator.InventoryManipulator;
+import constants.game.GameConstants;
 import server.ItemInformationProvider;
 import server.Trade;
 import tools.PacketCreator;
@@ -92,7 +93,7 @@ class BotDropManager {
     // ─── Trade actions (actual trade window) ─────────────────────────────────
 
     private static final String[] ALL_DONE_MSGS = {
-        "that's all!", "done adding items!", "all in!", "everything's added!"
+        "that's all!", "done adding stuff!", "all set!", "everything's in!"
     };
 
     /**
@@ -100,6 +101,11 @@ class BotDropManager {
      * Items are batched ≤9 per trade window; subsequent batches open new trades automatically.
      */
     static void startTradeTransfer(String category, BotEntry entry, Character bot) {
+        if (isMesoCategory(category)) {
+            startTradeMesoTransfer(category, entry, bot);
+            return;
+        }
+
         Character owner = entry.owner;
         if (owner == null) {
             BotManager.getInstance().botSay(bot, "can't find you to trade!");
@@ -123,17 +129,33 @@ class BotDropManager {
     }
 
     static boolean hasTransferableItems(String category, Character bot) {
+        if (isMesoCategory(category)) {
+            int currentMesos = bot.getMeso();
+            if (currentMesos <= 0) {
+                return false;
+            }
+
+            int requestedMesos = requestedTradeMesos(category);
+            return requestedMesos <= 0 || currentMesos >= requestedMesos;
+        }
+
         return !collectItems(category, bot).isEmpty();
     }
 
     static String noItemsReply(String category) {
         String what = switch (category) {
+            case "mesos" -> "mesos";
             case "scrolls" -> "scrolls";
             case "pots" -> "pots";
             case "use" -> "use items";
             case "equips" -> "equips";
             case "etc" -> "etc items";
-            default -> category.startsWith("name:") ? category.substring(5) : "those items";
+            default -> {
+                if (category.startsWith("mesos:")) {
+                    yield "mesos";
+                }
+                yield category.startsWith("name:") ? category.substring(5) : "those items";
+            }
         };
 
         String fmt = NO_ITEMS_PROMPTS[ThreadLocalRandom.current().nextInt(NO_ITEMS_PROMPTS.length)];
@@ -148,8 +170,10 @@ class BotDropManager {
             return;
         }
         entry.pendingTradeItems    = items.size() > 9 ? new ArrayList<>(items.subList(0, 9)) : items;
+        entry.pendingTradeMeso     = 0;
         entry.pendingTradeIdx      = 0;
         entry.pendingTradeTimerMs  = 0;
+        entry.pendingTradeMesoAdded = false;
         entry.pendingTradeAllAdded = false;
         entry.pendingTradeBotDone  = false;
         Trade.startTrade(bot);
@@ -217,6 +241,18 @@ class BotDropManager {
                 return;
             }
 
+            if (!entry.pendingTradeMesoAdded && entry.pendingTradeMeso > 0) {
+                if (bot.getMeso() < entry.pendingTradeMeso) {
+                    cancelTradeSequence(entry, bot, "don't have that many mesos anymore");
+                    return;
+                }
+
+                trade.setMeso(entry.pendingTradeMeso);
+                entry.pendingTradeMesoAdded = true;
+                entry.pendingTradeTimerMs = BotMovementManager.delayAfterCurrentTick(500);
+                return;
+            }
+
             List<Item> items = entry.pendingTradeItems;
             int idx = entry.pendingTradeIdx;
 
@@ -279,8 +315,10 @@ class BotDropManager {
     private static void resetTradeState(BotEntry entry) {
         entry.pendingTradeCategory = null;
         entry.pendingTradeItems    = null;
+        entry.pendingTradeMeso     = 0;
         entry.pendingTradeIdx      = 0;
         entry.pendingTradeTimerMs  = 0;
+        entry.pendingTradeMesoAdded = false;
         entry.pendingTradeAllAdded = false;
         entry.pendingTradeBotDone  = false;
     }
@@ -291,6 +329,50 @@ class BotDropManager {
         if (receivedSomething) {
             BotManager.getInstance().botSay(bot, BotManager.randomReply(TRADE_THANKS));
         }
+    }
+
+    private static void startTradeMesoTransfer(String category, BotEntry entry, Character bot) {
+        Character owner = entry.owner;
+        if (owner == null) {
+            BotManager.getInstance().botSay(bot, "can't find you to trade!");
+            return;
+        }
+        if (bot.getTrade() != null || entry.pendingTradeCategory != null) {
+            BotManager.getInstance().botSay(bot, "already in a trade!");
+            return;
+        }
+        if (owner.getTrade() != null) {
+            BotManager.getInstance().botSay(bot, "you're already in a trade!");
+            return;
+        }
+
+        int currentMesos = bot.getMeso();
+        if (currentMesos <= 0) {
+            BotManager.getInstance().botSay(bot, noItemsReply(category));
+            return;
+        }
+
+        int requestedMesos = requestedTradeMesos(category);
+        if (requestedMesos == 0) {
+            BotManager.getInstance().botSay(bot, "ask for more than 0 mesos, or just say 'trade mesos'");
+            return;
+        }
+        if (requestedMesos > 0 && currentMesos < requestedMesos) {
+            BotManager.getInstance().botSay(bot, notEnoughMesosReply(requestedMesos, currentMesos));
+            return;
+        }
+
+        entry.pendingTradeCategory = category;
+        entry.pendingTradeItems = List.of();
+        entry.pendingTradeMeso = requestedMesos > 0 ? requestedMesos : currentMesos;
+        entry.pendingTradeIdx = 0;
+        entry.pendingTradeTimerMs = 0;
+        entry.pendingTradeMesoAdded = false;
+        entry.pendingTradeAllAdded = false;
+        entry.pendingTradeBotDone = false;
+        Trade.startTrade(bot);
+        Trade.inviteTrade(bot, owner);
+        BotManager.getInstance().botSay(bot, "trade request sent!");
     }
 
     // ─── Item collection helpers ──────────────────────────────────────────────
@@ -447,5 +529,29 @@ class BotDropManager {
         BotManager.getInstance().botSay(bot,
                 count > 0 ? "dropped " + count + " " + noun + (count != 1 ? "s" : "") + "!"
                           : "no " + noun + "s to drop");
+    }
+
+    static boolean isMesoCategory(String category) {
+        return category != null && (category.equals("mesos") || category.startsWith("mesos:"));
+    }
+
+    private static int requestedTradeMesos(String category) {
+        if (!isMesoCategory(category)) {
+            return 0;
+        }
+        if ("mesos".equals(category)) {
+            return -1;
+        }
+
+        try {
+            return Integer.parseInt(category.substring("mesos:".length()));
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
+    }
+
+    private static String notEnoughMesosReply(int requestedMesos, int currentMesos) {
+        return "i only have " + GameConstants.numberWithCommas(currentMesos)
+                + " mesos rn, not " + GameConstants.numberWithCommas(requestedMesos);
     }
 }
