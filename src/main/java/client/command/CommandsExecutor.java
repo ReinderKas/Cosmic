@@ -97,6 +97,7 @@ import client.command.commands.gm2.WarpCommand;
 import client.command.commands.gm2.WarpMapCommand;
 import client.command.commands.gm2.WhereaMiCommand;
 import client.command.commands.gm3.BanCommand;
+import client.command.commands.gm3.BotNavCommand;
 import client.command.commands.gm3.ChatCommand;
 import client.command.commands.gm3.CheckDmgCommand;
 import client.command.commands.gm3.ClosePortalCommand;
@@ -442,6 +443,7 @@ public class CommandsExecutor {
         addCommand("fly", 3, FlyCommand.class);
         addCommand("spawn", 3, SpawnCommand.class);
         addCommand("spawnbot", 3, SpawnBotCommand.class);
+        addCommand("botnav", 3, BotNavCommand.class);
         addCommand("mutemap", 3, MuteMapCommand.class);
         addCommand("checkdmg", 3, CheckDmgCommand.class);
         addCommand("inmap", 3, InMapCommand.class);

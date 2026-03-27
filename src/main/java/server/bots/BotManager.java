@@ -203,6 +203,25 @@ public class BotManager {
         return (entries != null && !entries.isEmpty()) ? entries.get(0).bot : null;
     }
 
+    BotEntry getFirstBotEntry(int ownerCharId) {
+        List<BotEntry> entries = bots.get(ownerCharId);
+        return (entries != null && !entries.isEmpty()) ? entries.get(0) : null;
+    }
+
+    BotEntry getBotEntry(int ownerCharId, String botName) {
+        List<BotEntry> entries = bots.get(ownerCharId);
+        if (entries == null || botName == null) {
+            return null;
+        }
+
+        for (BotEntry entry : entries) {
+            if (entry.bot.getName().equalsIgnoreCase(botName)) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
     public void syncPartyBotsQuestStart(Character source, Quest quest, int npc) {
         if (quest == null) {
             return;

@@ -484,6 +484,10 @@ public class MapleMap {
         }
     }
 
+    public int allocateMapObjectId() {
+        return getUsableOID();
+    }
+
     public void removeMapObject(int num) {
         objectWLock.lock();
         try {

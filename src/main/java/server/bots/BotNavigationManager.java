@@ -119,6 +119,18 @@ final class BotNavigationManager {
                                                         int startRegionId,
                                                         int targetRegionId,
                                                         Point targetPos) {
+        List<BotNavigationGraph.Edge> path = findPath(graph, bot, startRegionId, targetRegionId, targetPos);
+        if (path.isEmpty()) {
+            return null;
+        }
+        return collapseLeadingWalkEdges(path);
+    }
+
+    static List<BotNavigationGraph.Edge> findPath(BotNavigationGraph graph,
+                                                  Character bot,
+                                                  int startRegionId,
+                                                  int targetRegionId,
+                                                  Point targetPos) {
         PriorityQueue<SearchNode> open = new PriorityQueue<>(Comparator.comparingInt(node -> node.score));
         Map<Integer, Integer> gScore = new HashMap<>();
         Map<Integer, Integer> cameFrom = new HashMap<>();
@@ -156,11 +168,7 @@ final class BotNavigationManager {
             }
         }
 
-        List<BotNavigationGraph.Edge> path = reconstructPath(startRegionId, targetRegionId, cameFrom, cameByEdge);
-        if (path.isEmpty()) {
-            return null;
-        }
-        return collapseLeadingWalkEdges(path);
+        return reconstructPath(startRegionId, targetRegionId, cameFrom, cameByEdge);
     }
 
     private static List<BotNavigationGraph.Edge> reconstructPath(int startRegionId,
