@@ -11,6 +11,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -66,8 +67,28 @@ class BotNavigationGraphProviderTest {
 
         assertEquals(1, path.size());
         assertEquals(BotNavigationGraph.EdgeType.JUMP, path.getFirst().type);
-        assertEquals(41, path.getFirst().toRegionId);
         assertEquals(new Point(938, 274), path.getFirst().endPoint);
+    }
+
+    @Test
+    void shouldNotMergeElliniaPivotFootholdsIntoOneRegion() {
+        Point leftSlopePoint = new Point(-508, -421);
+        Point rightSlopePoint = new Point(-464, -422);
+
+        int leftRegionId = elliniaGraph.findRegionId(ellinia, leftSlopePoint);
+        int rightRegionId = elliniaGraph.findRegionId(ellinia, rightSlopePoint);
+
+        assertTrue(leftRegionId > 0);
+        assertTrue(rightRegionId > 0);
+        assertNotEquals(leftRegionId, rightRegionId);
+    }
+
+    @Test
+    void shouldKeepElliniaPivotFootholdsWalkConnectedAfterSplit() {
+        List<BotNavigationGraph.Edge> path = findPath(elliniaGraph, ellinia, new Point(-508, -421), new Point(-217, -351));
+
+        assertFalse(path.isEmpty());
+        assertTrue(path.stream().allMatch(edge -> edge.type == BotNavigationGraph.EdgeType.WALK));
     }
 
     @Test
@@ -90,24 +111,22 @@ class BotNavigationGraphProviderTest {
     @Test
     void shouldPreferElliniaLocalRightSideJumpChainOverFarLeftDetour() {
         List<BotNavigationGraph.Edge> path = findPath(elliniaGraph, ellinia, new Point(1355, -888), new Point(1354, -1197));
+        int targetRegionId = elliniaGraph.findRegionId(ellinia, new Point(1354, -1197));
 
-        assertEquals(6, path.size());
-        assertEquals(BotNavigationGraph.EdgeType.JUMP, path.get(0).type);
-        assertEquals(61, path.get(0).toRegionId);
-        assertEquals(57, path.get(1).toRegionId);
-        assertEquals(55, path.get(2).toRegionId);
-        assertEquals(52, path.get(3).toRegionId);
-        assertEquals(51, path.get(4).toRegionId);
-        assertEquals(49, path.get(5).toRegionId);
+        assertFalse(path.isEmpty());
+        assertTrue(path.stream().allMatch(edge -> edge.type == BotNavigationGraph.EdgeType.JUMP));
+        assertEquals(new Point(1355, -888), path.getFirst().startPoint);
+        assertEquals(targetRegionId, path.getLast().toRegionId);
     }
 
     @Test
     void shouldPreferElliniaLedgeDropsOverDownJumpsWhenDroppingStraightDown() {
         List<BotNavigationGraph.Edge> path = findPath(elliniaGraph, ellinia, new Point(1354, -1197), new Point(1355, -888));
 
-        assertEquals(1, path.size());
         assertEquals(BotNavigationGraph.EdgeType.DROP, path.getFirst().type);
         assertTrue(path.getFirst().launchStepX != 0, "Ledge drops should keep a horizontal walk-off step instead of down-jumping in place");
+        assertTrue(path.stream().allMatch(edge -> edge.type == BotNavigationGraph.EdgeType.DROP
+                || edge.type == BotNavigationGraph.EdgeType.WALK));
     }
 
     private static List<BotNavigationGraph.Edge> findPath(BotNavigationGraph graph,

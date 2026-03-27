@@ -25,10 +25,10 @@ import java.util.concurrent.ConcurrentHashMap;
 final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
-    private static final int GRAPH_VERSION = 4;
-    private static final int REGION_MERGE_GAP_PX = 8;
+    private static final int GRAPH_VERSION = 6;
     private static final int WALK_CONNECTION_GAP_PX = 12;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 16;
+    private static final double REGION_MERGE_MIN_CONTINUATION_COSINE = 0.94;
     private static final Path CACHE_DIR = Path.of("cache", "bot-nav", "v" + GRAPH_VERSION);
     private static final Map<Integer, BotNavigationGraph> GRAPHS = new ConcurrentHashMap<>();
 
@@ -188,17 +188,13 @@ final class BotNavigationGraphProvider {
             return false;
         }
 
-        EndpointConnection connection = closestEndpointConnection(first, second);
+        EndpointConnection connection = sharedEndpointConnection(first, second);
         if (connection == null) {
             return false;
         }
 
-        if (Math.abs(connection.to.x - connection.from.x) > REGION_MERGE_GAP_PX) {
-            return false;
-        }
-
         return isWalkConnection(connection)
-                || isWalkConnection(new EndpointConnection(connection.to, connection.from));
+                && hasCompatiblePlatformShape(first, second, connection.from);
     }
 
     private static void addWalkEdges(Foothold foothold,
@@ -630,6 +626,63 @@ final class BotNavigationGraphProvider {
             }
         }
         return best;
+    }
+
+    private static EndpointConnection sharedEndpointConnection(Foothold first, Foothold second) {
+        Point[] firstEndpoints = new Point[]{
+                new Point(first.getX1(), first.getY1()),
+                new Point(first.getX2(), first.getY2())
+        };
+        Point[] secondEndpoints = new Point[]{
+                new Point(second.getX1(), second.getY1()),
+                new Point(second.getX2(), second.getY2())
+        };
+
+        for (Point from : firstEndpoints) {
+            for (Point to : secondEndpoints) {
+                if (from.equals(to)) {
+                    return new EndpointConnection(from, to);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean hasCompatiblePlatformShape(Foothold first, Foothold second, Point sharedPoint) {
+        if (first.isWall() || second.isWall() || sharedPoint == null) {
+            return false;
+        }
+
+        Point firstOther = otherEndpoint(first, sharedPoint);
+        Point secondOther = otherEndpoint(second, sharedPoint);
+        if (firstOther == null || secondOther == null) {
+            return false;
+        }
+
+        double firstDx = sharedPoint.x - firstOther.x;
+        double firstDy = sharedPoint.y - firstOther.y;
+        double secondDx = secondOther.x - sharedPoint.x;
+        double secondDy = secondOther.y - sharedPoint.y;
+        double firstLength = Math.hypot(firstDx, firstDy);
+        double secondLength = Math.hypot(secondDx, secondDy);
+        if (firstLength == 0.0 || secondLength == 0.0) {
+            return false;
+        }
+
+        double continuationCosine = ((firstDx * secondDx) + (firstDy * secondDy)) / (firstLength * secondLength);
+        return continuationCosine >= REGION_MERGE_MIN_CONTINUATION_COSINE;
+    }
+
+    private static Point otherEndpoint(Foothold foothold, Point sharedPoint) {
+        Point first = new Point(foothold.getX1(), foothold.getY1());
+        Point second = new Point(foothold.getX2(), foothold.getY2());
+        if (first.equals(sharedPoint)) {
+            return second;
+        }
+        if (second.equals(sharedPoint)) {
+            return first;
+        }
+        return null;
     }
 
     private static int footholdMinX(Foothold foothold) {
