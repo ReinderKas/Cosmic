@@ -25,14 +25,22 @@ import java.util.concurrent.ConcurrentHashMap;
 final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
-    private static final int GRAPH_VERSION = 2;
+    private static final int GRAPH_VERSION = 3;
     private static final int REGION_MERGE_GAP_PX = 8;
     private static final int WALK_CONNECTION_GAP_PX = 12;
+    private static final int ENDPOINT_ANCHOR_SPACING_PX = 16;
     private static final Path CACHE_DIR = Path.of("cache", "bot-nav", "v" + GRAPH_VERSION);
     private static final Map<Integer, BotNavigationGraph> GRAPHS = new ConcurrentHashMap<>();
 
     static BotNavigationGraph getGraph(MapleMap map) {
         return GRAPHS.computeIfAbsent(map.getId(), ignored -> loadOrBuildGraph(map));
+    }
+
+    static BotNavigationGraph rebuildGraph(MapleMap map) {
+        BotNavigationGraph rebuilt = buildGraph(map);
+        GRAPHS.put(map.getId(), rebuilt);
+        saveGraph(rebuilt);
+        return rebuilt;
     }
 
     private static BotNavigationGraph loadOrBuildGraph(MapleMap map) {
@@ -399,6 +407,10 @@ final class BotNavigationGraphProvider {
     private static List<Point> anchorPoints(BotNavigationGraph.Region region, List<Integer> featureXs) {
         List<Point> points = new ArrayList<>();
         addAnchor(points, region.leftPoint());
+        for (BotNavigationGraph.Segment segment : region.segments) {
+            addAnchor(points, new Point(segment.x1, segment.y1), ENDPOINT_ANCHOR_SPACING_PX);
+            addAnchor(points, new Point(segment.x2, segment.y2), ENDPOINT_ANCHOR_SPACING_PX);
+        }
         if (region.width() >= Math.max(BotMovementManager.cfg.FOLLOW_DIST * 2, 140)) {
             addAnchor(points, region.centerPoint());
         }
@@ -417,8 +429,17 @@ final class BotNavigationGraphProvider {
     }
 
     private static void addAnchor(List<Point> points, Point point) {
+        addAnchor(points, point, 0);
+    }
+
+    private static void addAnchor(List<Point> points, Point point, int minSpacingPx) {
         for (Point existing : points) {
             if (existing.equals(point)) {
+                return;
+            }
+            if (minSpacingPx > 0
+                    && Math.abs(existing.x - point.x) <= minSpacingPx
+                    && Math.abs(existing.y - point.y) <= 8) {
                 return;
             }
         }
