@@ -1,5 +1,6 @@
 package server.bots;
 
+import client.BotClient;
 import client.Character;
 import client.Job;
 import client.inventory.Equip;
@@ -12,7 +13,12 @@ import constants.inventory.EquipSlot;
 import constants.inventory.ItemConstants;
 import server.ItemInformationProvider;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.ToIntFunction;
 import java.util.stream.Collectors;
 
