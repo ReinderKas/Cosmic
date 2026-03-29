@@ -164,6 +164,9 @@ class BotChatManager {
             "\\b(unequip|take\\s+off|remove)\\s+(?:everything|all|all\\s+(?:your|ur|my)\\s+gear|gear|equipment|equips?)\\b"
             + "|\\bstrip\\s+(?:down|everything|all)\\b",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern UNEQUIP_SLOT_PATTERN = Pattern.compile(
+            "\\b(unequip|take\\s+off|remove)\\s+(weapon|wep|shield|offhand|cape|hat|helm(?:et)?|top|shirt|bottom|pants|shoes|boots|gloves?|face(?:\\s*acc(?:essory)?)?|eye(?:\\s*(?:acc(?:essory)?|piece))?|rings?\\s*[1-4]?|pendant|medal|belt)\\b",
+            Pattern.CASE_INSENSITIVE);
 
     // SP variant selection — only matched when spVariantPromptSent=true and spVariant=null
     private static final Pattern SP_1H_PATTERN = Pattern.compile(
@@ -453,6 +456,16 @@ class BotChatManager {
             }, 600);
             return;
         }
+        Matcher unequipSlotMatcher = UNEQUIP_SLOT_PATTERN.matcher(message);
+        if (unequipSlotMatcher.find()) {
+            String slotName = unequipSlotMatcher.group(2);
+            short[] slots = BotEquipManager.slotsFromName(slotName);
+            if (slots.length > 0) {
+                TimerManager.getInstance().schedule(() ->
+                        BotManager.getInstance().botSay(entry.bot, BotEquipManager.unequipSlot(entry.bot, slots)), 600);
+                return;
+            }
+        }
         if (UNEQUIP_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
                 entry.following = false;
@@ -465,14 +478,14 @@ class BotChatManager {
         if (FOLLOW_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
                 entry.grinding = false;
-                BotEquipManager.autoEquip(entry.bot);
+                BotEquipManager.autoEquip(entry.bot, entry.owner);
                 BotManager.getInstance().botSay(entry.bot, BotManager.randomReply(FOLLOW_REPLIES));
                 TimerManager.getInstance().schedule(() -> entry.following = true, 250 + ThreadLocalRandom.current().nextInt(0, 500));
             }, 1500 + ThreadLocalRandom.current().nextInt(0, 500));
         } else if (GRIND_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
                 entry.following = false;
-                BotEquipManager.autoEquip(entry.bot);
+                BotEquipManager.autoEquip(entry.bot, entry.owner);
                 BotManager.getInstance().setupAutopotForBot(entry.bot);
                 BotManager.getInstance().botSay(entry.bot, BotManager.getInstance().grindStartMessage(entry.bot));
                 TimerManager.getInstance().schedule(() -> {
@@ -484,7 +497,7 @@ class BotChatManager {
             TimerManager.getInstance().schedule(() -> {
                 entry.following = false;
                 entry.grinding  = false;
-                BotEquipManager.autoEquip(entry.bot);
+                BotEquipManager.autoEquip(entry.bot, entry.owner);
                 TimerManager.getInstance().schedule(() -> BotManager.getInstance().botSay(entry.bot, BotManager.randomReply(STOP_REPLIES)), 1500);
             }, 1000);
         } else if (GREETING_PATTERN.matcher(message).find()) {

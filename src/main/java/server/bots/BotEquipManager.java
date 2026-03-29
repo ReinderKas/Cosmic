@@ -48,13 +48,17 @@ class BotEquipManager {
 
     /**
      * Scans the bot's EQUIP inventory and equips any item that improves current gear.
+     * Items that are upgrade candidates for the owner or party members are skipped
+     * so they remain available for recommendation/trade.
      * Scoring priority: max damage > total defense > total stat sum.
      * Cash items are skipped. Called on mode change (follow / stop / grind).
      */
-    static void autoEquip(Character bot) {
+    static void autoEquip(Character bot, Character owner) {
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
         Inventory eqpInv = bot.getInventory(InventoryType.EQUIP);
         Inventory eqdInv = bot.getInventory(InventoryType.EQUIPPED);
+
+        Set<Equip> reservedForParty = collectReservedForParty(bot, owner);
 
         WeaponType weaponType = currentWeaponType(bot, ii);
 
@@ -62,6 +66,7 @@ class BotEquipManager {
         Map<Short, List<Equip>> bySlot = new LinkedHashMap<>();
         for (Item item : eqpInv.list()) {
             if (ii.isCash(item.getItemId())) continue;
+            if (reservedForParty.contains(item)) continue;
             String textSlot = ii.getEquipmentSlot(item.getItemId());
             EquipSlot eslot = EquipSlot.getFromTextSlot(textSlot);
             if (eslot == EquipSlot.PET_EQUIP) continue;
@@ -245,6 +250,80 @@ class BotEquipManager {
             InventoryManipulator.handleItemMove(bot.getClient(), InventoryType.EQUIP, src, dst, (short) 1);
         }
         return "unequipped " + equippedSlots.size() + " item" + (equippedSlots.size() != 1 ? "s" : "");
+    }
+
+    static String unequipSlot(Character bot, short[] slots) {
+        ItemInformationProvider ii = ItemInformationProvider.getInstance();
+        Inventory eqpInv = bot.getInventory(InventoryType.EQUIP);
+        Inventory eqdInv = bot.getInventory(InventoryType.EQUIPPED);
+
+        List<Short> toUnequip = new ArrayList<>();
+        for (short slot : slots) {
+            Item item = eqdInv.getItem(slot);
+            if (item != null && !ii.isCash(item.getItemId())) {
+                toUnequip.add(slot);
+            }
+        }
+        if (toUnequip.isEmpty()) {
+            return "nothing equipped there";
+        }
+        if (eqpInv.getNumFreeSlot() < toUnequip.size()) {
+            return "equip bag full";
+        }
+        StringBuilder names = new StringBuilder();
+        for (short src : toUnequip) {
+            Item item = eqdInv.getItem(src);
+            short dst = eqpInv.getNextFreeSlot();
+            if (dst < 0) return "ran out of equip slots";
+            InventoryManipulator.handleItemMove(bot.getClient(), InventoryType.EQUIP, src, dst, (short) 1);
+            if (!names.isEmpty()) names.append(", ");
+            names.append(ii.getName(item.getItemId()));
+        }
+        return "unequipped " + names;
+    }
+
+    /** Returns the equipped slot(s) that match the given slot name from chat. Empty array = unknown. */
+    static short[] slotsFromName(String name) {
+        return switch (name.trim().toLowerCase().replaceAll("\\s+", "")) {
+            case "weapon", "wep" -> new short[]{-11};
+            case "shield", "offhand" -> new short[]{-10};
+            case "cape" -> new short[]{-9};
+            case "hat", "helm", "helmet" -> new short[]{-1};
+            case "top", "shirt" -> new short[]{-8};
+            case "bottom" -> new short[]{-6};
+            case "pants" -> new short[]{-4};
+            case "shoes", "boots" -> new short[]{-7};
+            case "glove", "gloves" -> new short[]{-5};
+            case "face", "faceacc", "faceaccessory" -> new short[]{-3};
+            case "eye", "eyeacc", "eyeaccessory", "eyepiece" -> new short[]{-2};
+            case "ring" -> RING_SLOTS.clone();
+            case "ring1" -> new short[]{-12};
+            case "ring2" -> new short[]{-13};
+            case "ring3" -> new short[]{-15};
+            case "ring4" -> new short[]{-16};
+            case "pendant" -> new short[]{-17};
+            case "medal" -> new short[]{-20};
+            case "belt" -> new short[]{-21};
+            default -> new short[0];
+        };
+    }
+
+    private static Set<Equip> collectReservedForParty(Character bot, Character owner) {
+        if (owner == null) return Set.of();
+        Set<Equip> reserved = new HashSet<>();
+        addReservedFor(reserved, owner, bot);
+        for (Character member : owner.getPartyMembersOnSameMap()) {
+            if (member.getId() == owner.getId() || member.getId() == bot.getId()) continue;
+            if (member.getClient() instanceof BotClient) continue;
+            addReservedFor(reserved, member, bot);
+        }
+        return reserved;
+    }
+
+    private static void addReservedFor(Set<Equip> reserved, Character receiver, Character holder) {
+        for (EquipRecommendation rec : findRecommendedEquips(receiver, holder)) {
+            reserved.add(rec.candidate());
+        }
     }
 
     private static void autoEquipRings(Character bot, ItemInformationProvider ii, WeaponType wt,
