@@ -173,16 +173,12 @@ class BotMovementManager {
                 return;
             }
 
-            if (runAiTick) {
-                if (shouldJumpOffCommittedClimb(entry, botPos)) {
-                    jumpOffRope(entry, bot, entry.navEdge.launchStepX);
-                    return;
-                }
-                if (Math.abs(dxOwner) > cfg.FOLLOW_DIST && entry.jumpCooldownMs == 0
-                        && rope.bottomY() < targetPos.y) {
-                    jumpOffRope(entry, bot, dxOwner);
-                    return;
-                }
+            // If not navigating, allow jumping off when target is far away horizontally
+            if (runAiTick && entry.navEdge == null
+                    && Math.abs(dxOwner) > cfg.FOLLOW_DIST && entry.jumpCooldownMs == 0
+                    && rope.bottomY() < targetPos.y) {
+                jumpOffRope(entry, bot, dxOwner);
+                return;
             }
 
             boolean climbIdle = shouldHoldClimbIdle(entry, dy, dxOwner);
@@ -192,7 +188,7 @@ class BotMovementManager {
                 return;
             }
 
-            MoveAction action = planClimbAction(entry, botPos, dy);
+            MoveAction action = dy <= 0 ? MoveAction.climbUp() : MoveAction.climbDown();
             applyClimbAction(entry, bot, action);
         } finally {
             BotPerformanceMonitor.record("move-climb", System.nanoTime() - startedAt);
@@ -206,16 +202,6 @@ class BotMovementManager {
         entry.ropeGrabCooldownMs = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS + 200);
         entry.jumpCooldownMs = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS);
         broadcastMovement(entry);
-    }
-
-    private static MoveAction planClimbAction(BotEntry entry, Point botPos, int dy) {
-        if (isCommittedClimbDown(entry, botPos)) {
-            return MoveAction.climbDown();
-        }
-        if (dy < 0 || entry.climbRope.topY() < botPos.y + 200) {
-            return MoveAction.climbUp();
-        }
-        return MoveAction.climbDown();
     }
 
     private static void applyClimbAction(BotEntry entry, Character bot, MoveAction action) {
@@ -235,27 +221,6 @@ class BotMovementManager {
         broadcastMovement(entry);
     }
 
-    private static boolean shouldJumpOffCommittedClimb(BotEntry entry, Point botPos) {
-        if (entry.navEdge == null || entry.navEdge.type != BotNavigationGraph.EdgeType.CLIMB) {
-            return false;
-        }
-        if (entry.navEdge.launchStepX == 0 || entry.jumpCooldownMs != 0) {
-            return false;
-        }
-        if (botPos.y > entry.climbRope.topY() + cfg.JUMP_Y_THRESH) {
-            return false;
-        }
-
-        JumpLanding landing = simulateRopeJumpLanding(entry.bot.getMap(), botPos, entry.navEdge.launchStepX);
-        if (landing == null) {
-            return false;
-        }
-
-        BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(entry.bot.getMap());
-        int landingRegionId = graph.regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1);
-        return landingRegionId == entry.navEdge.toRegionId;
-    }
-
     static boolean shouldHoldClimbIdle(BotEntry entry, int dy, int dxOwner) {
         if (entry.navEdge != null && entry.navEdge.type == BotNavigationGraph.EdgeType.CLIMB) {
             return false;
@@ -263,12 +228,6 @@ class BotMovementManager {
         return !entry.grinding
                 && Math.abs(dy) < cfg.FOLLOW_DIST
                 && Math.abs(dxOwner) < cfg.FOLLOW_DIST * 2;
-    }
-
-    private static boolean isCommittedClimbDown(BotEntry entry, Point botPos) {
-        return entry.navEdge != null
-                && entry.navEdge.type == BotNavigationGraph.EdgeType.CLIMB
-                && entry.navEdge.endPoint.y > botPos.y + 8;
     }
 
     static void tickAirborne(BotEntry entry) {

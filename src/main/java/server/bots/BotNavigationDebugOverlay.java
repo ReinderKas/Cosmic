@@ -249,7 +249,7 @@ public final class BotNavigationDebugOverlay {
     private static OverlayType overlayTypeForEdge(BotNavigationGraph.EdgeType edgeType) {
         return switch (edgeType) {
             case DROP, PORTAL -> OverlayType.TRANSITION;
-            case JUMP, CLIMB, FLASH_JUMP, TELEPORT -> OverlayType.PATH;
+            case JUMP, CLIMB -> OverlayType.PATH;
             case WALK -> OverlayType.REGION;
         };
     }

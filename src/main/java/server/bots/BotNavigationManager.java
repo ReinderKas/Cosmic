@@ -183,11 +183,22 @@ final class BotNavigationManager {
         if (entry.inAir || entry.downJumpPending) {
             return null;
         }
-        if (entry.climbing) {
-            return new NavigationDirective(rawTargetPos, false);
-        }
 
-        Rope rope = findEdgeRope(bot.getMap(), edge);
+        if (entry.climbing) {
+            return tryExecuteClimbExit(entry, bot, botPos, rawTargetPos, edge);
+        } else {
+            return tryExecuteClimbEntry(entry, bot, botPos, rawTargetPos, edge);
+        }
+    }
+
+    private static NavigationDirective tryExecuteClimbEntry(BotEntry entry,
+                                                             Character bot,
+                                                             Point botPos,
+                                                             Point rawTargetPos,
+                                                             BotNavigationGraph.Edge edge) {
+        BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(bot.getMap());
+        BotNavigationGraph.Region toRegion = graph.getRegion(edge.toRegionId);
+        Rope rope = findRopeForRegion(bot.getMap(), toRegion);
         if (rope == null) {
             return null;
         }
@@ -205,6 +216,50 @@ final class BotNavigationManager {
         }
 
         return null;
+    }
+
+    private static NavigationDirective tryExecuteClimbExit(BotEntry entry,
+                                                            Character bot,
+                                                            Point botPos,
+                                                            Point rawTargetPos,
+                                                            BotNavigationGraph.Edge edge) {
+        if (entry.jumpCooldownMs != 0) {
+            return null;
+        }
+
+        int exitY = edge.startPoint.y;
+        if (Math.abs(botPos.y - exitY) > BotMovementManager.cfg.JUMP_Y_THRESH) {
+            return null;
+        }
+
+        BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(bot.getMap());
+        BotNavigationGraph.Region toRegion = graph.getRegion(edge.toRegionId);
+
+        if (toRegion != null && toRegion.isRopeRegion) {
+            // Rope-to-rope: jump to the other rope
+            Rope targetRope = findRopeForRegion(bot.getMap(), toRegion);
+            if (targetRope == null) {
+                return null;
+            }
+            BotMovementManager.jumpOffRope(entry, bot, edge.launchStepX);
+            return new NavigationDirective(rawTargetPos, true);
+        }
+
+        if (edge.launchStepX == 0) {
+            // Step off (top or bottom)
+            Point ground = bot.getMap().getPointBelow(new Point(botPos.x, botPos.y - 3));
+            if (ground != null && Math.abs(ground.y - botPos.y) <= BotMovementManager.cfg.JUMP_Y_THRESH * 2) {
+                BotPhysicsEngine.landOnGround(entry, bot, ground);
+            } else {
+                BotPhysicsEngine.beginFall(entry, bot, 0);
+            }
+            BotMovementManager.broadcastMovement(entry);
+            return new NavigationDirective(rawTargetPos, true);
+        }
+
+        // Jump off rope
+        BotMovementManager.jumpOffRope(entry, bot, edge.launchStepX);
+        return new NavigationDirective(rawTargetPos, true);
     }
 
     static boolean canExecuteDropFromCurrentPosition(BotNavigationGraph graph,
@@ -238,22 +293,19 @@ final class BotNavigationManager {
     }
 
     private static boolean shouldUsePreciseTarget(BotEntry entry, Point botPos, BotNavigationGraph.Edge edge) {
-        if (entry.inAir || entry.climbing) {
+        if (entry.inAir) {
             return false;
         }
         return switch (edge.type) {
             case WALK -> false;
-            case JUMP, DROP, PORTAL, FLASH_JUMP, TELEPORT, CLIMB -> !isReadyForEdge(botPos, edge);
+            case JUMP, DROP, PORTAL, CLIMB -> !isReadyForEdge(botPos, edge);
         };
     }
 
     private static Point selectWaypoint(BotEntry entry, Point botPos, BotNavigationGraph.Edge edge) {
         return switch (edge.type) {
             case WALK -> new Point(edge.endPoint);
-            case JUMP, DROP, PORTAL, FLASH_JUMP, TELEPORT -> entry.inAir ? new Point(edge.endPoint) : new Point(edge.startPoint);
-            case CLIMB -> entry.climbing || isReadyForEdge(botPos, edge)
-                    ? new Point(edge.endPoint)
-                    : new Point(edge.startPoint);
+            case JUMP, DROP, PORTAL, CLIMB -> entry.inAir ? new Point(edge.endPoint) : new Point(edge.startPoint);
         };
     }
 
@@ -303,7 +355,7 @@ final class BotNavigationManager {
                 }
 
                 if (current.state.regionId == targetRegionId) {
-                    int goalCost = current.cost + intraRegionTravelCost(current.state.point, targetPos);
+                    int goalCost = current.cost + intraRegionTravelCost(graph, current.state.regionId, current.state.point, targetPos);
                     if (goalCost < bestGoalCost) {
                         bestGoalCost = goalCost;
                         bestGoalState = current.state;
@@ -315,7 +367,7 @@ final class BotNavigationManager {
                         continue;
                     }
 
-                    int tentativeCost = current.cost + intraRegionTravelCost(current.state.point, edge.startPoint) + edge.cost;
+                    int tentativeCost = current.cost + intraRegionTravelCost(graph, current.state.regionId, current.state.point, edge.startPoint) + edge.cost;
                     SearchState nextState = new SearchState(edge.toRegionId, edge.endPoint);
                     if (tentativeCost >= gScore.getOrDefault(nextState, Integer.MAX_VALUE)) {
                         continue;
@@ -393,7 +445,6 @@ final class BotNavigationManager {
                 Portal portal = map.getPortal(edge.portalId);
                 yield portal != null && portal.getPortalStatus();
             }
-            case FLASH_JUMP, TELEPORT -> false;
         };
     }
 
@@ -426,17 +477,17 @@ final class BotNavigationManager {
         return Math.max(0, (int) Math.round((travel * 1000.0) / Math.max(1, BotMovementManager.cfg.WALK_VEL)));
     }
 
-    private static int heuristic(Point from, Point targetPos) {
-        return intraRegionTravelCost(from, targetPos);
+    private static int intraRegionTravelCost(BotNavigationGraph graph, int regionId, Point from, Point to) {
+        BotNavigationGraph.Region region = graph.getRegion(regionId);
+        if (region != null && region.isRopeRegion) {
+            int travel = Math.abs(to.y - from.y);
+            return Math.max(0, (int) Math.round((travel * 1000.0) / Math.max(1, BotMovementManager.cfg.CLIMB_SPEED_PXS)));
+        }
+        return intraRegionTravelCost(from, to);
     }
 
-    private static Rope findEdgeRope(MapleMap map, BotNavigationGraph.Edge edge) {
-        for (Rope rope : map.getRopes()) {
-            if (rope.x() == edge.ropeX && rope.topY() == edge.ropeTopY && rope.bottomY() == edge.ropeBottomY) {
-                return rope;
-            }
-        }
-        return null;
+    private static int heuristic(Point from, Point targetPos) {
+        return intraRegionTravelCost(from, targetPos);
     }
 
     private static boolean canGrabRopeAtCurrentPosition(Point botPos, Rope rope) {
@@ -457,5 +508,9 @@ final class BotNavigationManager {
 
     private static int clampToRope(int y, Rope rope) {
         return Math.max(rope.topY(), Math.min(y, rope.bottomY()));
+    }
+
+    private static Rope findRopeForRegion(MapleMap map, BotNavigationGraph.Region region) {
+        return BotNavigationGraphProvider.findRopeFromRegion(map, region);
     }
 }

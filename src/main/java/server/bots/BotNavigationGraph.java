@@ -16,9 +16,7 @@ final class BotNavigationGraph implements Serializable {
         JUMP,
         DROP,
         CLIMB,
-        PORTAL,
-        FLASH_JUMP,
-        TELEPORT
+        PORTAL
     }
 
     static final class Segment implements Serializable {
@@ -73,6 +71,8 @@ final class BotNavigationGraph implements Serializable {
         final int maxX;
         final int minY;
         final int maxY;
+        final boolean isRopeRegion;
+        final boolean isLadder;
 
         Region(int id, List<Segment> segments) {
             if (segments.isEmpty()) {
@@ -81,6 +81,8 @@ final class BotNavigationGraph implements Serializable {
 
             this.id = id;
             this.segments = new ArrayList<>(segments);
+            this.isRopeRegion = false;
+            this.isLadder = false;
 
             int regionMinX = Integer.MAX_VALUE;
             int regionMaxX = Integer.MIN_VALUE;
@@ -99,8 +101,23 @@ final class BotNavigationGraph implements Serializable {
             this.maxY = regionMaxY;
         }
 
+        Region(int id, int ropeX, int topY, int bottomY, boolean isLadder) {
+            this.id = id;
+            this.segments = List.of();
+            this.isRopeRegion = true;
+            this.isLadder = isLadder;
+            this.minX = ropeX;
+            this.maxX = ropeX;
+            this.minY = topY;
+            this.maxY = bottomY;
+        }
+
         int width() {
             return Math.max(0, maxX - minX);
+        }
+
+        int height() {
+            return Math.max(0, maxY - minY);
         }
 
         Point leftPoint() {
@@ -108,6 +125,9 @@ final class BotNavigationGraph implements Serializable {
         }
 
         Point centerPoint() {
+            if (isRopeRegion) {
+                return new Point(minX, minY + height() / 2);
+            }
             return pointAt(minX + width() / 2);
         }
 
@@ -116,8 +136,15 @@ final class BotNavigationGraph implements Serializable {
         }
 
         Point pointAt(int x) {
+            if (isRopeRegion) {
+                return new Point(minX, minY + height() / 2);
+            }
             Segment bestSegment = findBestSegment(x);
             return bestSegment.pointAt(x);
+        }
+
+        Point ropePointAtY(int y) {
+            return new Point(minX, Math.max(minY, Math.min(y, maxY)));
         }
 
         private Segment findBestSegment(int x) {
@@ -218,10 +245,27 @@ final class BotNavigationGraph implements Serializable {
         }
 
         Foothold foothold = BotPhysicsEngine.findGroundFoothold(map, position);
-        if (foothold == null) {
-            return -1;
+        if (foothold != null) {
+            int regionId = regionIdByFootholdId.getOrDefault(foothold.getId(), -1);
+            if (regionId >= 0) {
+                return regionId;
+            }
         }
 
-        return regionIdByFootholdId.getOrDefault(foothold.getId(), -1);
+        return findRopeRegionId(position);
+    }
+
+    private int findRopeRegionId(Point position) {
+        for (Region region : regions) {
+            if (!region.isRopeRegion) {
+                continue;
+            }
+            if (Math.abs(position.x - region.minX) <= BotPhysicsEngine.cfg.ROPE_GRAB_X
+                    && position.y >= region.minY
+                    && position.y <= region.maxY) {
+                return region.id;
+            }
+        }
+        return -1;
     }
 }
