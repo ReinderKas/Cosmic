@@ -1735,6 +1735,10 @@ public class Monster extends AbstractLoadedLife {
         return stats.getPADamage();
     }
 
+    public int getAvoidability() {
+        return stats.getAvoidability();
+    }
+
     public Map<MonsterStatus, MonsterStatusEffect> getStati() {
         statiLock.lock();
         try {

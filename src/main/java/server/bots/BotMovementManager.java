@@ -131,19 +131,22 @@ class BotMovementManager {
         BotPhysicsEngine.resetMotion(entry, entry.bot.getPosition());
         entry.grindTarget = null;
         entry.attackCooldownMs = 0;
+        clearNavigationState(entry);
+        entry.movementBroadcastValid = false;
+    }
+
+    static void clearNavigationState(BotEntry entry) {
         entry.navTargetPos = null;
         entry.navEdge = null;
         entry.navTargetRegionId = -1;
         entry.navPreciseTarget = false;
-        entry.movementBroadcastValid = false;
     }
 
     static void tickClimbing(BotEntry entry, Point targetPos, boolean runAiTick) {
         long startedAt = System.nanoTime();
         try {
             Character bot = entry.bot;
-            Rope rope = entry.climbRope;
-            if (rope == null) {
+            if (entry.climbRope == null) {
                 BotPhysicsEngine.beginFall(entry, bot, 0);
                 broadcastMovement(entry);
                 return;
@@ -152,38 +155,21 @@ class BotMovementManager {
             BotPhysicsEngine.tickMotionTimers(entry);
             Point botPos = bot.getPosition();
             int dy = targetPos.y - botPos.y;
-            int dxOwner = targetPos.x - rope.x();
+            int dxOwner = targetPos.x - entry.climbRope.x();
 
             entry.jumpCooldownMs = tickDown(entry.jumpCooldownMs);
-
-            if (botPos.y <= rope.topY()) {
-                Point ground = bot.getMap().getPointBelow(new Point(botPos.x, botPos.y - 3));
-                if (ground != null && ground.y <= botPos.y + BotPhysicsEngine.climbStepPerTick() + 2) {
-                    BotPhysicsEngine.landOnGround(entry, bot, new Point(botPos.x, ground.y));
-                } else {
-                    BotPhysicsEngine.beginFall(entry, bot, 0);
-                }
-                broadcastMovement(entry);
-                return;
-            }
-
-            if (botPos.y >= rope.bottomY() + 3) {
-                BotPhysicsEngine.beginFall(entry, bot, 0);
-                broadcastMovement(entry);
-                return;
-            }
 
             // If not navigating, allow jumping off when target is far away horizontally
             if (runAiTick && entry.navEdge == null
                     && Math.abs(dxOwner) > cfg.FOLLOW_DIST && entry.jumpCooldownMs == 0
-                    && rope.bottomY() < targetPos.y) {
+                    && entry.climbRope.bottomY() < targetPos.y) {
                 jumpOffRope(entry, bot, dxOwner);
                 return;
             }
 
             boolean climbIdle = shouldHoldClimbIdle(entry, dy, dxOwner);
             if (climbIdle) {
-                BotPhysicsEngine.holdClimb(entry);
+                BotPhysicsEngine.holdClimb(entry, bot);
                 broadcastMovement(entry);
                 return;
             }
@@ -205,18 +191,16 @@ class BotMovementManager {
     }
 
     private static void applyClimbAction(BotEntry entry, Character bot, MoveAction action) {
-        int step = BotPhysicsEngine.climbStepPerTick();
-        int currentY = bot.getPosition().y;
-        int nextY = switch (action.type()) {
-            case CLIMB_UP -> currentY - step;
-            case CLIMB_DOWN -> currentY + step;
-            default -> currentY;
+        int climbDir = switch (action.type()) {
+            case CLIMB_UP -> -1;
+            case CLIMB_DOWN -> 1;
+            default -> 0;
         };
 
-        if (action.type() == ActionType.IDLE) {
-            BotPhysicsEngine.holdClimb(entry);
+        if (climbDir == 0) {
+            BotPhysicsEngine.holdClimb(entry, bot);
         } else {
-            BotPhysicsEngine.moveOnRope(entry, bot, nextY);
+            BotPhysicsEngine.advanceClimb(entry, bot, climbDir);
         }
         broadcastMovement(entry);
     }
@@ -318,6 +302,9 @@ class BotMovementManager {
             return MoveAction.idle();
         }
         if (!isPathWalkable(entry.bot, botPos, stepX)) {
+            if (entry.navEdge != null) {
+                clearNavigationState(entry);
+            }
             return MoveAction.idle();
         }
         return MoveAction.walk(stepX);
@@ -395,12 +382,17 @@ class BotMovementManager {
     }
 
     static boolean isPathWalkable(Character bot, Point botPos, int stepX) {
-        Point next = bot.getMap().getPointBelow(new Point(botPos.x + stepX, botPos.y - BotPhysicsEngine.cfg.MAX_SLOPE_UP));
+        Point standing = BotPhysicsEngine.findGroundPoint(bot.getMap(), botPos);
+        int baseY = standing != null
+                && Math.abs(standing.y - botPos.y) <= BotPhysicsEngine.cfg.MAX_SLOPE_UP
+                ? standing.y
+                : botPos.y;
+        Point next = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(botPos.x + stepX, baseY));
         if (next == null) {
             return false;
         }
 
-        int dy = next.y - botPos.y;
+        int dy = next.y - baseY;
         return dy <= BotPhysicsEngine.cfg.MAX_SNAP_DROP
                 && dy >= -BotPhysicsEngine.cfg.MAX_SLOPE_UP;
     }

@@ -1,19 +1,29 @@
 package server.bots;
 
+import client.Character;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import server.maps.MapleMap;
+import server.maps.Rope;
 
 import java.awt.*;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class BotNavigationGraphProviderTest {
     private static MapleMap henesys;
@@ -149,6 +159,37 @@ class BotNavigationGraphProviderTest {
                 elliniaGraph, ellinia, dropCase.alternativeStart(), dropCase.edge()));
     }
 
+    @Test
+    void shouldAllowJumpExecutionFromAlternativeStartWhenLandingRegionMatches() {
+        AlternativeJumpCase jumpCase = findJumpCaseWithAlternativeStart(henesysGraph, henesys);
+
+        assertNotNull(jumpCase, "Expected at least one jump edge that stays valid from an alternate same-region start point");
+        assertNotEquals(jumpCase.edge().startPoint.x, jumpCase.alternativeStart().x);
+        assertTrue(BotNavigationManager.canExecuteJumpFromCurrentPosition(
+                henesysGraph, henesys, jumpCase.alternativeStart(), jumpCase.edge()));
+    }
+
+    @Test
+    void shouldDiscardCommittedRopeEntryEdgeAfterBotHasAttachedToRope() {
+        RopeEntryReuseCase reuseCase = findRopeEntryReuseCase(elliniaGraph, ellinia);
+
+        assertNotNull(reuseCase, "Expected a rope-entry edge whose top attachment point resolves to a non-rope region");
+
+        Character bot = mockBot(reuseCase.botPosition(), ellinia);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.climbing = true;
+        entry.climbRope = reuseCase.rope();
+        entry.navEdge = reuseCase.edge();
+        entry.navTargetRegionId = elliniaGraph.findRegionId(ellinia, reuseCase.rawTarget());
+
+        BotNavigationManager.NavigationDirective directive =
+                BotNavigationManager.resolveTarget(entry, reuseCase.rawTarget(), false);
+
+        assertFalse(directive.consumedTick);
+        assertEquals(reuseCase.rawTarget(), directive.targetPos);
+        assertNull(entry.navEdge);
+    }
+
     private static List<BotNavigationGraph.Edge> findPath(BotNavigationGraph graph,
                                                           MapleMap map,
                                                           Point start,
@@ -246,6 +287,117 @@ class BotNavigationGraphProviderTest {
         return null;
     }
 
+    private static AlternativeJumpCase findJumpCaseWithAlternativeStart(BotNavigationGraph graph, MapleMap map) {
+        for (BotNavigationGraph.Region region : graph.regions) {
+            for (BotNavigationGraph.Edge edge : graph.getOutgoing(region.id)) {
+                if (edge.type != BotNavigationGraph.EdgeType.JUMP) {
+                    continue;
+                }
+
+                Point alternative = findAlternativeJumpStart(graph, map, edge);
+                if (alternative != null) {
+                    return new AlternativeJumpCase(edge, alternative);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static Point findAlternativeJumpStart(BotNavigationGraph graph,
+                                                  MapleMap map,
+                                                  BotNavigationGraph.Edge edge) {
+        BotNavigationGraph.Region region = graph.getRegion(edge.fromRegionId);
+        if (region == null) {
+            return null;
+        }
+
+        for (int x = region.minX; x <= region.maxX; x += 4) {
+            Point start = region.pointAt(x);
+            if (Math.abs(start.x - edge.startPoint.x) < 12) {
+                continue;
+            }
+
+            BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateJumpLanding(map, start, edge.launchStepX);
+            if (landing == null) {
+                continue;
+            }
+
+            int landingRegionId = graph.regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1);
+            if (landingRegionId == edge.toRegionId) {
+                return start;
+            }
+        }
+        return null;
+    }
+
+    private static RopeEntryReuseCase findRopeEntryReuseCase(BotNavigationGraph graph, MapleMap map) {
+        for (BotNavigationGraph.Region region : graph.regions) {
+            for (BotNavigationGraph.Edge edge : graph.getOutgoing(region.id)) {
+                if (edge.type != BotNavigationGraph.EdgeType.CLIMB) {
+                    continue;
+                }
+
+                BotNavigationGraph.Region from = graph.getRegion(edge.fromRegionId);
+                BotNavigationGraph.Region to = graph.getRegion(edge.toRegionId);
+                if (from == null || to == null || from.isRopeRegion || !to.isRopeRegion) {
+                    continue;
+                }
+
+                Point botPosition = new Point(edge.endPoint);
+                if (graph.findRegionId(map, botPosition) == edge.toRegionId) {
+                    continue;
+                }
+
+                Point rawTarget = alternateTargetInRegion(from, edge.startPoint);
+                if (rawTarget == null || graph.findRegionId(map, rawTarget) != from.id) {
+                    continue;
+                }
+
+                Rope rope = BotNavigationGraphProvider.findRopeFromRegion(map, to);
+                if (rope != null) {
+                    return new RopeEntryReuseCase(edge, rope, botPosition, rawTarget);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static Point alternateTargetInRegion(BotNavigationGraph.Region region, Point excluded) {
+        Point[] candidates = new Point[]{region.centerPoint(), region.leftPoint(), region.rightPoint()};
+        for (Point candidate : candidates) {
+            if (!candidate.equals(excluded)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static Character mockBot(Point startPosition, MapleMap map) {
+        Character bot = mock(Character.class);
+        AtomicReference<Point> position = new AtomicReference<>(new Point(startPosition));
+        AtomicInteger stance = new AtomicInteger(BotPhysicsEngine.cfg.STAND_STANCE);
+
+        when(bot.getPosition()).thenAnswer(invocation -> new Point(position.get()));
+        doAnswer(invocation -> {
+            position.set(new Point(invocation.getArgument(0)));
+            return null;
+        }).when(bot).setPosition(any(Point.class));
+        when(bot.getMap()).thenReturn(map);
+        when(bot.getHp()).thenReturn(100);
+        when(bot.getStance()).thenAnswer(invocation -> stance.get());
+        doAnswer(invocation -> {
+            stance.set(invocation.getArgument(0));
+            return null;
+        }).when(bot).setStance(anyInt());
+        return bot;
+    }
+
     private record StraightDropCase(BotNavigationGraph.Edge edge, Point alternativeStart) {
+    }
+
+    private record AlternativeJumpCase(BotNavigationGraph.Edge edge, Point alternativeStart) {
+    }
+
+    private record RopeEntryReuseCase(BotNavigationGraph.Edge edge, Rope rope, Point botPosition, Point rawTarget) {
     }
 }

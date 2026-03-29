@@ -1,5 +1,6 @@
 package server.bots;
 
+import client.Character;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import server.maps.MapleMap;
@@ -8,6 +9,8 @@ import server.maps.Rope;
 
 import java.awt.*;
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -15,6 +18,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class BotPhysicsEngineTest {
     private static MapleMap henesys;
@@ -140,6 +148,58 @@ class BotPhysicsEngineTest {
     }
 
     @Test
+    void shouldBeginFallWhenClimbDownMovesPastRopeBottom() {
+        Character bot = mockBot(new Point(100, 40), null);
+        BotEntry entry = new BotEntry(bot, null, null);
+        Rope rope = new Rope(100, 0, 40, false);
+        BotPhysicsEngine.attachToRope(entry, bot, rope, rope.bottomY());
+
+        BotPhysicsEngine.advanceClimb(entry, bot, 1);
+
+        assertTrue(entry.inAir);
+        assertFalse(entry.climbing);
+        assertEquals(new Point(100, 40), bot.getPosition());
+    }
+
+    @Test
+    void shouldLandOnTopPlatformWhenHoldingAtRopeTop() {
+        MapleMap map = mock(MapleMap.class);
+        when(map.getPointBelow(any(Point.class))).thenAnswer(invocation -> new Point(100, 0));
+        Character bot = mockBot(new Point(100, 0), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        Rope rope = new Rope(100, 0, 40, false);
+        BotPhysicsEngine.attachToRope(entry, bot, rope, rope.topY());
+
+        BotPhysicsEngine.holdClimb(entry, bot);
+
+        assertFalse(entry.inAir);
+        assertFalse(entry.climbing);
+        assertEquals(new Point(100, 0), bot.getPosition());
+        assertEquals(BotPhysicsEngine.cfg.STAND_STANCE, bot.getStance());
+    }
+
+    @Test
+    void shouldSnapGroundMotionBackToFootholdWhenBotStartsSlightlyAboveGround() {
+        MapleMap map = mock(MapleMap.class);
+        when(map.getPointBelow(any(Point.class))).thenAnswer(invocation -> {
+            Point probe = invocation.getArgument(0);
+            return new Point(probe.x, 120);
+        });
+        Character bot = mockBot(new Point(100, 110), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        Foothold foothold = mock(Foothold.class);
+        when(foothold.slope()).thenReturn(0.0);
+
+        BotPhysicsEngine.resetMotion(entry, bot.getPosition());
+        BotPhysicsEngine.GroundMotion motion = BotPhysicsEngine.applyGroundMotion(entry, bot, foothold, 0);
+
+        assertFalse(motion.lostGround());
+        assertEquals(0, motion.stepX());
+        assertEquals(new Point(100, 120), bot.getPosition());
+        assertFalse(entry.inAir);
+    }
+
+    @Test
     void shouldPreferExactGroundFootholdWhenOffsetLookupWouldChooseDifferentPlatform() {
         StandingLookupCase lookupCase = findStandingLookupCaseWhereOffsetDiffers(ellinia);
 
@@ -205,6 +265,26 @@ class BotPhysicsEngineTest {
 
         double ratio = (x - foothold.getX1()) / (double) (foothold.getX2() - foothold.getX1());
         return (int) Math.round(foothold.getY1() + (foothold.getY2() - foothold.getY1()) * ratio);
+    }
+
+    private static Character mockBot(Point startPosition, MapleMap map) {
+        Character bot = mock(Character.class);
+        AtomicReference<Point> position = new AtomicReference<>(new Point(startPosition));
+        AtomicInteger stance = new AtomicInteger(BotPhysicsEngine.cfg.STAND_STANCE);
+
+        when(bot.getPosition()).thenAnswer(invocation -> new Point(position.get()));
+        doAnswer(invocation -> {
+            position.set(new Point(invocation.getArgument(0)));
+            return null;
+        }).when(bot).setPosition(any(Point.class));
+        when(bot.getMap()).thenReturn(map);
+        when(bot.getHp()).thenReturn(100);
+        when(bot.getStance()).thenAnswer(invocation -> stance.get());
+        doAnswer(invocation -> {
+            stance.set(invocation.getArgument(0));
+            return null;
+        }).when(bot).setStance(anyInt());
+        return bot;
     }
 
     private record StandingLookupCase(Point point, Foothold exactFoothold, Foothold offsetFoothold) {

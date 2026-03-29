@@ -82,9 +82,20 @@ public class BotManager {
             "\\b(dismiss|disown|release)\\s+(\\S+)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern RECRUIT_PATTERN = Pattern.compile(
             "\\b(recruit|adopt|hire|claim)\\s+(\\S+)\\b", Pattern.CASE_INSENSITIVE);
-    // "give Jason Bob" or "transfer Jason to Bob"
-    private static final Pattern GIVE_PATTERN = Pattern.compile(
-            "\\b(give|transfer)\\s+(\\S+)(?:\\s+to)?\\s+(\\S+)\\b", Pattern.CASE_INSENSITIVE);
+    // Reserve `give ...` for item requests handled by BotChatManager.
+    private static final Pattern TRANSFER_PATTERN = Pattern.compile(
+            "\\btransfer\\s+(\\S+)(?:\\s+to)?\\s+(\\S+)\\b", Pattern.CASE_INSENSITIVE);
+
+    record BotTransferCommand(String botName, String targetName) {}
+
+    static BotTransferCommand matchBotTransferCommand(String message) {
+        Matcher matcher = TRANSFER_PATTERN.matcher(message);
+        if (!matcher.find()) {
+            return null;
+        }
+
+        return new BotTransferCommand(matcher.group(1), matcher.group(2));
+    }
 
     static String randomReply(List<String> list) {
         return list.get(ThreadLocalRandom.current().nextInt(list.size()));
@@ -343,11 +354,11 @@ public class BotManager {
             return;
         }
 
-        Matcher gm = GIVE_PATTERN.matcher(message);
-        if (gm.find()) {
-            String err = giveBot(owner.getId(), owner, gm.group(2), gm.group(3));
+        BotTransferCommand transferCommand = matchBotTransferCommand(message);
+        if (transferCommand != null) {
+            String err = giveBot(owner.getId(), owner, transferCommand.botName(), transferCommand.targetName());
             if (err != null) owner.yellowMessage(err);
-            else owner.yellowMessage("Bot '" + gm.group(2) + "' transferred to " + gm.group(3) + ".");
+            else owner.yellowMessage("Bot '" + transferCommand.botName() + "' transferred to " + transferCommand.targetName() + ".");
             return;
         }
 
@@ -521,7 +532,11 @@ public class BotManager {
         // Map change and teleport checks only apply when following owner
         if (entry.following) {
             if (bot.getMapId() != owner.getMapId()) {
-                Point spawn = new Point(owner.getPosition().x, owner.getPosition().y - 10);
+                Point ownerPos = owner.getPosition();
+                Point spawn = BotPhysicsEngine.findGroundPoint(owner.getMap(), new Point(ownerPos.x, ownerPos.y - 1));
+                if (spawn == null) {
+                    spawn = ownerPos;
+                }
                 BotPhysicsEngine.idleOnGround(entry, bot);
                 bot.changeMap(owner.getMap(), spawn);
                 BotMovementManager.resetEntryState(entry);
@@ -530,7 +545,10 @@ public class BotManager {
         }
         // Teleport if hopelessly far — applies to both follow and grind (catches falling off map)
         if (Math.abs(botPos.x - targetPos.x) + Math.abs(botPos.y - targetPos.y) > BotMovementManager.cfg.TELEPORT_DIST) {
-            Point spawn = new Point(targetPos.x, targetPos.y - 10);
+            Point spawn = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(targetPos.x, targetPos.y - 1));
+            if (spawn == null) {
+                spawn = targetPos;
+            }
             BotPhysicsEngine.teleportTo(entry, bot, spawn);
             BotMovementManager.resetEntryState(entry);
             BotMovementManager.broadcastMovement(entry);

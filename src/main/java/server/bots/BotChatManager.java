@@ -1295,7 +1295,7 @@ class BotChatManager {
         }
     }
 
-    private static String matchChoiceCategory(String message) {
+    static String matchChoiceCategory(String message) {
         if (DROP_SCROLLS_COMMAND_PATTERN.matcher(message).find()) return "scrolls";
         if (DROP_POTS_COMMAND_PATTERN.matcher(message).find()) return "pots";
         if (DROP_USE_COMMAND_PATTERN.matcher(message).find()) return "use";

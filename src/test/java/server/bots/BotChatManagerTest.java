@@ -36,6 +36,12 @@ class BotChatManagerTest {
     }
 
     @Test
+    void shouldParseNamedItemGiveRequests() {
+        assertEquals("name:flaming feather", BotChatManager.matchChoiceCategory("give me flaming feather"));
+        assertEquals("name:flaming feather", BotChatManager.matchChoiceCategory("give flaming feather"));
+    }
+
+    @Test
     void shouldParseRecommendedGearTrades() {
         assertEquals("recommended", BotChatManager.matchTradeCategory("trade recommended gear"));
         assertEquals("recommended", BotChatManager.matchTradeCategory("trade me upgrades"));

@@ -128,6 +128,18 @@ final class BotPhysicsEngine {
         return map.getFootholds().findBelow(new Point(position.x, position.y - cfg.MAX_SLOPE_UP));
     }
 
+    static Point findGroundPoint(MapleMap map, Point position) {
+        if (map == null || position == null) {
+            return null;
+        }
+
+        Point ground = map.getPointBelow(position);
+        if (ground != null) {
+            return ground;
+        }
+        return map.getPointBelow(new Point(position.x, position.y - cfg.MAX_SLOPE_UP));
+    }
+
     static void stopGroundMotion(BotEntry entry) {
         entry.hspeed = 0.0;
     }
@@ -204,45 +216,40 @@ final class BotPhysicsEngine {
 
     static void attachToRope(BotEntry entry, Character bot, Rope rope, int y) {
         int ropeY = Math.max(rope.topY(), Math.min(y, rope.bottomY()));
-        Point position = new Point(rope.x(), ropeY);
-        bot.setPosition(position);
-        entry.climbing = true;
-        entry.climbRope = rope;
-        entry.inAir = false;
-        entry.crouching = false;
-        entry.climbUpIntent = false;
-        entry.velY = 0f;
-        entry.airVelX = 0;
-        entry.physX = position.x;
-        entry.physY = position.y;
-        entry.downJumpPending = false;
-        stopGroundMotion(entry);
-        setMovementVelocity(entry, 0, 0);
-        syncCharacterState(entry);
+        setClimbPosition(entry, bot, rope, ropeY);
     }
 
-    static void moveOnRope(BotEntry entry, Character bot, int y) {
+    static void advanceClimb(BotEntry entry, Character bot, int verticalDir) {
         Rope rope = entry.climbRope;
         if (rope == null) {
+            beginFall(entry, bot, 0);
             return;
         }
 
-        int ropeY = Math.max(rope.topY(), Math.min(y, rope.bottomY()));
-        Point position = new Point(rope.x(), ropeY);
-        bot.setPosition(position);
-        entry.climbing = true;
-        entry.inAir = false;
-        entry.crouching = false;
-        entry.climbUpIntent = false;
-        entry.velY = 0f;
-        entry.airVelX = 0;
-        entry.physX = position.x;
-        entry.physY = position.y;
-        setMovementVelocity(entry, 0, 0);
-        syncCharacterState(entry);
+        int climbDir = Integer.compare(verticalDir, 0);
+        if (climbDir == 0) {
+            holdClimb(entry, bot);
+            return;
+        }
+
+        int nextY = bot.getPosition().y + climbDir * climbStepPerTick();
+        if (resolveClimbBoundary(entry, bot, rope, nextY)) {
+            return;
+        }
+
+        setClimbPosition(entry, bot, rope, nextY);
     }
 
-    static void holdClimb(BotEntry entry) {
+    static void holdClimb(BotEntry entry, Character bot) {
+        Rope rope = entry.climbRope;
+        if (rope == null) {
+            beginFall(entry, bot, 0);
+            return;
+        }
+        if (resolveClimbBoundary(entry, bot, rope, bot.getPosition().y)) {
+            return;
+        }
+
         setMovementVelocity(entry, 0, 0);
         syncCharacterState(entry);
     }
@@ -267,7 +274,7 @@ final class BotPhysicsEngine {
         int velocityX = velocityFromDeltaX(deltaPhysX);
         int newX = (int) Math.round(entry.physX);
         int stepX = newX - currentPos.x;
-        Point snappedPoint = map.getPointBelow(new Point(newX, currentPos.y - cfg.MAX_SLOPE_UP));
+        Point snappedPoint = findGroundPoint(map, new Point(newX, currentPos.y));
         boolean lostGround = snappedPoint == null || snappedPoint.y > currentPos.y + cfg.MAX_SNAP_DROP;
 
         if (lostGround) {
@@ -275,7 +282,7 @@ final class BotPhysicsEngine {
             return new GroundMotion(0, true);
         }
 
-        Point position = stepX == 0 ? currentPos : snappedPoint;
+        Point position = snappedPoint;
         bot.setPosition(position);
         entry.inAir = false;
         entry.climbing = false;
@@ -432,6 +439,56 @@ final class BotPhysicsEngine {
         entry.airVelX = airVelX;
         entry.downJumpPending = false;
         setMovementVelocity(entry, velocityFromDeltaX(airVelX), velocityFromAirStep(initialVelY));
+        syncCharacterState(entry);
+    }
+
+    private static boolean resolveClimbBoundary(BotEntry entry, Character bot, Rope rope, int candidateY) {
+        if (candidateY <= rope.topY()) {
+            Point landing = findTopLandingPoint(bot, rope, candidateY);
+            if (landing != null) {
+                landOnGround(entry, bot, landing);
+            } else {
+                beginFall(entry, bot, 0);
+            }
+            return true;
+        }
+        if (candidateY > rope.bottomY()) {
+            beginFall(entry, bot, 0);
+            return true;
+        }
+        return false;
+    }
+
+    private static Point findTopLandingPoint(Character bot, Rope rope, int candidateY) {
+        MapleMap map = bot.getMap();
+        if (map == null) {
+            return null;
+        }
+
+        int probeY = Math.min(candidateY, rope.topY()) - 3;
+        Point ground = map.getPointBelow(new Point(rope.x(), probeY));
+        if (ground == null) {
+            return null;
+        }
+
+        return ground.y <= rope.topY() + climbStepPerTick() + 2 ? ground : null;
+    }
+
+    private static void setClimbPosition(BotEntry entry, Character bot, Rope rope, int y) {
+        Point position = new Point(rope.x(), y);
+        bot.setPosition(position);
+        entry.climbing = true;
+        entry.climbRope = rope;
+        entry.inAir = false;
+        entry.crouching = false;
+        entry.climbUpIntent = false;
+        entry.velY = 0f;
+        entry.airVelX = 0;
+        entry.physX = position.x;
+        entry.physY = position.y;
+        entry.downJumpPending = false;
+        stopGroundMotion(entry);
+        setMovementVelocity(entry, 0, 0);
         syncCharacterState(entry);
     }
 

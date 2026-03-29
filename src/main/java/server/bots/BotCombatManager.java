@@ -389,7 +389,7 @@ class BotCombatManager {
         attack.targets = new HashMap<>();
 
         for (Monster target : attackPlan.targets) {
-            attack.targets.put(target.getObjectId(), makeTarget(attackPlan.numDamage, minDmg, maxDmg));
+            attack.targets.put(target.getObjectId(), makeTarget(bot, target, attackPlan.numDamage, minDmg, maxDmg));
         }
 
         applyAttackRoute(attackPlan.route, attack, bot);
@@ -798,13 +798,8 @@ class BotCombatManager {
         return 1.7f - (attackSpeed / 10f);
     }
 
-    private static AbstractDealDamageHandler.AttackTarget makeTarget(int hits, int minDmg, int maxDmg) {
-        List<Integer> lines = new ArrayList<>(hits);
-        for (int i = 0; i < hits; i++) {
-            lines.add(minDmg < maxDmg
-                    ? ThreadLocalRandom.current().nextInt(minDmg, maxDmg + 1)
-                    : maxDmg);
-        }
+    private static AbstractDealDamageHandler.AttackTarget makeTarget(Character bot, Monster monster, int hits, int minDmg, int maxDmg) {
+        List<Integer> lines = BotCombatFormulaProvider.getInstance().rollDamageLines(bot, monster, hits, minDmg, maxDmg);
         return new AbstractDealDamageHandler.AttackTarget((short) 305, lines);
     }
 
