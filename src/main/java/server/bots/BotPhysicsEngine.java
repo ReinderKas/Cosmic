@@ -209,6 +209,22 @@ final class BotPhysicsEngine {
         launchAirborne(entry, bot, position, initialVelY, airVelX, false);
     }
 
+    static void applyAirKnockback(BotEntry entry, Character bot, int airVelX) {
+        Point position = bot.getPosition();
+        entry.inAir = true;
+        entry.climbing = false;
+        entry.climbRope = null;
+        entry.crouching = false;
+        entry.physX = position.x;
+        entry.physY = position.y;
+        stopGroundMotion(entry);
+        entry.climbUpIntent = false;
+        entry.airVelX = airVelX;
+        entry.downJumpPending = false;
+        setMovementVelocity(entry, velocityFromDeltaX(airVelX), velocityFromAirStep(entry.velY));
+        syncCharacterState(entry);
+    }
+
     static void landOnGround(BotEntry entry, Character bot, Point position) {
         bot.setPosition(position);
         idleOnGround(entry, bot);

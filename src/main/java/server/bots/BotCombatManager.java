@@ -86,8 +86,9 @@ class BotCombatManager {
 
     static class Config {
         // Physics (combat use only)
-        // OpenStory Player::damage applies vforce -= 3.5 on knockback at an 8 ms timestep.
-        public float KNOCKBACK_RISE = 3.5f / 0.008f * (BotMovementManager.cfg.TICK_MS / 1000f);
+        // OpenStory Player::damage sets hspeed = +/-1.5 and vforce -= 3.5 on mob knockback.
+        public float KNOCKBACK_HSPEED = 1.5f;
+        public float KNOCKBACK_VFORCE = 3.5f;
 
         // Basic attack fallback when weapon data cannot produce a real normal-attack hit box.
         public int   ATTACK_RANGE_X  = 80;
@@ -166,30 +167,24 @@ class BotCombatManager {
     static void applyMobHit(BotEntry entry, Character bot, Monster mob) {
         Config cc = BotCombatManager.cfg;
         int dmg = rollPhysicalMobDamage(bot, mob);
-        int dir = mob.getPosition().x < bot.getPosition().x ? 0 : 1;
+        Point botPos = bot.getPosition();
+        MobHitKnockback knockback = resolveMobHitKnockback(botPos, mob.getPosition());
 
         if (dmg <= 0) {
             bot.getMap().broadcastMessage(bot,
                     PacketCreator.damagePlayer(-1, mob.getId(), bot.getId(), 0, 0,
-                            dir, false, 0, false, 0, 0, 0), false);
+                            knockback.direction(), false, 0, false, 0, 0, 0), false);
             entry.mobHitCooldownMs = BotMovementManager.delayAfterCurrentTick(cc.MOB_HIT_COOLDOWN_MS);
             return;
         }
 
         bot.addMPHP(-dmg, 0);
 
-        // direction: 0 = hit from left (knocked right), 1 = hit from right (knocked left)
+        // OpenStory touch attacks use the mob's position as attack origin:
+        // direction 0 means the hit came from the right and knocks the player left.
         bot.getMap().broadcastMessage(bot,
                 PacketCreator.damagePlayer(-1, mob.getId(), bot.getId(), dmg, 0,
-                        dir, false, 0, false, 0, 0, 0), false);
-
-        // Knock the bot back and hand motion over to the normal airborne physics.
-        Point bp = bot.getPosition();
-        int kbX = bp.x + (dir == 0 ? 30 : -30);
-        BotMovementManager.resetEntryState(entry);
-        int airVelX = (dir == 0 ? 1 : -1) * BotMovementManager.walkStep(bot.getMap());
-        BotPhysicsEngine.beginKnockback(entry, bot, new Point(kbX, bp.y), -cfg.KNOCKBACK_RISE, airVelX);
-        BotMovementManager.broadcastMovement(entry);
+                        knockback.direction(), false, 0, false, 0, 0, 0), false);
 
         entry.mobHitCooldownMs = BotMovementManager.delayAfterCurrentTick(cc.MOB_HIT_COOLDOWN_MS);
 
@@ -199,11 +194,59 @@ class BotCombatManager {
             BotManager.getInstance().botSay(bot, BotManager.randomReply(DEATH_REPLIES));
             entry.deadUntil = System.currentTimeMillis() + cc.BOT_DEAD_MS;
             BotMovementManager.resetEntryState(entry);
+            return;
         }
+
+        if (!shouldApplyMobKnockback(entry, bot)) {
+            return;
+        }
+
+        clearMobHitActionState(entry);
+        if (entry.inAir) {
+            BotPhysicsEngine.applyAirKnockback(entry, bot, knockback.airVelX());
+        } else {
+            BotPhysicsEngine.beginKnockback(entry, bot, botPos, -scaledOpenStoryStep(cfg.KNOCKBACK_VFORCE), knockback.airVelX());
+        }
+        BotMovementManager.broadcastMovement(entry);
     }
 
     private static int rollPhysicalMobDamage(Character bot, Monster mob) {
         return BotDefenseDataProvider.getInstance().rollPhysicalTouchDamage(bot, mob);
+    }
+
+    private static boolean shouldApplyMobKnockback(BotEntry entry, Character bot) {
+        if (entry.climbing || bot.getHp() <= 0) {
+            return false;
+        }
+
+        Integer stancePercent = bot.getBuffedValue(BuffStat.STANCE);
+        if (stancePercent == null || stancePercent <= 0) {
+            return true;
+        }
+
+        float stanceChance = Math.max(0f, Math.min(1f, stancePercent / 100f));
+        return ThreadLocalRandom.current().nextFloat() > stanceChance;
+    }
+
+    private static MobHitKnockback resolveMobHitKnockback(Point botPos, Point attackOrigin) {
+        boolean attackFromRight = attackOrigin.x > botPos.x;
+        int direction = attackFromRight ? 0 : 1;
+        int airVelX = Math.round((attackFromRight ? -1f : 1f) * scaledOpenStoryStep(cfg.KNOCKBACK_HSPEED));
+        return new MobHitKnockback(direction, airVelX);
+    }
+
+    private static float scaledOpenStoryStep(float openStoryStepValue) {
+        return openStoryStepValue * (BotMovementManager.cfg.TICK_MS / 8.0f);
+    }
+
+    private static void clearMobHitActionState(BotEntry entry) {
+        entry.grindTarget = null;
+        entry.attackCooldownMs = 0;
+        BotMovementManager.clearNavigationState(entry);
+        entry.movementBroadcastValid = false;
+    }
+
+    private record MobHitKnockback(int direction, int airVelX) {
     }
 
     static void rebuildSkillCacheIfNeeded(BotEntry entry, Character bot) {
