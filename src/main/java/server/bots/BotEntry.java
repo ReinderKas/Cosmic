@@ -126,7 +126,6 @@ class BotEntry {
     // Human-like spacing and stagger
     final int followOffsetX = ThreadLocalRandom.current().nextInt(-100, 101);
     int skipDelayMs = ThreadLocalRandom.current().nextInt(0, 501);
-    int idleEmoteTimerMs = ThreadLocalRandom.current().nextInt(25_000, 45_001);
     int aiTickAccumulatorMs = 0;
 
     // Cached movement state shared across ticks
