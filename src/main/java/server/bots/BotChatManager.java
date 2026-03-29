@@ -483,6 +483,7 @@ class BotChatManager {
         if (FOLLOW_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
                 entry.grinding = false;
+                entry.bot.changeFaceExpression(1);
                 BotEquipManager.autoEquip(entry.bot, entry.owner);
                 BotManager.getInstance().botSay(entry.bot, BotManager.randomReply(FOLLOW_REPLIES));
                 TimerManager.getInstance().schedule(() -> entry.following = true, 250 + ThreadLocalRandom.current().nextInt(0, 500));
@@ -490,6 +491,7 @@ class BotChatManager {
         } else if (GRIND_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
                 entry.following = false;
+                entry.bot.changeFaceExpression(ThreadLocalRandom.current().nextBoolean() ? 3 : 4);
                 BotEquipManager.autoEquip(entry.bot, entry.owner);
                 BotManager.getInstance().setupAutopotForBot(entry.bot);
                 BotManager.getInstance().botSay(entry.bot, BotManager.getInstance().grindStartMessage(entry.bot));
@@ -502,11 +504,13 @@ class BotChatManager {
             TimerManager.getInstance().schedule(() -> {
                 entry.following = false;
                 entry.grinding  = false;
+                entry.bot.changeFaceExpression(1);
                 BotEquipManager.autoEquip(entry.bot, entry.owner);
                 TimerManager.getInstance().schedule(() -> BotManager.getInstance().botSay(entry.bot, BotManager.randomReply(STOP_REPLIES)), 1500);
             }, 1000);
         } else if (GREETING_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
+                entry.bot.changeFaceExpression(ThreadLocalRandom.current().nextBoolean() ? 1 : 6);
                 queueBotSay(entry, BotManager.randomReply(GREETING_REPLIES));
                 checkBotStatus(entry, entry.bot);
             }, 1000);
@@ -665,7 +669,10 @@ class BotChatManager {
                 entry.ownerWasAfk = false;
                 final Character bot = entry.bot;
                 TimerManager.getInstance().schedule(
-                        () -> BotManager.getInstance().botSay(bot, BotManager.randomReply(WB_REPLIES)), 2000);
+                        () -> {
+                    bot.changeFaceExpression(ThreadLocalRandom.current().nextBoolean() ? 1 : 7);
+                    BotManager.getInstance().botSay(bot, BotManager.randomReply(WB_REPLIES));
+                }, 2000);
             }
             entry.ownerAfkPos     = pos;
             entry.ownerAfkSinceMs = now;
