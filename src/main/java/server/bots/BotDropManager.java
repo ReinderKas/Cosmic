@@ -388,10 +388,10 @@ class BotDropManager {
         boolean receivedSomething = trade.getPartner() != null && trade.getPartner().hasAnyOffer();
         Trade.completeTrade(bot);
         if (receivedSomething) {
-            bot.changeFaceExpression(ThreadLocalRandom.current().nextBoolean() ? 1 : 7);
+            bot.changeFaceExpression(Emote.HAPPY.getValue());
             BotManager.getInstance().botSay(bot, BotManager.randomReply(TRADE_THANKS_MSGS));
         } else if (ThreadLocalRandom.current().nextInt(100) < 20) {
-            bot.changeFaceExpression(ThreadLocalRandom.current().nextBoolean() ? 2 : 4);
+            bot.changeFaceExpression(ThreadLocalRandom.current().nextBoolean() ? Emote.GLARE.getValue() : Emote.ANNOYED.getValue());
             BotManager.getInstance().botSay(bot, BotManager.randomReply(TRADE_FREEBIE_QUIPS));
         }
     }

@@ -648,7 +648,7 @@ public class BotManager {
             registerBot(ownerCharId, owner, botChar);
             TimerManager.getInstance().schedule(() -> {
                 botSay(botChar, "back!!");
-                botChar.changeFaceExpression(1);
+                botChar.changeFaceExpression(Emote.HAPPY.getValue());
             }, 1000);
         } catch (SQLException e) {
             log.warn("reloginBot: failed to reload charId={}", charId, e);
@@ -668,7 +668,7 @@ public class BotManager {
         BotMovementManager.resetEntryState(entry);
         BotMovementManager.broadcastMovement(entry);
         botSay(bot, "back!");
-        bot.changeFaceExpression(1);
+        bot.changeFaceExpression(Emote.GLARE.getValue());
     }
 
     // -------------------------------------------------------------------------
@@ -819,7 +819,7 @@ public class BotManager {
             entry.grinding = false;
             entry.following = true;
             botSay(bot, "low on pots!! walking to you");
-            bot.changeFaceExpression(2);
+            bot.changeFaceExpression(Emote.GLARE.getValue());
         }
     }
 
