@@ -134,7 +134,6 @@ class BotCombatManager {
             GM.BLESS,
             GM.HYPER_BODY,
             SuperGM.HASTE,
-            SuperGM.BLESS,
             SuperGM.HOLY_SYMBOL,
             SuperGM.HYPER_BODY
     );
