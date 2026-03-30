@@ -4,6 +4,7 @@ import client.BuffStat;
 import client.Character;
 import client.Job;
 import client.inventory.InventoryType;
+import client.inventory.WeaponType;
 import net.packet.Packet;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -27,6 +28,30 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class BotCombatManagerTest {
+    @Test
+    void shouldMatchOpenStoryBasicAttackStanceIds() {
+        assertEquals(23, BotCombatManager.attackStanceId("swingO1"));
+        assertEquals(11, BotCombatManager.attackStanceId("shoot1"));
+        assertEquals(10, BotCombatManager.attackStanceId("shot"));
+        assertEquals(0, BotCombatManager.attackStanceId("stand1"));
+    }
+
+    @Test
+    void shouldUseOpenStoryFallbackAttackGroupsByWeaponType() {
+        BotCombatManager.BasicAttackSpec gunSpec = BotCombatManager.basicAttackSpec(WeaponType.GUN);
+        assertEquals(9, gunSpec.display());
+        assertEquals("shot", gunSpec.primaryAction());
+
+        BotCombatManager.BasicAttackSpec bowSpec = BotCombatManager.basicAttackSpec(WeaponType.BOW);
+        assertEquals(3, bowSpec.display());
+        assertEquals("shoot1", bowSpec.primaryAction());
+
+        BotCombatManager.BasicAttackSpec twoHandedSpec = BotCombatManager.basicAttackSpec(WeaponType.SWORD2H);
+        assertEquals(5, twoHandedSpec.display());
+        assertTrue(twoHandedSpec.actions().contains("swingT1"));
+        assertTrue(twoHandedSpec.actions().contains("stabO1"));
+    }
+
     @Test
     void shouldMatchOpenStoryGroundMobKnockbackWhenHitFromRight() {
         MapleMap map = mock(MapleMap.class);
@@ -96,6 +121,17 @@ class BotCombatManagerTest {
         assertTrue(entry.deadUntil > 0);
         assertFalse(entry.inAir);
         assertFalse(entry.climbing);
+    }
+
+    @Test
+    void shouldUseCloserPreciseApproachPointWhenTargetIsOutOfRange() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mockBot(new Point(-608, 2039), map, 20_000, null);
+        Monster mob = mockMob(new Point(-525, 2094), 9300004);
+
+        Point approach = BotCombatManager.resolveAttackApproachPoint(null, bot, mob);
+
+        assertEquals(new Point(-551, 2094), approach);
     }
 
     private static void assertDamageDirection(MapleMap map, Character bot, int expectedBroadcasts, int expectedDirection) {

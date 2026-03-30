@@ -174,7 +174,9 @@ class BotMovementManager {
                 return;
             }
 
-            MoveAction action = dy <= 0 ? MoveAction.climbUp() : MoveAction.climbDown();
+            MoveAction action = dy < 0
+                    ? MoveAction.climbUp()
+                    : dy > 0 ? MoveAction.climbDown() : MoveAction.idle();
             applyClimbAction(entry, bot, action);
         } finally {
             BotPerformanceMonitor.record("move-climb", System.nanoTime() - startedAt);

@@ -38,9 +38,10 @@ final class BotAttackDataProvider {
         private final Rectangle rightFacingBounds;
         private final List<String> sourceActions;
         private final String sourcePath;
+        private final Map<String, Integer> afterimageFirstFramesByAction;
 
         private NormalAttackProfile(int attackSpeed, int attack, int attackDelayMillis, String afterImage, Rectangle rightFacingBounds,
-                                    List<String> sourceActions, String sourcePath) {
+                                    List<String> sourceActions, String sourcePath, Map<String, Integer> afterimageFirstFramesByAction) {
             this.attackSpeed = attackSpeed;
             this.attack = attack;
             this.attackDelayMillis = attackDelayMillis;
@@ -48,6 +49,7 @@ final class BotAttackDataProvider {
             this.rightFacingBounds = rightFacingBounds != null ? new Rectangle(rightFacingBounds) : null;
             this.sourceActions = List.copyOf(sourceActions);
             this.sourcePath = sourcePath;
+            this.afterimageFirstFramesByAction = Map.copyOf(afterimageFirstFramesByAction);
         }
 
         int getAttackSpeed() {
@@ -78,6 +80,18 @@ final class BotAttackDataProvider {
             return sourcePath;
         }
 
+        String getActionForVariant(int variantOffset, String fallbackAction) {
+            if (sourceActions.isEmpty()) {
+                return fallbackAction;
+            }
+            int normalizedIndex = Math.max(0, Math.min(variantOffset, sourceActions.size() - 1));
+            return sourceActions.get(normalizedIndex);
+        }
+
+        int getAfterimageFirstFrame(String actionName) {
+            return afterimageFirstFramesByAction.getOrDefault(actionName, 0);
+        }
+
         Rectangle calculateBoundingBox(Point origin, boolean facingLeft) {
             if (rightFacingBounds == null) {
                 return null;
@@ -96,22 +110,29 @@ final class BotAttackDataProvider {
         }
     }
 
+    private record BodyStanceTiming(List<Integer> frameDelays, int totalDelayMillis) {
+    }
+
     private static final class AttackBoundsData {
         private final Rectangle bounds;
         private final int attackDelayMillis;
         private final List<String> sourceActions;
         private final String sourcePath;
+        private final Map<String, Integer> firstFramesByAction;
 
-        private AttackBoundsData(Rectangle bounds, int attackDelayMillis, List<String> sourceActions, String sourcePath) {
+        private AttackBoundsData(Rectangle bounds, int attackDelayMillis, List<String> sourceActions, String sourcePath,
+                                 Map<String, Integer> firstFramesByAction) {
             this.bounds = new Rectangle(bounds);
             this.attackDelayMillis = attackDelayMillis;
             this.sourceActions = List.copyOf(sourceActions);
             this.sourcePath = sourcePath;
+            this.firstFramesByAction = Map.copyOf(firstFramesByAction);
         }
     }
 
     private final Map<Integer, NormalAttackProfile> normalAttackProfiles = new HashMap<>();
-    private volatile Map<String, Integer> bodyStanceDurations = null;
+    private volatile Map<String, BodyStanceTiming> bodyStanceTimings = null;
+    private volatile Path cachedCharacterRoot = null;
 
     private BotAttackDataProvider() {
     }
@@ -124,17 +145,54 @@ final class BotAttackDataProvider {
      * Returns 0 if the stance is not found.
      */
     int getBodyStanceDurationMs(String stanceName) {
-        if (bodyStanceDurations == null) {
+        BodyStanceTiming timing = getBodyStanceTiming(stanceName);
+        return timing != null ? timing.totalDelayMillis() : 0;
+    }
+
+    int getBodyStanceDelayBeforeFrameMs(String stanceName, int firstFrame) {
+        BodyStanceTiming timing = getBodyStanceTiming(stanceName);
+        if (timing == null || firstFrame <= 0) {
+            return 0;
+        }
+
+        int delay = 0;
+        List<Integer> frameDelays = timing.frameDelays();
+        for (int frame = 0; frame < Math.min(firstFrame, frameDelays.size()); frame++) {
+            delay += frameDelays.get(frame);
+        }
+        return delay;
+    }
+
+    private BodyStanceTiming getBodyStanceTiming(String stanceName) {
+        ensureCurrentCharacterRoot();
+        if (bodyStanceTimings == null) {
             synchronized (this) {
-                if (bodyStanceDurations == null) {
-                    bodyStanceDurations = loadBodyStanceDurations();
+                if (bodyStanceTimings == null) {
+                    bodyStanceTimings = loadBodyStanceTimings();
                 }
             }
         }
-        return bodyStanceDurations.getOrDefault(stanceName, 0);
+        return bodyStanceTimings.get(stanceName);
     }
 
-    private Map<String, Integer> loadBodyStanceDurations() {
+    private void ensureCurrentCharacterRoot() {
+        Path currentCharacterRoot = WZFiles.CHARACTER.getFile();
+        Path previousCharacterRoot = cachedCharacterRoot;
+        if (previousCharacterRoot != null && previousCharacterRoot.equals(currentCharacterRoot)) {
+            return;
+        }
+
+        synchronized (this) {
+            if (cachedCharacterRoot != null && cachedCharacterRoot.equals(currentCharacterRoot)) {
+                return;
+            }
+            normalAttackProfiles.clear();
+            bodyStanceTimings = null;
+            cachedCharacterRoot = currentCharacterRoot;
+        }
+    }
+
+    private Map<String, BodyStanceTiming> loadBodyStanceTimings() {
         Path bodyFile = WZFiles.CHARACTER.getFile().resolve("00002000.img.xml");
         if (!Files.isRegularFile(bodyFile)) {
             log.warn("Bot attack timing: body animation file not found at {}", bodyFile);
@@ -146,13 +204,14 @@ final class BotAttackDataProvider {
             return Map.of();
         }
 
-        Map<String, Integer> durations = new HashMap<>();
+        Map<String, BodyStanceTiming> timings = new HashMap<>();
         for (Element stanceEl : getNamedChildren(doc.getDocumentElement())) {
             String stanceName = stanceEl.getAttribute("name");
             if (stanceName.isBlank()) {
                 continue;
             }
 
+            List<Integer> frameDelays = new ArrayList<>();
             int totalDelay = 0;
             for (Element frameEl : getNamedChildren(stanceEl)) {
                 // Frames with an "action" child are action-redirect frames (no direct delay)
@@ -160,19 +219,22 @@ final class BotAttackDataProvider {
                     continue;
                 }
                 // Default 100 ms matches OpenStory's BodyDrawInfo fallback
-                totalDelay += getIntValue(findNamedChild(frameEl, "delay"), 100);
+                int frameDelay = getIntValue(findNamedChild(frameEl, "delay"), 100);
+                frameDelays.add(frameDelay);
+                totalDelay += frameDelay;
             }
 
             if (totalDelay > 0) {
-                durations.put(stanceName, totalDelay);
+                timings.put(stanceName, new BodyStanceTiming(List.copyOf(frameDelays), totalDelay));
             }
         }
 
-        log.info("Bot attack timing: loaded {} body stances from {}", durations.size(), bodyFile.getFileName());
-        return Map.copyOf(durations);
+        log.info("Bot attack timing: loaded {} body stances from {}", timings.size(), bodyFile.getFileName());
+        return Map.copyOf(timings);
     }
 
     NormalAttackProfile getNormalAttackProfile(int itemId) {
+        ensureCurrentCharacterRoot();
         if (normalAttackProfiles.containsKey(itemId)) {
             return normalAttackProfiles.get(itemId);
         }
@@ -210,7 +272,7 @@ final class BotAttackDataProvider {
         // and are far shorter than the full swing animation.
         AttackBoundsData forBounds = afterImageData != null ? afterImageData : weaponActionData;
         if (forBounds == null) {
-            return new NormalAttackProfile(attackSpeed, attack, 0, afterImage, null, List.of(), weaponFile.toString());
+            return new NormalAttackProfile(attackSpeed, attack, 0, afterImage, null, List.of(), weaponFile.toString(), Map.of());
         }
 
         int delay = weaponActionData != null && weaponActionData.attackDelayMillis > 0
@@ -218,7 +280,8 @@ final class BotAttackDataProvider {
                 : afterImageData != null ? afterImageData.attackDelayMillis : 0;
 
         return new NormalAttackProfile(attackSpeed, attack, delay, afterImage, forBounds.bounds,
-                forBounds.sourceActions, forBounds.sourcePath);
+                forBounds.sourceActions, forBounds.sourcePath,
+                afterImageData != null ? afterImageData.firstFramesByAction : Map.of());
     }
 
     private AttackBoundsData loadAfterimageBounds(String afterImage, int reqLevel) {
@@ -248,6 +311,7 @@ final class BotAttackDataProvider {
         int totalDelay = 0;
         int delayedActions = 0;
         Set<String> actionNames = new LinkedHashSet<>();
+        Map<String, Integer> firstFramesByAction = new HashMap<>();
         for (Element action : getNamedChildren(levelBucket)) {
             Element lt = findNamedChild(action, "lt");
             Element rb = findNamedChild(action, "rb");
@@ -261,7 +325,9 @@ final class BotAttackDataProvider {
             }
 
             bounds = bounds == null ? new Rectangle(actionBounds) : bounds.union(actionBounds);
-            actionNames.add(action.getAttribute("name"));
+            String actionName = action.getAttribute("name");
+            actionNames.add(actionName);
+            firstFramesByAction.put(actionName, findAfterimageFirstFrame(action));
             int actionDelay = sumActionDelayMillis(action);
             if (actionDelay > 0) {
                 totalDelay += actionDelay;
@@ -273,7 +339,8 @@ final class BotAttackDataProvider {
             return null;
         }
 
-        return new AttackBoundsData(bounds, averageDelay(totalDelay, delayedActions), new ArrayList<>(actionNames), afterimageFile.toString());
+        return new AttackBoundsData(bounds, averageDelay(totalDelay, delayedActions), new ArrayList<>(actionNames),
+                afterimageFile.toString(), firstFramesByAction);
     }
 
     private Element findBestLevelBucket(Element root, int requestedBucket) {
@@ -351,7 +418,27 @@ final class BotAttackDataProvider {
             return null;
         }
 
-        return new AttackBoundsData(bounds, averageDelay(totalDelay, delayedActions), new ArrayList<>(actionNames), weaponFile.toString());
+        return new AttackBoundsData(bounds, averageDelay(totalDelay, delayedActions), new ArrayList<>(actionNames),
+                weaponFile.toString(), Map.of());
+    }
+
+    private int findAfterimageFirstFrame(Element action) {
+        int bestFrame = 0;
+        boolean found = false;
+
+        for (Element child : getNamedChildren(action)) {
+            int frame = parseInt(child.getAttribute("name"), Integer.MIN_VALUE);
+            if (frame == Integer.MIN_VALUE) {
+                continue;
+            }
+
+            if (!found || frame > bestFrame) {
+                bestFrame = frame;
+                found = true;
+            }
+        }
+
+        return found ? bestFrame : 0;
     }
 
     private static boolean isBasicAttackAction(String actionName) {

@@ -16,6 +16,7 @@ import constants.skills.DawnWarrior;
 import constants.skills.Magician;
 import constants.skills.Warrior;
 import constants.skills.WhiteKnight;
+import net.packet.Packet;
 import net.server.Server;
 import net.server.world.Party;
 import org.slf4j.Logger;
@@ -791,6 +792,7 @@ public class BotManager {
             entry.grindTarget = target;
             Point tp = target.getPosition();
             BotCombatManager.AttackPlan attackPlan = BotCombatManager.planAttack(entry, bot, target);
+            boolean requiresPreciseCombatApproach = false;
 
             if (!entry.climbing) {
                 if (BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)) {
@@ -807,9 +809,16 @@ public class BotManager {
                     // Target is above but within jump height — jump toward it
                     BotMovementManager.initiateJump(entry, bot, tp.x - botPos.x);
                     return;
+                } else if (!entry.inAir) {
+                    requiresPreciseCombatApproach = true;
                 }
             }
-            targetPos = tp;
+            targetPos = requiresPreciseCombatApproach
+                    ? BotCombatManager.resolveAttackApproachPoint(attackPlan, bot, target)
+                    : tp;
+            if (requiresPreciseCombatApproach) {
+                entry.navPreciseTarget = true;
+            }
         }
 
         BotNavigationManager.NavigationDirective navDirective = BotNavigationManager.resolveTarget(entry, targetPos, runAiTick);
@@ -820,7 +829,7 @@ public class BotManager {
 
         // Spread bots out on the same platform — only when no cross-region nav edge is active,
         // so precise jump/climb/portal waypoints aren't disrupted.
-        if ((entry.following || entry.grinding) && entry.navEdge == null) {
+        if ((entry.following || entry.grinding) && entry.navEdge == null && !entry.navPreciseTarget) {
             targetPos = new Point(targetPos.x + entry.followOffsetX, targetPos.y);
         }
 
@@ -981,6 +990,10 @@ public class BotManager {
         entry.invFullWarnCooldownMs = BotMovementManager.tickDown(entry.invFullWarnCooldownMs);
         Point botPos = bot.getPosition();
         for (MapItem drop : bot.getMap().getDroppedItems()) {
+            if (drop.isPickedUp() || bot.getMap().getMapObject(drop.getObjectId()) != drop) {
+                cleanupBotLootGhostDrop(bot, drop);
+                continue;
+            }
             if (!drop.canBePickedBy(bot)) continue;
             if (System.currentTimeMillis() - drop.getDropTime() < 3000) continue; // wait 3s after spawn
             Point dp = drop.getPosition();
@@ -1004,12 +1017,36 @@ public class BotManager {
             } else {
                 bot.pickupItem(drop);
             }
+            cleanupBotLootGhostDrop(bot, drop);
             if (pickedItem != null
                     && pickedItemId > 0
                     && ItemConstants.getInventoryType(pickedItemId) == InventoryType.EQUIP
                     && BotDropManager.hasItem(bot, pickedItem)) {
                 BotChatManager.scheduleLootOfferPrompt(entry, bot, pickedItem, 5_000L);
             }
+        }
+    }
+
+    private void cleanupBotLootGhostDrop(Character bot, MapItem drop) {
+        if (drop == null) {
+            return;
+        }
+        if (!drop.isPickedUp() && bot.getMap().getMapObject(drop.getObjectId()) == drop) {
+            return;
+        }
+
+        var map = bot.getMap();
+        Packet removePacket = PacketCreator.removeItemFromMap(drop.getObjectId(), 1, 0);
+        for (Character player : map.getAllPlayers()) {
+            if (player.getClient() instanceof BotClient) {
+                continue;
+            }
+            if (!player.isMapObjectVisible(drop)) {
+                continue;
+            }
+
+            player.removeVisibleMapObject(drop);
+            player.sendPacket(removePacket);
         }
     }
 
