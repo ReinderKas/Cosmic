@@ -210,7 +210,7 @@ class BotMovementManager {
             return false;
         }
         return !entry.grinding
-                && Math.abs(dy) < cfg.FOLLOW_DIST
+                && Math.abs(dy) < cfg.STOP_DIST
                 && Math.abs(dxOwner) < cfg.FOLLOW_DIST * 2;
     }
 

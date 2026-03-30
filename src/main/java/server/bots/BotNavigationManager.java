@@ -154,7 +154,20 @@ final class BotNavigationManager {
             return null;
         }
         BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(bot.getMap());
-        if (!canExecuteJumpFromCurrentPosition(graph, bot.getMap(), bot.getPosition(), edge)) {
+        Point botPos = bot.getPosition();
+        if (!canExecuteJumpFromCurrentPosition(graph, bot.getMap(), botPos, edge)) {
+            // Bot may be standing at the top of a rope region whose bottom is the jump entry.
+            // Grab the rope and descend — tickClimbing will naturally drive toward edge.startPoint.
+            if (edge.startPoint.y > botPos.y) {
+                BotNavigationGraph.Region fromRegion = graph.getRegion(edge.fromRegionId);
+                if (fromRegion != null && fromRegion.isRopeRegion) {
+                    Rope rope = findRopeForRegion(bot.getMap(), fromRegion);
+                    if (rope != null && canGrabRopeAtCurrentPosition(botPos, rope)) {
+                        startClimbing(entry, bot, rope, edge.startPoint.y);
+                        return new NavigationDirective(rawTargetPos, true);
+                    }
+                }
+            }
             return null;
         }
 
