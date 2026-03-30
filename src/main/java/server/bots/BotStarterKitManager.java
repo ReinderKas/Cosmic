@@ -78,7 +78,7 @@ final class BotStarterKitManager {
                         bot.getName(), grant.itemId(), grant.quantity(), newJob);
             }
         }
-        BotEquipManager.autoEquip(bot, owner);
+        BotEquipManager.autoEquip(bot, owner, null);
     }
 
     private static boolean canHoldStarterKit(Character bot, List<ItemGrant> starterKit) {

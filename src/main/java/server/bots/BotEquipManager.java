@@ -1,6 +1,5 @@
 package server.bots;
 
-import client.BotClient;
 import client.Character;
 import client.Job;
 import client.inventory.Equip;
@@ -14,7 +13,6 @@ import constants.inventory.ItemConstants;
 import server.ItemInformationProvider;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,17 +52,14 @@ class BotEquipManager {
 
     /**
      * Scans the bot's EQUIP inventory and equips any item that improves current gear.
-     * Items that are upgrade candidates for the owner or party members are skipped
-     * so they remain available for recommendation/trade.
      * Scoring priority: max damage > total defense > total stat sum.
      * Cash items are skipped. Called on mode change (follow / stop / grind).
+     * {@code pendingOffer} is excluded so a pending gear offer to the owner stays tradeable.
      */
-    static void autoEquip(Character bot, Character owner) {
+    static void autoEquip(Character bot, Character owner, Item pendingOffer) {
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
         Inventory eqpInv = bot.getInventory(InventoryType.EQUIP);
         Inventory eqdInv = bot.getInventory(InventoryType.EQUIPPED);
-
-        Set<Equip> reservedForParty = collectReservedForParty(bot, owner);
 
         WeaponType weaponType = currentWeaponType(bot, ii);
 
@@ -72,7 +67,7 @@ class BotEquipManager {
         Map<Short, List<Equip>> bySlot = new LinkedHashMap<>();
         for (Item item : eqpInv.list()) {
             if (ii.isCash(item.getItemId())) continue;
-            if (reservedForParty.contains(item)) continue;
+            if (item == pendingOffer) continue;
             String textSlot = ii.getEquipmentSlot(item.getItemId());
             EquipSlot eslot = EquipSlot.getFromTextSlot(textSlot);
             if (eslot == EquipSlot.PET_EQUIP) continue;
@@ -312,24 +307,6 @@ class BotEquipManager {
             case "belt" -> new short[]{-21};
             default -> new short[0];
         };
-    }
-
-    private static Set<Equip> collectReservedForParty(Character bot, Character owner) {
-        if (owner == null) return Set.of();
-        Set<Equip> reserved = new HashSet<>();
-        addReservedFor(reserved, owner, bot);
-        for (Character member : owner.getPartyMembersOnSameMap()) {
-            if (member.getId() == owner.getId() || member.getId() == bot.getId()) continue;
-            if (member.getClient() instanceof BotClient) continue;
-            addReservedFor(reserved, member, bot);
-        }
-        return reserved;
-    }
-
-    private static void addReservedFor(Set<Equip> reserved, Character receiver, Character holder) {
-        for (EquipRecommendation rec : findRecommendedEquips(receiver, holder)) {
-            reserved.add(rec.candidate());
-        }
     }
 
     private static void autoEquipRings(Character bot, ItemInformationProvider ii, WeaponType wt,

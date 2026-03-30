@@ -723,16 +723,17 @@ public class BotManager {
             targetPos = tp;
         }
 
-        // Shift target by bot's personal offset so multiple bots spread out (follow + grind)
-//        if (entry.following || entry.grinding) {
-//            targetPos = new Point(targetPos.x + entry.followOffsetX, targetPos.y);
-//        }
-
         BotNavigationManager.NavigationDirective navDirective = BotNavigationManager.resolveTarget(entry, targetPos, runAiTick);
         if (navDirective.consumedTick) {
             return;
         }
         targetPos = navDirective.targetPos;
+
+        // Spread bots out on the same platform — only when no cross-region nav edge is active,
+        // so precise jump/climb/portal waypoints aren't disrupted.
+        if ((entry.following || entry.grinding) && entry.navEdge == null) {
+            targetPos = new Point(targetPos.x + entry.followOffsetX, targetPos.y);
+        }
 
         if (entry.climbing) {
             BotMovementManager.tickClimbing(entry, targetPos, runAiTick);

@@ -483,14 +483,14 @@ class BotChatManager {
         if (FOLLOW_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
                 entry.grinding = false;
-                BotEquipManager.autoEquip(entry.bot, entry.owner);
+                BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem);
                 BotManager.getInstance().botSay(entry.bot, BotManager.randomReply(FOLLOW_REPLIES));
                 TimerManager.getInstance().schedule(() -> entry.following = true, 250 + ThreadLocalRandom.current().nextInt(0, 500));
             }, 1500 + ThreadLocalRandom.current().nextInt(0, 500));
         } else if (GRIND_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
                 entry.following = false;
-                BotEquipManager.autoEquip(entry.bot, entry.owner);
+                BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem);
                 BotManager.getInstance().setupAutopotForBot(entry.bot);
                 BotManager.getInstance().botSay(entry.bot, BotManager.getInstance().grindStartMessage(entry.bot));
                 TimerManager.getInstance().schedule(() -> {
@@ -502,7 +502,7 @@ class BotChatManager {
             TimerManager.getInstance().schedule(() -> {
                 entry.following = false;
                 entry.grinding  = false;
-                BotEquipManager.autoEquip(entry.bot, entry.owner);
+                BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem);
                 TimerManager.getInstance().schedule(() -> BotManager.getInstance().botSay(entry.bot, BotManager.randomReply(STOP_REPLIES)), 1500);
             }, 1000);
         } else if (GREETING_PATTERN.matcher(message).find()) {
@@ -802,12 +802,13 @@ class BotChatManager {
             return;
         }
 
-        if (BotEquipManager.findRecommendedEquips(owner, bot).isEmpty()) {
+        List<BotEquipManager.EquipRecommendation> recs = BotEquipManager.findRecommendedEquips(owner, bot);
+        if (recs.isEmpty()) {
             queueBotSay(entry, "no better gear for you rn");
             return;
         }
 
-        queueBotSay(entry, "yes, say 'trade recommended gear' if you want it");
+        offerGearItem(entry, bot, owner, recs.get(0).candidate());
         entry.nextGearSuggestionAt = System.currentTimeMillis() + 60_000L;
     }
 
@@ -823,8 +824,21 @@ class BotChatManager {
             return;
         }
 
-        queueBotSay(entry, "I have better gear for you, say 'trade recommended gear'");
+        offerGearItem(entry, bot, owner, recs.get(0).candidate());
         entry.nextGearSuggestionAt = now + 60_000L;
+    }
+
+    private static void offerGearItem(BotEntry entry, Character bot, Character owner, Item item) {
+        if (entry.pendingAction != null || entry.pendingTradeCategory != null
+                || !BotDropManager.hasItem(bot, item)) {
+            return;
+        }
+        entry.pendingAction = RECOMMENDED_TRADE_ACTION;
+        entry.pendingDropCategory = null;
+        entry.pendingLootOfferItem = item;
+        entry.pendingLootOfferRecipientId = owner.getId();
+        entry.pendingLootOfferExpiresAt = System.currentTimeMillis() + 30_000L;
+        queueBotSay(entry, buildLootOfferPrompt(owner, owner, item));
     }
 
     static void scheduleLootOfferPrompt(BotEntry entry, Character bot, Item item, long delayMs) {
