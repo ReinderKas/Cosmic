@@ -14,7 +14,9 @@ import constants.skills.Spearman;
 import constants.skills.Warrior;
 import constants.skills.WhiteKnight;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 class BotBuildManager {
 
@@ -106,6 +108,60 @@ class BotBuildManager {
         List<BuildStep> steps = getBuildOrder(bot.getJob(), entry.spVariant);
         if (steps == null) return;
 
+        autoAssignSp(bot, steps);
+    }
+
+    static String respecSp(BotEntry entry, Character bot) {
+        if (bot.getJob() == Job.HERO && entry.spVariant == null) {
+            return "need your hero build first. say '1h' or '2h'";
+        }
+
+        List<Job> buildPath = getSupportedBuildPath(bot.getJob());
+        if (buildPath == null) {
+            return "dont have an sp respec build for my job yet";
+        }
+
+        int[] refundedSp = new int[5];
+        List<Skill> skillsToReset = new ArrayList<>();
+        for (Map.Entry<Skill, Character.SkillEntry> learned : bot.getSkills().entrySet()) {
+            Skill skill = learned.getKey();
+            Character.SkillEntry skillEntry = learned.getValue();
+            if (skill == null || skillEntry == null || skillEntry.skillevel <= 0) {
+                continue;
+            }
+
+            int skillId = skill.getId();
+            if (skill.isBeginnerSkill() || GameConstants.isHiddenSkills(skillId)) {
+                continue;
+            }
+            if (!GameConstants.isInJobTree(skillId, bot.getJob().getId())) {
+                continue;
+            }
+
+            refundedSp[GameConstants.getSkillBook(skillId / 10000)] += skillEntry.skillevel;
+            skillsToReset.add(skill);
+        }
+
+        for (Skill skill : skillsToReset) {
+            bot.changeSkillLevel(skill, (byte) 0, bot.getMasterLevel(skill), bot.getSkillExpiration(skill));
+        }
+        for (int book = 0; book < refundedSp.length; book++) {
+            if (refundedSp[book] > 0) {
+                bot.gainSp(refundedSp[book], book, false);
+            }
+        }
+
+        for (Job job : buildPath) {
+            List<BuildStep> steps = getBuildOrder(job, entry.spVariant);
+            if (steps != null) {
+                autoAssignSp(bot, steps);
+            }
+        }
+
+        return "ok, rebuilt my sp using the bot build";
+    }
+
+    private static void autoAssignSp(Character bot, List<BuildStep> steps) {
         for (BuildStep step : steps) {
             Skill skill = SkillFactory.getSkill(step.skillId());
             if (skill == null) continue;
@@ -119,6 +175,20 @@ class BotBuildManager {
                         bot.getMasterLevel(skill), bot.getSkillExpiration(skill));
             }
         }
+    }
+
+    private static List<Job> getSupportedBuildPath(Job job) {
+        return switch (job) {
+            case WARRIOR -> List.of(Job.WARRIOR);
+            case FIGHTER -> List.of(Job.WARRIOR, Job.FIGHTER);
+            case CRUSADER -> List.of(Job.WARRIOR, Job.FIGHTER, Job.CRUSADER);
+            case HERO -> List.of(Job.WARRIOR, Job.FIGHTER, Job.CRUSADER, Job.HERO);
+            case PAGE -> List.of(Job.WARRIOR, Job.PAGE);
+            case WHITEKNIGHT -> List.of(Job.WARRIOR, Job.PAGE, Job.WHITEKNIGHT);
+            case SPEARMAN -> List.of(Job.WARRIOR, Job.SPEARMAN);
+            case DRAGONKNIGHT -> List.of(Job.WARRIOR, Job.SPEARMAN, Job.DRAGONKNIGHT);
+            default -> null;
+        };
     }
 
     // ─── Build orders ─────────────────────────────────────────────────────────

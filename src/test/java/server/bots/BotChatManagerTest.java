@@ -65,4 +65,11 @@ class BotChatManagerTest {
                 "Alice, picked up Blue Moon, want it?",
                 "Alice, I got Blue Moon if you want it").contains(prompt));
     }
+
+    @Test
+    void shouldMatchRespecCommands() {
+        assertTrue(BotChatManager.isRespecCommand("respec"));
+        assertTrue(BotChatManager.isRespecCommand("reset skills"));
+        assertTrue(BotChatManager.isRespecCommand("rebuild sp"));
+    }
 }

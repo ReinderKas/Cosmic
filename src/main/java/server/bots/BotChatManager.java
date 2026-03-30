@@ -284,6 +284,9 @@ class BotChatManager {
     private static final Pattern AP_CHANGE_BUILD_PATTERN = Pattern.compile(
             "\\b(change|switch|update|reset|new)\\s+(your\\s+|ur\\s+)?build\\b",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern RESPEC_PATTERN = Pattern.compile(
+            "\\b(respec|reset\\s+(skills?|sp)|rebuild\\s+(skills?|sp)|fix\\s+(skills?|sp|build))\\b",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern LOGOUT_PATTERN = Pattern.compile(
             "\\b((save\\s+and\\s+)?log\\s*(off|out)|disconnect|(pls|please)\\s+log(\\s+me)?\\s+(off|out))\\b",
             Pattern.CASE_INSENSITIVE);
@@ -459,6 +462,11 @@ class BotChatManager {
                 entry.supportHealsEnabled = true;
                 BotManager.getInstance().botSay(entry.bot, "ok, ill heal when needed");
             }, 600);
+            return;
+        }
+        if (isRespecCommand(message)) {
+            TimerManager.getInstance().schedule(() ->
+                    BotManager.getInstance().botSay(entry.bot, BotBuildManager.respecSp(entry, entry.bot)), 600);
             return;
         }
         Matcher unequipSlotMatcher = UNEQUIP_SLOT_PATTERN.matcher(message);
@@ -789,10 +797,14 @@ class BotChatManager {
     }
 
     private static void reportHelp(BotEntry entry) {
-        queueBotSay(entry, "commands: follow, stop, grind, stats, skills, inventory, slots, scrolls, pots, debug stats");
+        queueBotSay(entry, "commands: follow, stop, grind, stats, skills, inventory, slots, scrolls, pots, debug stats, respec");
         queueBotSay(entry, "support: support on/off, buffs on/off, heals on/off");
         queueBotSay(entry, "gear: ask 'any upgrades?' or say 'trade recommended gear'");
         queueBotSay(entry, "trade: mesos, scrolls, pots, equips, etc, or named items");
+    }
+
+    static boolean isRespecCommand(String message) {
+        return RESPEC_PATTERN.matcher(message).find();
     }
 
     private static void reportRecommendedGear(BotEntry entry, Character bot) {
