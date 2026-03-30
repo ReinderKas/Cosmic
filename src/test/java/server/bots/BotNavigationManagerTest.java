@@ -1,13 +1,16 @@
 package server.bots;
 
+import server.maps.Rope;
 import org.junit.jupiter.api.Test;
 
 import java.awt.*;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BotNavigationManagerTest {
     @Test
@@ -45,5 +48,23 @@ class BotNavigationManagerTest {
         ));
 
         assertNull(collapsed);
+    }
+
+    @Test
+    void shouldOnlySnapZeroStepClimbExitAtRopeTop() {
+        Rope rope = new Rope(675, 143, 215, false);
+        BotNavigationGraph.Edge topExit = new BotNavigationGraph.Edge(
+                49, 45, BotNavigationGraph.EdgeType.CLIMB,
+                new Point(675, 143), new Point(675, 141),
+                0, 0, 675, 143, 215, 250
+        );
+        BotNavigationGraph.Edge bottomExit = new BotNavigationGraph.Edge(
+                49, 45, BotNavigationGraph.EdgeType.CLIMB,
+                new Point(675, 215), new Point(675, 215),
+                0, 0, 675, 143, 215, 250
+        );
+
+        assertTrue(BotNavigationManager.isTopStepOffExit(rope, new Point(675, 145), topExit));
+        assertFalse(BotNavigationManager.isTopStepOffExit(rope, new Point(675, 215), bottomExit));
     }
 }

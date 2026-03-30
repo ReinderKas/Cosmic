@@ -264,10 +264,13 @@ final class BotNavigationManager {
         }
 
         if (edge.launchStepX == 0) {
-            // Step off (top or bottom)
-            Point ground = bot.getMap().getPointBelow(new Point(botPos.x, botPos.y - 3));
-            if (ground != null && Math.abs(ground.y - botPos.y) <= BotMovementManager.cfg.JUMP_Y_THRESH * 2) {
-                BotPhysicsEngine.landOnGround(entry, bot, ground);
+            if (isTopStepOffExit(entry.climbRope, botPos, edge)) {
+                Point ground = bot.getMap().getPointBelow(new Point(botPos.x, botPos.y - 3));
+                if (ground != null && Math.abs(ground.y - botPos.y) <= BotMovementManager.cfg.JUMP_Y_THRESH * 2) {
+                    BotPhysicsEngine.landOnGround(entry, bot, ground);
+                } else {
+                    BotPhysicsEngine.beginFall(entry, bot, 0);
+                }
             } else {
                 BotPhysicsEngine.beginFall(entry, bot, 0);
             }
@@ -703,6 +706,14 @@ final class BotNavigationManager {
         BotNavigationGraph.Region from = graph.getRegion(edge.fromRegionId);
         BotNavigationGraph.Region to = graph.getRegion(edge.toRegionId);
         return from != null && to != null && !from.isRopeRegion && to.isRopeRegion;
+    }
+
+    static boolean isTopStepOffExit(Rope rope, Point botPos, BotNavigationGraph.Edge edge) {
+        if (rope == null || botPos == null || edge == null || edge.launchStepX != 0) {
+            return false;
+        }
+        return edge.startPoint.y == rope.topY()
+                && botPos.y <= rope.topY() + BotPhysicsEngine.climbStepPerTick() + 2;
     }
 
     private static Rope findRopeForRegion(MapleMap map, BotNavigationGraph.Region region) {
