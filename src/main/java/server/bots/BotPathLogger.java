@@ -82,7 +82,7 @@ final class BotPathLogger {
         int ownerRegionId = graph.findRegionId(entry.bot.getMap(), ownerPos);
 
         StringBuilder sb = new StringBuilder(4096);
-        appendHeader(sb, now);
+        appendHeader(sb, now, note);
         appendCurrentState(sb, entry, ownerPos, botPos, botRegionId, ownerRegionId);
         appendCurrentPath(sb, entry, ownerPos, ownerRegionId, botRegionId, graph);
         appendHistory(sb);
@@ -101,7 +101,7 @@ final class BotPathLogger {
     // Report sections
     // -------------------------------------------------------------------------
 
-    private void appendHeader(StringBuilder sb, LocalDateTime now) {
+    private void appendHeader(StringBuilder sb, LocalDateTime now, String note) {
         sb.append("=== Bot Path Log: ").append(botName).append(" ===\n");
         sb.append("Map: ").append(mapId).append("\n");
         sb.append("Captured: ").append(now.format(HEADER_FMT)).append("\n");
