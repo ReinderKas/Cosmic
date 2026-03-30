@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
-    private static final int GRAPH_VERSION = 8;
+    private static final int GRAPH_VERSION = 9;
     private static final int WALK_CONNECTION_GAP_PX = 12;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
     private static final int ROPE_ANCHOR_INTERVAL_PX = 30;
@@ -399,7 +399,7 @@ final class BotNavigationGraphProvider {
                     continue;
                 }
 
-                int cost = estimateClimbCost(ropeRegion.centerPoint(), ropePoint) + estimateJumpCost(ropePoint, landing.point());
+                int cost = estimateRopeExitJumpCost();
                 addEdge(ropeRegion.id, toRegion.id, BotNavigationGraph.EdgeType.CLIMB,
                         ropePoint, landing.point(), stepX, 0, cost, outgoing, edgeKeys);
             }
@@ -426,7 +426,7 @@ final class BotNavigationGraphProvider {
 
                 Point startPoint = new Point(ropeX, anchorY);
                 Point endPoint = new Point(targetRope.x(), anchorY);
-                int cost = estimateClimbCost(ropeRegion.centerPoint(), startPoint) + estimateJumpCost(startPoint, endPoint) + 150;
+                int cost = estimateRopeExitJumpCost() + 150;
                 int launchDir = targetRope.x() > ropeX ? jumpStep : -jumpStep;
                 addEdge(ropeRegion.id, otherRope.id, BotNavigationGraph.EdgeType.CLIMB,
                         startPoint, endPoint, launchDir, 0, cost, outgoing, edgeKeys);
@@ -457,7 +457,7 @@ final class BotNavigationGraphProvider {
                 }
 
                 Point ropePoint = new Point(rope.x(), rope.topY());
-                int cost = estimateClimbCost(ropeRegion.centerPoint(), ropePoint) + estimateWalkCost(ropePoint, landPoint);
+                int cost = estimateWalkCost(ropePoint, landPoint);
                 addEdge(ropeRegion.id, ground.id, BotNavigationGraph.EdgeType.CLIMB,
                         ropePoint, landPoint, 0, 0, cost, outgoing, edgeKeys);
                 return;
@@ -777,8 +777,21 @@ final class BotNavigationGraphProvider {
     }
 
     private static int estimateJumpCost(Point start, Point end) {
-        int travel = Math.abs(end.x - start.x) + Math.abs(end.y - start.y);
-        return 300 + Math.max(100, (int) Math.round((travel * 1000.0) / Math.max(1, BotMovementManager.cfg.WALK_VEL)));
+        // Use real jump airtime from BotPhysicsEngine physics constants.
+        // Not charging horizontal distance means diagonal jumps (launchStepX != 0) cost
+        // the same as vertical jumps — A* naturally prefers them because the bot doesn't
+        // also need to walk horizontally to align under the target first.
+        return 300 + jumpAirtimeCostMs(BotPhysicsEngine.jumpForcePerTick());
+    }
+
+    private static int estimateRopeExitJumpCost() {
+        return 300 + jumpAirtimeCostMs(BotPhysicsEngine.ropeJumpForcePerTick());
+    }
+
+    private static int jumpAirtimeCostMs(float launchForce) {
+        float gravity = BotPhysicsEngine.gravityPerTick();
+        int ticks = Math.max(1, (int) Math.ceil(2.0 * launchForce / gravity));
+        return ticks * BotPhysicsEngine.cfg.TICK_MS;
     }
 
     private static int estimateDropCost(Point start, Point end) {
@@ -797,10 +810,6 @@ final class BotNavigationGraphProvider {
         }
 
         return 0;
-    }
-
-    private static int estimateClimbCost(Point start, Point end) {
-        return 150 + Math.max(100, (int) Math.round((Math.abs(end.y - start.y) * 1000.0) / Math.max(1, BotMovementManager.cfg.CLIMB_SPEED_PXS)));
     }
 
     private record EndpointConnection(Point from, Point to) {

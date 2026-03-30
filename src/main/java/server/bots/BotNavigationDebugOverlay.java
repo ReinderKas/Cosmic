@@ -126,6 +126,25 @@ public final class BotNavigationDebugOverlay {
         return "Bot nav overlay cleared.";
     }
 
+    public static synchronized String pathLog(Character viewer, String botName, String note) {
+        BotSelection selection = selectBotEntry(viewer, botName);
+        if (selection.errorMessage != null) {
+            return selection.errorMessage;
+        }
+        BotEntry entry = selection.entry;
+
+        if (entry.pathLogger == null) {
+            entry.pathLogger = new BotPathLogger(entry.bot.getName(), entry.bot.getMapId());
+            return "Path logging started for '" + entry.bot.getName() + "'. Run !botnav pathlog again to dump.";
+        }
+
+        BotPathLogger logger = entry.pathLogger;
+        entry.pathLogger = null;
+        Point ownerPos = resolveRawTargetPos(entry);
+        String filePath = logger.dumpToFile(entry, ownerPos, note);
+        return "Path log for '" + entry.bot.getName() + "' dumped: " + filePath;
+    }
+
     private static void drawRegion(OverlayBuilder overlay, BotNavigationGraph.Region region, OverlayType type) {
         if (region == null) {
             return;

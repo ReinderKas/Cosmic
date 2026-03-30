@@ -136,6 +136,10 @@ class BotEntry {
     boolean navPreciseTarget = false;
     boolean debugPromptSent = false;
     long nextGearSuggestionAt = 0L;
+
+    // Path logging (debug)
+    BotPathLogger pathLogger = null;
+    String lastNavDecision = "-";
     long pendingGearPromptAt = 0L;
 
     // Movement packet cache so repeated no-op packets are suppressed

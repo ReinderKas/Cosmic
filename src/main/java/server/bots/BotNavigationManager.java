@@ -54,6 +54,7 @@ final class BotNavigationManager {
             int targetRegionId = graph.findRegionId(bot.getMap(), rawTargetPos);
 
             BotNavigationGraph.Edge edge = reuseCommittedEdge(graph, entry, startRegionId, targetRegionId);
+            boolean edgeReused = (edge != null);
             if (edge == null && runAiTick && startRegionId >= 0 && targetRegionId >= 0 && startRegionId != targetRegionId) {
                 edge = findNextEdge(graph, bot, startRegionId, targetRegionId, rawTargetPos);
                 if (edge != null) {
@@ -63,17 +64,24 @@ final class BotNavigationManager {
             }
 
             if (edge == null) {
+                entry.lastNavDecision = !runAiTick ? "no-ai"
+                        : startRegionId < 0 || targetRegionId < 0 ? "no-region"
+                        : startRegionId == targetRegionId ? "same-region" : "no-path";
                 clearNavigation(entry);
                 return new NavigationDirective(rawTargetPos, false);
             }
 
             NavigationDirective executionDirective = tryExecuteEdge(entry, bot, botPos, rawTargetPos, edge, runAiTick);
             if (executionDirective != null) {
+                entry.lastNavDecision = "exec";
+                if (entry.pathLogger != null) entry.pathLogger.record(entry, rawTargetPos, startRegionId, true);
                 return executionDirective;
             }
 
+            entry.lastNavDecision = edgeReused ? "reuse" : "new";
             entry.navPreciseTarget = shouldUsePreciseTarget(entry, botPos, edge);
             entry.navTargetPos = selectWaypoint(entry, botPos, edge);
+            if (entry.pathLogger != null) entry.pathLogger.record(entry, rawTargetPos, startRegionId, false);
             return new NavigationDirective(new Point(entry.navTargetPos), false);
         } finally {
             BotPerformanceMonitor.record("nav-resolve", System.nanoTime() - startedAt);
@@ -110,7 +118,13 @@ final class BotNavigationManager {
         if (startRegionId == edge.fromRegionId) {
             return edge;
         }
-        if ((entry.inAir || entry.climbing) && (startRegionId < 0 || startRegionId != edge.toRegionId)) {
+        // While climbing, always keep the edge — findGroundFoothold gives false positives
+        // (returns the platform below/behind the rope as the "current" region), which would
+        // otherwise drop the exit edge the moment the bot enters the destination region's Y range.
+        if (entry.climbing) {
+            return edge;
+        }
+        if (entry.inAir && (startRegionId < 0 || startRegionId != edge.toRegionId)) {
             return edge;
         }
         return null;
