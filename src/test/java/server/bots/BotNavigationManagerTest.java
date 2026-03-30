@@ -65,6 +65,7 @@ class BotNavigationManagerTest {
         );
 
         assertTrue(BotNavigationManager.isTopStepOffExit(rope, new Point(675, 145), topExit));
+        assertTrue(BotNavigationManager.isTopStepOffExit(rope, new Point(675, 171), topExit));
         assertFalse(BotNavigationManager.isTopStepOffExit(rope, new Point(675, 215), bottomExit));
     }
 
