@@ -103,7 +103,9 @@ public final class MessengerHandler extends AbstractPacketHandler {
                                     world.messengerInvite(c.getPlayer().getName(), messenger.getId(), input, c.getChannel());
                                 } else {
                                     BotManager.SpawnResult spawnResult = BotManager.getInstance().spawnBotForOwner(player, input);
-                                    if (!spawnResult.success()) {
+                                    if (spawnResult.success()) {
+                                        BotManager.getInstance().joinBotToOwnerParty(player, spawnResult.bot());
+                                    } else {
                                         c.sendPacket(PacketCreator.messengerNote(input, 4, 0));
                                     }
                                 }

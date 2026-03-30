@@ -16,6 +16,7 @@ import constants.skills.Magician;
 import constants.skills.Warrior;
 import constants.skills.WhiteKnight;
 import net.server.Server;
+import net.server.world.Party;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import server.ItemInformationProvider;
@@ -164,6 +165,22 @@ public class BotManager {
                 e.printStackTrace();
                 return SpawnResult.fail("Failed to load bot character '" + botName + "'.");
             }
+        }
+    }
+
+    public void joinBotToOwnerParty(Character owner, Character bot) {
+        if (bot.getParty() != null) {
+            bot.updatePartyMemberHP();
+            return;
+        }
+        net.server.world.Party ownerParty = owner.getParty();
+        if (ownerParty == null) {
+            if (!Party.createParty(owner, true)) return;
+            ownerParty = owner.getParty();
+        }
+        if (ownerParty == null) return;
+        if (Party.joinParty(bot, ownerParty.getId(), true)) {
+            bot.updatePartyMemberHP();
         }
     }
 

@@ -6,7 +6,6 @@ import client.Client;
 import client.DefaultDates;
 import client.command.Command;
 import client.creator.BotCreator;
-import net.server.world.Party;
 import server.bots.BotManager;
 import server.bots.BotOwnershipService;
 import tools.BCrypt;
@@ -89,30 +88,7 @@ public class SpawnBotCommand extends Command {
     }
 
     private void joinBotToPlayerParty(Character player, Character bot) {
-        if (bot.getParty() != null) {
-            bot.updatePartyMemberHP();
-            return;
-        }
-
-        Party playerParty = player.getParty();
-        if (playerParty == null) {
-            if (!Party.createParty(player, true)) {
-                player.yellowMessage("Bot spawned, but your party could not be created.");
-                return;
-            }
-            playerParty = player.getParty();
-        }
-
-        if (playerParty == null) {
-            player.yellowMessage("Bot spawned, but you are not in a party.");
-            return;
-        }
-
-        if (!Party.joinParty(bot, playerParty.getId(), true)) {
-            player.yellowMessage("Bot spawned, but it could not join your party.");
-            return;
-        }
-        bot.updatePartyMemberHP();
+        BotManager.getInstance().joinBotToOwnerParty(player, bot);
     }
 
     private BotAccountResolution resolveBotAccount(String name) {
