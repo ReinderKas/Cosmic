@@ -295,10 +295,10 @@ final class BotNavigationGraphProvider {
                                      Map<Integer, List<Integer>> featureXsByRegionId,
                                      Map<Integer, List<BotNavigationGraph.Edge>> outgoing,
                                      Set<String> edgeKeys) {
-        int jumpStep = BotMovementManager.walkStep(map);
+        int jumpStep = BotPhysicsEngine.walkStep(map);
         for (Point anchor : anchorPoints(from, featureXsByRegionId.getOrDefault(from.id, List.of()))) {
             for (int launchStepX : new int[]{-jumpStep, 0, jumpStep}) {
-                BotMovementManager.JumpLanding landing = BotMovementManager.simulateJumpLanding(map, anchor, launchStepX);
+                BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateJumpLanding(map, anchor, launchStepX);
                 if (landing == null) {
                     continue;
                 }

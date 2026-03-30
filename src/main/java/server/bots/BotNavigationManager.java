@@ -291,6 +291,13 @@ final class BotNavigationManager {
             return false;
         }
 
+        // Walk-off drops (launchStepX != 0) must start from near the platform edge, not mid-platform.
+        // This mirrors the 14px tolerance used by isReadyForEdge for DROP edges, ensuring the graph
+        // builder's edge placement and the runtime execution check share the same positional constraint.
+        if (edge.launchStepX != 0 && Math.abs(botPos.x - edge.startPoint.x) > 14) {
+            return false;
+        }
+
         BotPhysicsEngine.JumpLanding landing = edge.launchStepX == 0
                 ? BotPhysicsEngine.simulateDownJumpLanding(map, botPos)
                 : BotPhysicsEngine.simulateFallLanding(map, botPos, edge.launchStepX);

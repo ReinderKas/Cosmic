@@ -296,7 +296,8 @@ class BotMovementManager {
 
     private static MoveAction planGroundAction(BotEntry entry, Point botPos, Point targetPos) {
         int stopDist = entry.navPreciseTarget ? 4 : cfg.STOP_DIST;
-        int followDist = entry.navPreciseTarget ? 4 : cfg.FOLLOW_DIST;
+        // No hysteresis when navigating to an edge — always move toward the waypoint
+        int followDist = (entry.navEdge != null || entry.navPreciseTarget) ? stopDist : cfg.FOLLOW_DIST;
         int stepX = updateStepX(entry, entry.bot.getMap(), botPos.x, targetPos.x, stopDist, followDist);
         if (stepX == 0) {
             return MoveAction.idle();
