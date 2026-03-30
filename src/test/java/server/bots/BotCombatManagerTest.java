@@ -121,7 +121,7 @@ class BotCombatManagerTest {
         doAnswer(invocation -> {
             hp.addAndGet(invocation.getArgument(0));
             return null;
-        }).when(bot).addMPHP(anyInt(), anyInt());
+        }).when(bot).addMPHPAndTriggerAutopot(anyInt(), anyInt());
         when(bot.getStance()).thenAnswer(invocation -> stance.get());
         doAnswer(invocation -> {
             stance.set(invocation.getArgument(0));

@@ -178,7 +178,7 @@ class BotCombatManager {
             return;
         }
 
-        bot.addMPHP(-dmg, 0);
+        bot.addMPHPAndTriggerAutopot(-dmg, 0);
 
         // OpenStory touch attacks use the mob's position as attack origin:
         // direction 0 means the hit came from the right and knocks the player left.
@@ -615,6 +615,11 @@ class BotCombatManager {
     }
 
     private static Rectangle getBotTouchBounds(Character bot) {
+        Rectangle bounds = BotCharacterHitboxProvider.getInstance().getBotBounds(bot);
+        if (bounds != null) {
+            return bounds;
+        }
+
         Point botPos = bot.getPosition();
         int halfWidth = BotCombatManager.cfg.MOB_TOUCH_HALF_W;
         int halfHeight = BotCombatManager.cfg.MOB_TOUCH_HALF_H;

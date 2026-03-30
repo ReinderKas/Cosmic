@@ -9058,13 +9058,24 @@ public class Character extends AbstractCharacterObject {
             effLock.unlock();
         }
 
-        // autopot on HPMP deplete... thanks shavit for finding out D. Roar doesn't trigger autopot request
+        triggerAutopotAfterStatLoss(hpchange, mpchange);
+        return true;
+    }
+
+    public void addMPHPAndTriggerAutopot(int hpDelta, int mpDelta) {
+        addMPHP(hpDelta, mpDelta);
+        triggerAutopotAfterStatLoss(hpDelta, mpDelta);
+    }
+
+    private void triggerAutopotAfterStatLoss(int hpchange, int mpchange) {
+        // Autopot is keyed off stat loss, not off a manager tick, so both normal
+        // skill/effect depletion and bot-only server-side damage share one path.
         if (hpchange < 0) {
             KeyBinding autohpPot = this.getKeymap().get(91);
             if (autohpPot != null) {
                 int autohpItemid = autohpPot.getAction();
                 float autohpAlert = this.getAutopotHpAlert();
-                if (((float) this.getHp()) / this.getCurrentMaxHp() <= autohpAlert) { // try within user settings... thanks Lame, Optimist, Stealth2800
+                if (((float) this.getHp()) / this.getCurrentMaxHp() <= autohpAlert) {
                     Item autohpItem = this.getInventory(InventoryType.USE).findById(autohpItemid);
                     if (autohpItem != null) {
                         PetAutopotProcessor.runAutopotAction(client, autohpItem.getPosition(), autohpItemid);
@@ -9087,8 +9098,6 @@ public class Character extends AbstractCharacterObject {
                 }
             }
         }
-
-        return true;
     }
 
     public void setInventory(InventoryType type, Inventory inv) {

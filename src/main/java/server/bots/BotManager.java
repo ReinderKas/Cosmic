@@ -8,7 +8,6 @@ import client.SkillFactory;
 import client.inventory.Inventory;
 import client.inventory.InventoryType;
 import client.inventory.Item;
-import client.processor.action.PetAutopotProcessor;
 import client.keybind.KeyBinding;
 import constants.inventory.ItemConstants;
 import constants.skills.Crusader;
@@ -833,7 +832,6 @@ public class BotManager {
         entry.potCheckTimerMs = BotMovementManager.delayAfterCurrentTick(cfg.POT_CHECK_INTERVAL_MS);
 
         setupAutopotForBot(bot);
-        triggerAutopotIfNeeded(bot);
 
         if (!entry.grinding) return;
         int[] pots = countPotions(bot);
@@ -940,40 +938,6 @@ public class BotManager {
         }
 
         return Math.max(0, (bot.getInt() / 10) * level);
-    }
-
-    private void triggerAutopotIfNeeded(Character bot) {
-        triggerAutopotIfNeeded(bot, (byte) 91, bot.getAutopotHpAlert(), true);
-        triggerAutopotIfNeeded(bot, (byte) 92, bot.getAutopotMpAlert(), false);
-    }
-
-    private void triggerAutopotIfNeeded(Character bot, byte key, float threshold, boolean hp) {
-        if (threshold <= 0f) {
-            return;
-        }
-
-        int max = hp ? bot.getCurrentMaxHp() : bot.getCurrentMaxMp();
-        if (max <= 0) {
-            return;
-        }
-
-        int current = hp ? bot.getHp() : bot.getMp();
-        if (((float) current) / max > threshold) {
-            return;
-        }
-
-        KeyBinding binding = bot.getKeymap().get(key);
-        if (binding == null) {
-            return;
-        }
-
-        int itemId = binding.getAction();
-        Item item = bot.getInventory(InventoryType.USE).findById(itemId);
-        if (item == null) {
-            return;
-        }
-
-        PetAutopotProcessor.triggerAutopotAction(bot.getClient(), item.getPosition(), itemId);
     }
 
     private int resolveEffectiveRecoveryAmount(Character bot, StatEffect effect, boolean hp) {
