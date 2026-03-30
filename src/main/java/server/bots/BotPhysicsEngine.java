@@ -135,11 +135,18 @@ final class BotPhysicsEngine {
             return null;
         }
 
-        Point ground = map.getPointBelow(position);
-        if (ground != null) {
-            return ground;
+        Point exactGround = map.getPointBelow(position);
+        Point offsetGround = map.getPointBelow(new Point(position.x, position.y - cfg.MAX_SLOPE_UP));
+        if (exactGround == null) {
+            return offsetGround;
         }
-        return map.getPointBelow(new Point(position.x, position.y - cfg.MAX_SLOPE_UP));
+        if (offsetGround == null) {
+            return exactGround;
+        }
+
+        int exactDistance = Math.abs(exactGround.y - position.y);
+        int offsetDistance = Math.abs(offsetGround.y - position.y);
+        return offsetDistance < exactDistance ? offsetGround : exactGround;
     }
 
     static void stopGroundMotion(BotEntry entry) {

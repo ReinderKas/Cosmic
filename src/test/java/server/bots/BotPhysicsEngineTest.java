@@ -223,6 +223,20 @@ class BotPhysicsEngineTest {
     }
 
     @Test
+    void shouldPreferCloserGroundPointWhenExactProbeFallsThroughToLowerPlatform() {
+        MapleMap map = mock(MapleMap.class);
+        when(map.getPointBelow(any(Point.class))).thenAnswer(invocation -> {
+            Point probe = invocation.getArgument(0);
+            if (probe.y >= 151) {
+                return new Point(probe.x, 215);
+            }
+            return new Point(probe.x, 150);
+        });
+
+        assertEquals(new Point(-65, 150), BotPhysicsEngine.findGroundPoint(map, new Point(-65, 151)));
+    }
+
+    @Test
     void shouldPreferExactGroundFootholdWhenOffsetLookupWouldChooseDifferentPlatform() {
         StandingLookupCase lookupCase = findStandingLookupCaseWhereOffsetDiffers(ellinia);
 
