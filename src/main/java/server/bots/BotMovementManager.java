@@ -206,7 +206,7 @@ class BotMovementManager {
     }
 
     static boolean shouldHoldClimbIdle(BotEntry entry, int dy, int dxOwner) {
-        if (entry.navEdge != null && entry.navEdge.type == BotNavigationGraph.EdgeType.CLIMB) {
+        if (entry.navEdge != null) {
             return false;
         }
         return !entry.grinding
