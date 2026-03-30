@@ -51,7 +51,7 @@ final class BotNavigationManager {
             BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(bot.getMap());
             Point botPos = bot.getPosition();
             int startRegionId = resolveCurrentRegionId(graph, entry, bot.getMap(), botPos);
-            int targetRegionId = graph.findRegionId(bot.getMap(), rawTargetPos);
+            int targetRegionId = resolveTargetRegionId(graph, entry, bot.getMap(), rawTargetPos);
 
             BotNavigationGraph.Edge edge = reuseCommittedEdge(graph, entry, startRegionId, targetRegionId);
             boolean edgeReused = (edge != null);
@@ -632,6 +632,67 @@ final class BotNavigationManager {
             }
         }
         return graph.findRegionId(map, botPos);
+    }
+
+    static int resolveTargetRegionId(BotNavigationGraph graph,
+                                     BotEntry entry,
+                                     MapleMap map,
+                                     Point targetPos) {
+        if (targetPos == null) {
+            return -1;
+        }
+
+        Character owner = entry.owner;
+        if (!entry.grinding && owner != null && owner.getMap() == map && targetPos.equals(owner.getPosition())) {
+            return resolveCharacterRegionId(graph, map, owner);
+        }
+
+        return resolvePointTargetRegionId(graph, map, targetPos);
+    }
+
+    static int resolveCharacterRegionId(BotNavigationGraph graph,
+                                        MapleMap map,
+                                        Character character) {
+        if (character == null) {
+            return -1;
+        }
+
+        Point position = character.getPosition();
+        if (position == null) {
+            return -1;
+        }
+
+        if (isRopeOrLadderStance(character.getStance())) {
+            int ropeRegionId = graph.findRopeRegionId(position);
+            if (ropeRegionId >= 0) {
+                return ropeRegionId;
+            }
+        }
+
+        return resolvePointTargetRegionId(graph, map, position);
+    }
+
+    private static int resolvePointTargetRegionId(BotNavigationGraph graph,
+                                                  MapleMap map,
+                                                  Point position) {
+        int ropeRegionId = graph.findRopeRegionId(position);
+        if (ropeRegionId >= 0 && shouldPreferRopeRegion(map, position)) {
+            return ropeRegionId;
+        }
+        return graph.findRegionId(map, position);
+    }
+
+    private static boolean shouldPreferRopeRegion(MapleMap map, Point position) {
+        if (map == null || position == null) {
+            return false;
+        }
+
+        Point ground = map.getPointBelow(position);
+        return ground == null || ground.y > position.y + BotPhysicsEngine.cfg.MAX_SNAP_DROP;
+    }
+
+    private static boolean isRopeOrLadderStance(int stance) {
+        return stance == BotPhysicsEngine.cfg.ROPE_STANCE || stance == BotPhysicsEngine.cfg.LADDER_STANCE;
     }
 
     private static boolean isRopeEntryEdge(BotNavigationGraph graph, BotNavigationGraph.Edge edge) {

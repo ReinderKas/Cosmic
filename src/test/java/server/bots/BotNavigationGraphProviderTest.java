@@ -205,6 +205,23 @@ class BotNavigationGraphProviderTest {
                 BotNavigationManager.resolveCurrentRegionId(elliniaGraph, entry, ellinia, reuseCase.botPosition()));
     }
 
+    @Test
+    void shouldResolveFollowTargetFromOwnerRopeRegionWhileOwnerIsHanging() {
+        RopeEntryReuseCase reuseCase = findRopeEntryReuseCase(elliniaGraph, ellinia);
+
+        assertNotNull(reuseCase, "Expected a rope-entry edge whose rope point still resolves to ground");
+        assertNotEquals(reuseCase.edge().toRegionId, elliniaGraph.findRegionId(ellinia, reuseCase.botPosition()));
+
+        Character owner = mockBot(reuseCase.botPosition(), ellinia);
+        when(owner.getStance()).thenReturn(BotPhysicsEngine.cfg.ROPE_STANCE);
+
+        BotEntry entry = new BotEntry(mockBot(reuseCase.rawTarget(), ellinia), owner, null);
+        entry.following = true;
+
+        assertEquals(reuseCase.edge().toRegionId,
+                BotNavigationManager.resolveTargetRegionId(elliniaGraph, entry, ellinia, owner.getPosition()));
+    }
+
     private static List<BotNavigationGraph.Edge> findPath(BotNavigationGraph graph,
                                                           MapleMap map,
                                                           Point start,

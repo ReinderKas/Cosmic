@@ -89,7 +89,7 @@ public final class BotNavigationDebugOverlay {
         Point rawTargetPos = resolveRawTargetPos(entry);
         BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(bot.getMap());
         int startRegionId = BotNavigationManager.resolveCurrentRegionId(graph, entry, bot.getMap(), bot.getPosition());
-        int targetRegionId = graph.findRegionId(bot.getMap(), rawTargetPos);
+        int targetRegionId = BotNavigationManager.resolveTargetRegionId(graph, entry, bot.getMap(), rawTargetPos);
         List<BotNavigationGraph.Edge> path = startRegionId >= 0 && targetRegionId >= 0 && startRegionId != targetRegionId
                 ? BotNavigationManager.findPath(graph, bot, startRegionId, targetRegionId, rawTargetPos)
                 : List.of();
