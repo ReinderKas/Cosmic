@@ -149,6 +149,7 @@ import client.command.commands.gm3.RipCommand;
 import client.command.commands.gm3.SeedCommand;
 import client.command.commands.gm3.SpawnBotCommand;
 import client.command.commands.gm3.SpawnCommand;
+import client.command.commands.gm3.TakeBotOwnerCommand;
 import client.command.commands.gm3.StartEventCommand;
 import client.command.commands.gm3.StartMapEventCommand;
 import client.command.commands.gm3.StopMapEventCommand;
@@ -375,6 +376,7 @@ public class CommandsExecutor {
         addCommand("mylawn", MapOwnerClaimCommand.class);
         addCommand("registerbot", RegisterBotCommand.class);
         addCommand("spawnbot", SpawnBotCommand.class);
+        addCommand("takebotowner", 3, TakeBotOwnerCommand.class);
         addCommand("bosshp", BossHpCommand.class);
         addCommand("mobhp", MobHpCommand.class);
         addCommand("dress", DressingRoomCommand.class);
