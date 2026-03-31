@@ -39,6 +39,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.IntFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -893,11 +894,20 @@ public class BotManager {
      * @return int[2]: [hpCount, mpCount]
      */
     int[] countPotions(Character bot) {
-        int hp = 0, mp = 0;
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
-        for (Item item : bot.getInventory(InventoryType.USE).list()) {
-            StatEffect eff;
-            try { eff = ii.getItemEffect(item.getItemId()); } catch (Exception e) { continue; }
+        return countPotions(bot.getInventory(InventoryType.USE).list(), itemId -> {
+            try {
+                return ii.getItemEffect(itemId);
+            } catch (Exception e) {
+                return null;
+            }
+        });
+    }
+
+    static int[] countPotions(Iterable<Item> items, IntFunction<StatEffect> effectResolver) {
+        int hp = 0, mp = 0;
+        for (Item item : items) {
+            StatEffect eff = effectResolver.apply(item.getItemId());
             if (eff == null) continue;
             int qty = item.getQuantity();
             if (eff.getHp() > 0 || eff.getHpRate() > 0) hp += qty;

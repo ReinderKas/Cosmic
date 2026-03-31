@@ -792,25 +792,23 @@ class BotChatManager {
     }
 
     private static void reportPotions(BotEntry entry, Character bot) {
-        int hp = 0, mp = 0;
-        for (Item item : bot.getInventory(InventoryType.USE).list()) {
-            int id = item.getItemId();
-            int qty = item.getQuantity();
-            if (id >= 2000000 && id < 2001000) hp += qty;      // HP potions
-            else if (id >= 2001000 && id < 2002000) mp += qty; // MP potions
-        }
-        String msg;
+        int[] counts = BotManager.getInstance().countPotions(bot);
+        queueBotSay(entry, buildPotionReport(counts[0], counts[1]));
+    }
+
+    static String buildPotionReport(int hp, int mp) {
         if (hp == 0 && mp == 0) {
-            msg = "no pots on me rn";
-        } else if (mp == 0) {
-            msg = "I have " + hp + " hp pot" + (hp != 1 ? "s" : "") + ", no mp pots";
-        } else if (hp == 0) {
-            msg = "no hp pots, " + mp + " mp pot" + (mp != 1 ? "s" : "");
-        } else {
-            msg = "I have " + hp + " hp pot" + (hp != 1 ? "s" : "")
-                + " and " + mp + " mp pot" + (mp != 1 ? "s" : "");
+            return "no pots on me rn";
         }
-        queueBotSay(entry, msg);
+        if (mp == 0) {
+            return "I have " + hp + " hp pot" + (hp != 1 ? "s" : "") + ", no mp pots";
+        }
+        if (hp == 0) {
+            return "no hp pots, " + mp + " mp pot" + (mp != 1 ? "s" : "");
+        }
+
+        return "I have " + hp + " hp pot" + (hp != 1 ? "s" : "")
+                + " and " + mp + " mp pot" + (mp != 1 ? "s" : "");
     }
 
     static boolean isMesoQuery(String message) {
