@@ -728,6 +728,31 @@ class BotCombatManager {
         };
     }
 
+    static int basicAttackDirectionId(String actionName, String fallbackAction, int legacyFallbackDirection) {
+        if (isProneBasicAttackAction(actionName)) {
+            return legacyFallbackDirection;
+        }
+
+        BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
+        int actionId = provider.getBodyActionId(actionName);
+        if (actionId >= 0) {
+            return actionId;
+        }
+
+        if (fallbackAction != null && !fallbackAction.equals(actionName) && !isProneBasicAttackAction(fallbackAction)) {
+            int fallbackActionId = provider.getBodyActionId(fallbackAction);
+            if (fallbackActionId >= 0) {
+                return fallbackActionId;
+            }
+        }
+
+        return legacyFallbackDirection;
+    }
+
+    private static boolean isProneBasicAttackAction(String actionName) {
+        return actionName != null && actionName.startsWith("prone");
+    }
+
     private static void applyAttackRoute(AttackRoute route, AbstractDealDamageHandler.AttackInfo attack, Character bot) {
         switch (route) {
             case RANGED -> RangedAttackHandler.applyRangedAttackEffects(attack, bot, bot.getClient());
@@ -791,20 +816,19 @@ class BotCombatManager {
     private record BasicAttackData(Rectangle hitBox, int display, int direction, int rangedDirection,
                                    int stance, int speed, int hitDelayMs, int cooldownMs) {
         private static BasicAttackData fromProfile(BotAttackDataProvider.NormalAttackProfile profile, WeaponType weaponType, Rectangle hitBox, boolean facingLeft, Character bot) {
-            int baseDirection = profile.getAttack();
+            int baseDisplay = profile.getAttack();
             BasicAttackSpec fallbackSpec = basicAttackSpec(weaponType);
-            if (baseDirection <= 0) {
+            if (baseDisplay <= 0) {
                 return fallback(facingLeft, hitBox, profile.getAttackSpeed(), weaponType, bot);
             }
 
             int variantCount = Math.max(1, countMoveVariants(profile.getSourceActions()));
             int variantOffset = ThreadLocalRandom.current().nextInt(variantCount);
-            int display = baseDirection + variantOffset;
-            int direction = facingLeft ? display + 11 : display;
-            int effectiveAttackSpeed = resolveEffectiveAttackSpeed(profile.getAttackSpeed(), bot);
-
             String fallbackAction = fallbackSpec.primaryAction();
             String action = profile.getActionForVariant(variantOffset, fallbackAction);
+            int display = baseDisplay + variantOffset;
+            int direction = basicAttackDirectionId(action, fallbackAction, facingLeft ? display + 11 : display);
+            int effectiveAttackSpeed = resolveEffectiveAttackSpeed(profile.getAttackSpeed(), bot);
             BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
 
             // OpenStory gates new attacks on the body animation ending, while hit effects land
@@ -830,10 +854,10 @@ class BotCombatManager {
                                                 WeaponType weaponType, Character bot) {
             BasicAttackSpec attackSpec = basicAttackSpec(weaponType);
             int variantOffset = ThreadLocalRandom.current().nextInt(attackSpec.actions().size());
-            int display = attackSpec.display() + variantOffset;
-            int direction = facingLeft ? display + 11 : display;
-            int effectiveAttackSpeed = resolveEffectiveAttackSpeed(baseAttackSpeed, bot);
             String action = attackSpec.actionForVariant(variantOffset);
+            int display = attackSpec.display() + variantOffset;
+            int direction = basicAttackDirectionId(action, attackSpec.primaryAction(), facingLeft ? display + 11 : display);
+            int effectiveAttackSpeed = resolveEffectiveAttackSpeed(baseAttackSpeed, bot);
             int rawAnimationDelayMs = BotAttackDataProvider.getInstance().getBodyStanceDurationMs(action);
             if (rawAnimationDelayMs <= 0) {
                 rawAnimationDelayMs = 600;

@@ -132,6 +132,7 @@ final class BotAttackDataProvider {
 
     private final Map<Integer, NormalAttackProfile> normalAttackProfiles = new HashMap<>();
     private volatile Map<String, BodyStanceTiming> bodyStanceTimings = null;
+    private volatile Map<String, Integer> bodyActionIds = null;
     private volatile Path cachedCharacterRoot = null;
 
     private BotAttackDataProvider() {
@@ -163,6 +164,22 @@ final class BotAttackDataProvider {
         return delay;
     }
 
+    int getBodyActionId(String actionName) {
+        if (actionName == null || actionName.isBlank()) {
+            return -1;
+        }
+
+        ensureCurrentCharacterRoot();
+        if (bodyActionIds == null) {
+            synchronized (this) {
+                if (bodyActionIds == null) {
+                    bodyActionIds = loadBodyActionIds();
+                }
+            }
+        }
+        return bodyActionIds.getOrDefault(actionName, -1);
+    }
+
     private BodyStanceTiming getBodyStanceTiming(String stanceName) {
         ensureCurrentCharacterRoot();
         if (bodyStanceTimings == null) {
@@ -188,6 +205,7 @@ final class BotAttackDataProvider {
             }
             normalAttackProfiles.clear();
             bodyStanceTimings = null;
+            bodyActionIds = null;
             cachedCharacterRoot = currentCharacterRoot;
         }
     }
@@ -231,6 +249,32 @@ final class BotAttackDataProvider {
 
         log.info("Bot attack timing: loaded {} body stances from {}", timings.size(), bodyFile.getFileName());
         return Map.copyOf(timings);
+    }
+
+    private Map<String, Integer> loadBodyActionIds() {
+        Path bodyFile = WZFiles.CHARACTER.getFile().resolve("00002000.img.xml");
+        if (!Files.isRegularFile(bodyFile)) {
+            log.warn("Bot attack direction ids: body animation file not found at {}", bodyFile);
+            return Map.of();
+        }
+
+        Document doc = parseXmlDocument(bodyFile);
+        if (doc == null) {
+            return Map.of();
+        }
+
+        Map<String, Integer> actionIds = new HashMap<>();
+        int actionId = 0;
+        for (Element child : getNamedChildren(doc.getDocumentElement())) {
+            String actionName = child.getAttribute("name");
+            if (actionName.isBlank() || "info".equals(actionName)) {
+                continue;
+            }
+            actionIds.put(actionName, actionId++);
+        }
+
+        log.info("Bot attack direction ids: loaded {} body action ids from {}", actionIds.size(), bodyFile.getFileName());
+        return Map.copyOf(actionIds);
     }
 
     NormalAttackProfile getNormalAttackProfile(int itemId) {
