@@ -762,10 +762,17 @@ public class BotManager {
             return;
         }
 
-        // Rebuild foothold index on map change
+        // On any map change (e.g. NPC-triggered portal): rebuild footholds, reset physics,
+        // and snap to ground so the bot doesn't carry over airborne state from the previous map.
         if (entry.lastMapId != bot.getMapId()) {
             entry.fhIndex  = BotMovementManager.buildFhIndex(bot.getMap());
             entry.lastMapId = bot.getMapId();
+            Point cur = bot.getPosition();
+            Point ground = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(cur.x, cur.y - 1));
+            BotPhysicsEngine.teleportTo(entry, bot, ground != null ? ground : cur);
+            BotMovementManager.resetEntryState(entry);
+            BotMovementManager.broadcastMovement(entry);
+            return;
         }
 
         // Follow mode: attack monsters already in attack range without chasing
