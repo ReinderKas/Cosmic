@@ -685,7 +685,7 @@ public class BotManager {
         }
 
         Point botPos    = bot.getPosition();
-        Point targetPos = owner.getPosition();
+        Point targetPos = entry.moveTarget != null ? entry.moveTarget : owner.getPosition();
 
         // These run in all modes (idle, follow, grind)
         BotCombatManager.tickMobDamage(entry, bot);
@@ -712,7 +712,7 @@ public class BotManager {
             return;
         }
 
-        if (!entry.following && !entry.grinding) {
+        if (!entry.following && !entry.grinding && entry.moveTarget == null) {
             if (entry.inAir) {
                 BotMovementManager.tickAirborne(entry);
             } else if (!entry.climbing) {
@@ -828,6 +828,15 @@ public class BotManager {
             BotMovementManager.tickAirborne(entry);
         } else {
             BotMovementManager.tickGrounded(entry, targetPos);
+        }
+
+        // Clear moveTarget once the bot has arrived
+        if (entry.moveTarget != null) {
+            Point bp = bot.getPosition();
+            if (Math.abs(bp.x - entry.moveTarget.x) <= BotMovementManager.cfg.STOP_DIST
+                    && Math.abs(bp.y - entry.moveTarget.y) <= BotMovementManager.cfg.STOP_DIST) {
+                entry.moveTarget = null;
+            }
         }
     }
 

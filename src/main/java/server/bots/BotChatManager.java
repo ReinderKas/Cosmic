@@ -40,6 +40,10 @@ class BotChatManager {
             + "get\\s+over\\s+here|f\\s+me|(pls|please)\\s+follow)\\b",
             Pattern.CASE_INSENSITIVE);
 
+    private static final Pattern MOVE_HERE_PATTERN = Pattern.compile(
+            "\\b(move\\s+(here|there)|go\\s+(here|there))\\b",
+            Pattern.CASE_INSENSITIVE);
+
     private static final Pattern STOP_PATTERN = Pattern.compile(
             "\\b(stop(\\s+(moving|it|now|pls|please))?|stay(\\s+(here|there|put))?|"
             + "wait(\\s+(here|up|for\\s+me|a\\s+(sec|moment|bit)))?|"
@@ -52,6 +56,9 @@ class BotChatManager {
             "roger", "yep", "alright", "aye", "lets go!", "as you wish", "ok boss",
             "on my way", "right behind you", "np", "kk omw", "w8 up",
             "gotchu", "moving now", "aye aye");
+    private static final List<String> MOVE_HERE_REPLIES = List.of(
+            "k, coming", "omw", "ok heading over", "on my way", "k",
+            "got it, moving there", "coming, then staying put", "k moving there", "sure omw");
     private static final List<String> STOP_REPLIES = List.of(
             "ok", "k", "sure", "alright", "got it", "stopping",
             "ok ill wait here", "ill be here", "np", "standing by",
@@ -503,9 +510,20 @@ class BotChatManager {
             return;
         }
 
-        if (FOLLOW_PATTERN.matcher(message).find()) {
+        if (MOVE_HERE_PATTERN.matcher(message).find()) {
+            Point dest = entry.owner != null ? new Point(entry.owner.getPosition()) : null;
+            if (dest != null) {
+                TimerManager.getInstance().schedule(() -> {
+                    entry.following = false;
+                    entry.grinding = false;
+                    entry.moveTarget = dest;
+                    BotManager.getInstance().botSay(entry.bot, BotManager.randomReply(MOVE_HERE_REPLIES));
+                }, 1000 + ThreadLocalRandom.current().nextInt(0, 500));
+            }
+        } else if (FOLLOW_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
                 entry.grinding = false;
+                entry.moveTarget = null;
                 BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem);
                 BotManager.getInstance().botSay(entry.bot, BotManager.randomReply(FOLLOW_REPLIES));
                 TimerManager.getInstance().schedule(() -> entry.following = true, 250 + ThreadLocalRandom.current().nextInt(0, 500));
@@ -513,6 +531,7 @@ class BotChatManager {
         } else if (GRIND_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
                 entry.following = false;
+                entry.moveTarget = null;
                 BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem);
                 BotManager.getInstance().setupAutopotForBot(entry.bot);
                 BotManager.getInstance().botSay(entry.bot, BotManager.getInstance().grindStartMessage(entry.bot));
@@ -525,6 +544,7 @@ class BotChatManager {
             TimerManager.getInstance().schedule(() -> {
                 entry.following = false;
                 entry.grinding  = false;
+                entry.moveTarget = null;
                 BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem);
                 TimerManager.getInstance().schedule(() -> BotManager.getInstance().botSay(entry.bot, BotManager.randomReply(STOP_REPLIES)), 1500);
             }, 1000);
@@ -853,7 +873,7 @@ class BotChatManager {
     }
 
     private static void reportHelp(BotEntry entry) {
-        queueBotSay(entry, "commands: follow, stop, grind, stats, skills, inventory, mesos, slots, scrolls, pots, debug stats, respec");
+        queueBotSay(entry, "commands: follow, stop, move here, grind, stats, skills, inventory, mesos, slots, scrolls, pots, debug stats, respec");
         queueBotSay(entry, "support: support on/off, buffs on/off, heals on/off");
         queueBotSay(entry, "gear: ask 'any upgrades?' or say 'trade recommended gear'");
         queueBotSay(entry, "trade: mesos, scrolls, pots, equips, etc, or named items");

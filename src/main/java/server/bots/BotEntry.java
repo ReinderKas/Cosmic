@@ -129,6 +129,9 @@ class BotEntry {
     int skipDelayMs = ThreadLocalRandom.current().nextInt(0, 501);
     int aiTickAccumulatorMs = 0;
 
+    // "Move here" target — bot navigates to this fixed point, then idles until cleared
+    Point moveTarget = null;
+
     // Cached movement state shared across ticks
     int lastDesiredDirection = 0;
     Point navTargetPos = null;
