@@ -27,6 +27,7 @@ import server.ItemInformationProvider;
 import server.StatEffect;
 import server.TimerManager;
 import server.life.Monster;
+import server.bots.pq.BotPqHooks;
 import server.maps.MapItem;
 import server.maps.MapleMap;
 import server.quest.Quest;
@@ -711,6 +712,8 @@ public class BotManager {
         BotChatManager.tickAfkCheck(entry, owner);
         BotDropManager.tickTrade(entry, bot);
         BotDropManager.tickManualTrade(entry, bot);
+        BotPqHooks.tick(entry, bot, owner);
+        if (BotPqHooks.isNpcLocked(entry)) return;
         BotCombatManager.tickActionLock(entry);
         if (runAiTick) {
             BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
@@ -790,6 +793,21 @@ public class BotManager {
 
         // Grind mode: navigate toward nearest monster, attack when in range
         if (entry.grinding) {
+            // PQ nav override: walking to NPC or owner — skip monster seeking entirely
+            if (entry.kpq.navTarget != null) {
+                targetPos = entry.kpq.navTarget;
+                BotNavigationManager.NavigationDirective pqNav = BotNavigationManager.resolveTarget(entry, targetPos, runAiTick);
+                if (!pqNav.consumedTick) {
+                    if (entry.climbing) {
+                        BotMovementManager.tickClimbing(entry, pqNav.targetPos, runAiTick);
+                    } else if (entry.inAir) {
+                        BotMovementManager.tickAirborne(entry);
+                    } else {
+                        BotMovementManager.tickGrounded(entry, pqNav.targetPos);
+                    }
+                }
+                return;
+            }
             // Stick to current target while it's alive and in range; only re-pick when needed
             double seekRangeSq = (double) BotCombatManager.cfg.GRIND_SEEK_RANGE * BotCombatManager.cfg.GRIND_SEEK_RANGE;
             Monster target = entry.grindTarget;

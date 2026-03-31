@@ -15,7 +15,7 @@ import java.util.Map;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
 
-class BotEntry {
+public class BotEntry {
     final Character bot;
     volatile Character owner;
     volatile boolean following = false;
@@ -131,6 +131,9 @@ class BotEntry {
 
     // "Move here" target — bot navigates to this fixed point, then idles until cleared
     Point moveTarget = null;
+
+    // Party-quest state (one slot per PQ type; null = not in that PQ)
+    public server.bots.pq.BotKpqState kpq = new server.bots.pq.BotKpqState();
 
     // Cached movement state shared across ticks
     int lastDesiredDirection = 0;

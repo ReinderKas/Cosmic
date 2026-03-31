@@ -23,7 +23,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-class BotChatManager {
+public class BotChatManager {
     private static final String SKILL_TREE_CHOICE_ACTION = "skill_tree_choice";
     private static final String RECOMMENDED_TRADE_ACTION = "recommended_trade_offer";
 
@@ -652,7 +652,7 @@ class BotChatManager {
     // Message queue — 5-second spacing between consecutive bot messages
     // -------------------------------------------------------------------------
 
-    static void queueBotSay(BotEntry entry, String message) {
+    public static void queueBotSay(BotEntry entry, String message) {
         synchronized (entry.msgQueue) {
             entry.msgQueue.add(message);
             if (!entry.msgSending) {
