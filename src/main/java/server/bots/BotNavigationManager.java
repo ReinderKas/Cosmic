@@ -272,7 +272,7 @@ final class BotNavigationManager {
             if (targetRope == null || isSameRope(entry.climbRope, targetRope)) {
                 return null;
             }
-            BotMovementManager.jumpOffRope(entry, bot, edge.launchStepX);
+            BotMovementManager.jumpToRope(entry, bot, edge.launchStepX);
             return new NavigationDirective(rawTargetPos, true);
         }
 
@@ -606,10 +606,7 @@ final class BotNavigationManager {
         BotNavigationGraph.Region toRegion = graph.getRegion(edge.toRegionId);
         if (toRegion != null && toRegion.isRopeRegion) {
             Rope rope = findRopeForRegion(map, toRegion);
-            return rope != null
-                    && botPos.y >= rope.topY()
-                    && botPos.y <= rope.bottomY()
-                    && Math.abs(rope.x() - botPos.x) <= BotPhysicsEngine.maxRopeJumpHorizontalTravel(map);
+            return BotPhysicsEngine.simulateRopeJumpGrab(map, botPos, edge.launchStepX, rope) != null;
         }
 
         if (edge.launchStepX == 0) {

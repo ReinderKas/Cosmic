@@ -192,6 +192,15 @@ class BotMovementManager {
         broadcastMovement(entry);
     }
 
+    static void jumpToRope(BotEntry entry, Character bot, int dx) {
+        Rope sourceRope = entry.climbRope;
+        int walkStep = BotPhysicsEngine.walkStep(bot.getMap());
+        int airVelX = dx > 0 ? walkStep : dx < 0 ? -walkStep : 0;
+        BotPhysicsEngine.beginRopeTransferJump(entry, bot, sourceRope, airVelX);
+        entry.jumpCooldownMs = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS);
+        broadcastMovement(entry);
+    }
+
     private static void applyClimbAction(BotEntry entry, Character bot, MoveAction action) {
         int climbDir = switch (action.type()) {
             case CLIMB_UP -> -1;
@@ -252,6 +261,9 @@ class BotMovementManager {
         }
 
         for (Rope rope : bot.getMap().getRopes()) {
+            if (isSameRope(entry.blockedRopeGrab, rope)) {
+                continue;
+            }
             if (Math.abs(rope.x() - botPos.x) > BotPhysicsEngine.cfg.ROPE_GRAB_X) {
                 continue;
             }
@@ -265,6 +277,14 @@ class BotMovementManager {
         }
 
         return false;
+    }
+
+    private static boolean isSameRope(Rope left, Rope right) {
+        return left != null && right != null
+                && left.x() == right.x()
+                && left.topY() == right.topY()
+                && left.bottomY() == right.bottomY()
+                && left.isLadder() == right.isLadder();
     }
 
     static void tickGrounded(BotEntry entry, Point targetPos) {

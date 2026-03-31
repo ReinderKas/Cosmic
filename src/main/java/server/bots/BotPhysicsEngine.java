@@ -193,28 +193,39 @@ final class BotPhysicsEngine {
     }
 
     static void beginGroundJump(BotEntry entry, Character bot, int airVelX) {
+        entry.blockedRopeGrab = null;
         launchAirborne(entry, bot, bot.getPosition(), -jumpForcePerTick(), airVelX, false);
     }
 
     static void beginClimbUpJump(BotEntry entry, Character bot, int airVelX) {
+        entry.blockedRopeGrab = null;
         launchAirborne(entry, bot, bot.getPosition(), -jumpForcePerTick(), airVelX, true);
     }
 
     static void beginJumpOffRope(BotEntry entry, Character bot, int airVelX) {
+        entry.blockedRopeGrab = null;
         launchAirborne(entry, bot, bot.getPosition(), -ropeJumpForcePerTick(), airVelX, false);
     }
 
+    static void beginRopeTransferJump(BotEntry entry, Character bot, Rope sourceRope, int airVelX) {
+        entry.blockedRopeGrab = sourceRope;
+        launchAirborne(entry, bot, bot.getPosition(), -ropeJumpForcePerTick(), airVelX, true);
+    }
+
     static void beginDownJump(BotEntry entry, Character bot) {
+        entry.blockedRopeGrab = null;
         launchAirborne(entry, bot, bot.getPosition(), -downJumpForcePerTick(), 0, false);
         entry.downJumpGracePeriodMS = cfg.DOWN_JUMP_GRACE_MS;
     }
 
     static void beginFall(BotEntry entry, Character bot, int airVelX) {
+        entry.blockedRopeGrab = null;
         launchAirborne(entry, bot, bot.getPosition(), 0f, airVelX, false);
     }
 
     static void beginKnockback(BotEntry entry, Character bot, Point position, float initialVelY, int airVelX) {
         bot.setPosition(position);
+        entry.blockedRopeGrab = null;
         launchAirborne(entry, bot, position, initialVelY, airVelX, false);
     }
 
@@ -230,6 +241,7 @@ final class BotPhysicsEngine {
         entry.climbUpIntent = false;
         entry.airVelX = airVelX;
         entry.downJumpPending = false;
+        entry.blockedRopeGrab = null;
         setMovementVelocity(entry, velocityFromDeltaX(airVelX), velocityFromAirStep(entry.velY));
         syncCharacterState(entry);
     }
@@ -336,6 +348,7 @@ final class BotPhysicsEngine {
         entry.physX = position.x;
         entry.physY = position.y;
         entry.downJumpPending = false;
+        entry.blockedRopeGrab = null;
         stopGroundMotion(entry);
         setMovementVelocity(entry, 0, 0);
         syncCharacterState(entry);
@@ -426,6 +439,10 @@ final class BotPhysicsEngine {
 
     static int maxRopeJumpHorizontalTravel(MapleMap map) {
         return maxHorizontalTravel(map, ropeJumpForcePerTick());
+    }
+
+    static Point simulateRopeJumpGrab(MapleMap map, Point from, int stepX, Rope targetRope) {
+        return simulateRopeGrab(map, from, -ropeJumpForcePerTick(), stepX, targetRope, 0L);
     }
 
     static boolean canReachRopeFromGround(MapleMap map, Point from, Rope rope) {
@@ -542,6 +559,7 @@ final class BotPhysicsEngine {
         entry.airVelX = 0;
         entry.wasMovingX = false;
         entry.climbUpIntent = false;
+        entry.blockedRopeGrab = null;
         entry.ropeGrabCooldownMs = 0;
         entry.downJumpPending = false;
         entry.downJumpGracePeriodMS = 0L;
@@ -620,6 +638,62 @@ final class BotPhysicsEngine {
     private static int maxHorizontalTravel(MapleMap map, float launchSpeedPerTick) {
         int airtimeTicks = Math.max(1, (int) Math.ceil((2 * launchSpeedPerTick) / gravityPerTick()));
         return walkStep(map) * airtimeTicks;
+    }
+
+    private static Point simulateRopeGrab(MapleMap map,
+                                          Point from,
+                                          float initialVelY,
+                                          int stepX,
+                                          Rope targetRope,
+                                          long landingGraceMs) {
+        if (targetRope == null) {
+            return null;
+        }
+
+        float velocityY = initialVelY;
+        double physX = from.x;
+        double physY = from.y;
+        int previousIntY = from.y;
+        long remainingLandingGraceMs = Math.max(0L, landingGraceMs);
+
+        for (int tick = 0; tick < (1500 / cfg.TICK_MS); tick++) {
+            Point current = new Point((int) Math.round(physX), (int) Math.round(physY));
+            if (canGrabRopeAtPoint(current, targetRope)) {
+                return new Point(targetRope.x(), current.y);
+            }
+
+            if (remainingLandingGraceMs > 0L) {
+                remainingLandingGraceMs = Math.max(0L, remainingLandingGraceMs - cfg.TICK_MS);
+            }
+
+            physX += stepX;
+            float gravity = gravityPerTick();
+            physY += velocityY + 0.5f * gravity;
+            velocityY = Math.min(velocityY + gravity, maxFallPerTick());
+
+            int x = (int) Math.round(physX);
+            int intY = (int) Math.round(physY);
+            if (velocityY > 0 && remainingLandingGraceMs == 0L) {
+                Point probe = new Point(x, previousIntY + 1);
+                Point floor = map.getPointBelow(probe);
+                if (floor != null && floor.y <= intY) {
+                    Foothold foothold = map.getFootholds().findBelow(probe);
+                    if (foothold != null) {
+                        return null;
+                    }
+                }
+            }
+
+            previousIntY = intY;
+        }
+
+        return null;
+    }
+
+    private static boolean canGrabRopeAtPoint(Point position, Rope rope) {
+        return Math.abs(position.x - rope.x()) <= cfg.ROPE_GRAB_X
+                && position.y >= rope.topY()
+                && position.y <= rope.bottomY();
     }
 
     private static JumpLanding simulateLanding(MapleMap map,

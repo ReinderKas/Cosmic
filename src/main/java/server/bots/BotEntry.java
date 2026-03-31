@@ -37,6 +37,7 @@ class BotEntry {
     // Rope climbing
     boolean climbing = false;
     Rope climbRope = null;
+    Rope blockedRopeGrab = null;
 
     // Horizontal movement hysteresis
     boolean wasMovingX = false;

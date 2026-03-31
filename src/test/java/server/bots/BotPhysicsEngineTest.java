@@ -63,6 +63,20 @@ class BotPhysicsEngineTest {
     }
 
     @Test
+    void shouldSimulateRopeToRopeGrabAtActualCatchY() {
+        MapleMap map = createEmptyTestMap(910000001);
+        Rope sourceRope = new Rope(0, 100, 200, false);
+        Rope targetRope = new Rope(48, 140, 150, false);
+        map.addRope(sourceRope);
+        map.addRope(targetRope);
+
+        Point ropeGrab = BotPhysicsEngine.simulateRopeJumpGrab(map, new Point(sourceRope.x(), 160),
+                BotPhysicsEngine.walkStep(map), targetRope);
+
+        assertEquals(new Point(targetRope.x(), 146), ropeGrab);
+    }
+
+    @Test
     void shouldClearMovementStateOnReset() {
         BotEntry entry = new BotEntry(null, null, null);
         entry.inAir = true;
@@ -302,6 +316,12 @@ class BotPhysicsEngineTest {
 
         double ratio = (x - foothold.getX1()) / (double) (foothold.getX2() - foothold.getX1());
         return (int) Math.round(foothold.getY1() + (foothold.getY2() - foothold.getY1()) * ratio);
+    }
+
+    private static MapleMap createEmptyTestMap(int mapId) {
+        MapleMap map = new MapleMap(mapId, 0, 0, mapId, 1.0f);
+        map.setFootholds(new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000)));
+        return map;
     }
 
     private static Character mockBot(Point startPosition, MapleMap map) {

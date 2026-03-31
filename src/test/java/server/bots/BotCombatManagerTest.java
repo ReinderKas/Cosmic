@@ -168,6 +168,22 @@ class BotCombatManagerTest {
         assertEquals(590, timing.cooldownMs());
     }
 
+    @Test
+    void shouldAllowDiagonalJumpAttackForCloseRangeTargetsSlightlyAbove() {
+        assertTrue(BotCombatManager.isTargetJumpable(true, new Point(100, 200), new Point(230, 135)));
+    }
+
+    @Test
+    void shouldRejectJumpAttackForNonCloseRangeRoutes() {
+        assertFalse(BotCombatManager.isTargetJumpable(false, new Point(100, 200), new Point(170, 135)));
+    }
+
+    @Test
+    void shouldRejectJumpAttackWhenTargetIsTooHighOrTooFar() {
+        assertFalse(BotCombatManager.isTargetJumpable(true, new Point(100, 200), new Point(241, 135)));
+        assertFalse(BotCombatManager.isTargetJumpable(true, new Point(100, 200), new Point(170, 60)));
+    }
+
     private static void assertDamageDirection(MapleMap map, Character bot, int expectedBroadcasts, int expectedDirection) {
         ArgumentCaptor<Packet> packets = ArgumentCaptor.forClass(Packet.class);
         verify(map, times(expectedBroadcasts)).broadcastMessage(eq(bot), packets.capture(), eq(false));

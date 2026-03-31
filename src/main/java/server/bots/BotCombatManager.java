@@ -87,6 +87,10 @@ class BotCombatManager {
         Monster primaryTarget() {
             return targets.get(0);
         }
+
+        boolean isCloseRangeRoute() {
+            return route == AttackRoute.CLOSE;
+        }
     }
 
     static class Config {
@@ -100,6 +104,7 @@ class BotCombatManager {
         public int   ATTACK_RANGE_Y  = 50;
         public int   ATTACK_DOWN_MAX = 20;
         public int   ATTACK_JUMP_Y   = 130;
+        public int   ATTACK_JUMP_X_EXTRA = 60;
 
         // Grind / AoE
         public int   GRIND_SEEK_RANGE  = 800;
@@ -414,9 +419,13 @@ class BotCombatManager {
         return isBasicAttackInRange(bot.getPosition(), target.getPosition());
     }
 
-    static boolean isTargetJumpable(Point botPos, Point targetPos) {
+    static boolean isTargetJumpable(boolean closeRangeRoute, Point botPos, Point targetPos) {
+        if (!closeRangeRoute || botPos == null || targetPos == null) {
+            return false;
+        }
+
         int dx = Math.abs(targetPos.x - botPos.x);
-        if (dx > BotCombatManager.cfg.ATTACK_RANGE_X) {
+        if (dx > BotCombatManager.cfg.ATTACK_RANGE_X + BotCombatManager.cfg.ATTACK_JUMP_X_EXTRA) {
             return false;
         }
 

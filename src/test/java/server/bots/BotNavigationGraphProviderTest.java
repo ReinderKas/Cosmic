@@ -129,6 +129,25 @@ class BotNavigationGraphProviderTest {
     }
 
     @Test
+    void shouldGenerateRopeToRopeClimbEdgeWhenJumpArcCanCatchTargetRope() {
+        MapleMap map = createEmptyTestMap(910000002);
+        Rope sourceRope = new Rope(0, 100, 200, false);
+        Rope targetRope = new Rope(48, 140, 150, false);
+        map.addRope(sourceRope);
+        map.addRope(targetRope);
+
+        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(map);
+        BotNavigationGraph.Edge ropeTransfer = findFirstRopeToRopeClimbEdge(graph);
+
+        assertNotNull(ropeTransfer);
+        assertEquals(1, ropeTransfer.fromRegionId);
+        assertEquals(2, ropeTransfer.toRegionId);
+        assertEquals(BotPhysicsEngine.walkStep(map), ropeTransfer.launchStepX);
+        assertEquals(targetRope.x(), ropeTransfer.endPoint.x);
+        assertTrue(ropeTransfer.endPoint.y >= targetRope.topY() && ropeTransfer.endPoint.y <= targetRope.bottomY());
+    }
+
+    @Test
     void shouldPreferElliniaLocalRightSideJumpChainOverFarLeftDetour() {
         List<BotNavigationGraph.Edge> path = findPath(elliniaGraph, ellinia, new Point(1355, -888), new Point(1354, -1197));
         int targetRegionId = elliniaGraph.findRegionId(ellinia, new Point(1354, -1197));
@@ -264,6 +283,24 @@ class BotNavigationGraphProviderTest {
         return nearby.getFirst();
     }
 
+    private static BotNavigationGraph.Edge findFirstRopeToRopeClimbEdge(BotNavigationGraph graph) {
+        for (BotNavigationGraph.Region region : graph.regions) {
+            if (!region.isRopeRegion) {
+                continue;
+            }
+            for (BotNavigationGraph.Edge edge : graph.getOutgoing(region.id)) {
+                if (edge.type != BotNavigationGraph.EdgeType.CLIMB) {
+                    continue;
+                }
+                BotNavigationGraph.Region toRegion = graph.getRegion(edge.toRegionId);
+                if (toRegion != null && toRegion.isRopeRegion) {
+                    return edge;
+                }
+            }
+        }
+        return null;
+    }
+
     private static int countEdges(BotNavigationGraph graph, BotNavigationGraph.EdgeType type) {
         int count = 0;
         for (BotNavigationGraph.Region region : graph.regions) {
@@ -274,6 +311,12 @@ class BotNavigationGraphProviderTest {
             }
         }
         return count;
+    }
+
+    private static MapleMap createEmptyTestMap(int mapId) {
+        MapleMap map = new MapleMap(mapId, 0, 0, mapId, 1.0f);
+        map.setFootholds(new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000)));
+        return map;
     }
 
     private static StraightDropCase findStraightDropCaseWithAlternativeStart(BotNavigationGraph graph, MapleMap map) {

@@ -79,4 +79,24 @@ class BotMovementManagerTest {
 
         assertEquals(new Point(668, 1757), bot.getPosition());
     }
+
+    @Test
+    void shouldKeepRopeGrabEnabledWhenJumpingFromRopeToRope() {
+        Character bot = mock(Character.class);
+        MapleMap map = mock(MapleMap.class);
+        when(bot.getMap()).thenReturn(map);
+        when(bot.getPosition()).thenReturn(new Point(668, 1757));
+        when(bot.getHp()).thenReturn(100);
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.climbing = true;
+        entry.climbRope = new Rope(668, 1727, 1980, false);
+
+        BotMovementManager.jumpToRope(entry, bot, 8);
+
+        assertTrue(entry.inAir);
+        assertTrue(entry.climbUpIntent);
+        assertEquals(0, entry.ropeGrabCooldownMs);
+        assertEquals(668, entry.blockedRopeGrab.x());
+    }
 }

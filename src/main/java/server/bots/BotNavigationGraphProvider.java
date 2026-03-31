@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
-    private static final int GRAPH_VERSION = 9;
+    private static final int GRAPH_VERSION = 10;
     private static final int WALK_CONNECTION_GAP_PX = 12;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
     private static final int ROPE_ANCHOR_INTERVAL_PX = 30;
@@ -384,7 +384,7 @@ final class BotNavigationGraphProvider {
         // Direct step-off at the top of the rope
         addTopStepOffEdge(ropeRegion, rope, map, regionsById, regionIdByFootholdId, outgoing, edgeKeys);
 
-        // Jump-off / step-off at various heights along the rope
+        // Jump-off / step-off to ground at various heights along the rope
         for (int anchorY : ropeAnchorYs(rope)) {
             Point ropePoint = new Point(ropeX, anchorY);
             for (int stepX : new int[]{-jumpStep, 0, jumpStep}) {
@@ -403,8 +403,11 @@ final class BotNavigationGraphProvider {
                 addEdge(ropeRegion.id, toRegion.id, BotNavigationGraph.EdgeType.CLIMB,
                         ropePoint, landing.point(), stepX, 0, cost, outgoing, edgeKeys);
             }
+        }
 
-            // Check if jumping off can reach another rope (rope-to-rope)
+        // Rope-to-rope transfers need a tighter vertical sweep than generic rope exits.
+        for (int anchorY : ropeTransferAnchorYs(rope)) {
+            Point ropePoint = new Point(ropeX, anchorY);
             for (BotNavigationGraph.Region otherRope : regionsById.values()) {
                 if (!otherRope.isRopeRegion || otherRope.id == ropeRegion.id) {
                     continue;
@@ -415,21 +418,20 @@ final class BotNavigationGraphProvider {
                     continue;
                 }
 
-                // Can the bot jump from this rope and catch the other rope?
                 int dx = Math.abs(ropeX - targetRope.x());
                 if (dx > BotPhysicsEngine.maxRopeJumpHorizontalTravel(map)) {
                     continue;
                 }
-                if (anchorY < targetRope.topY() || anchorY > targetRope.bottomY()) {
+
+                int launchDir = targetRope.x() > ropeX ? jumpStep : -jumpStep;
+                Point ropeGrab = BotPhysicsEngine.simulateRopeJumpGrab(map, ropePoint, launchDir, targetRope);
+                if (ropeGrab == null) {
                     continue;
                 }
 
-                Point startPoint = new Point(ropeX, anchorY);
-                Point endPoint = new Point(targetRope.x(), anchorY);
                 int cost = estimateRopeExitJumpCost() + 150;
-                int launchDir = targetRope.x() > ropeX ? jumpStep : -jumpStep;
                 addEdge(ropeRegion.id, otherRope.id, BotNavigationGraph.EdgeType.CLIMB,
-                        startPoint, endPoint, launchDir, 0, cost, outgoing, edgeKeys);
+                        ropePoint, ropeGrab, launchDir, 0, cost, outgoing, edgeKeys);
             }
         }
     }
@@ -472,6 +474,18 @@ final class BotNavigationGraphProvider {
             ys.add(y);
         }
         ys.add(rope.bottomY());
+        return ys;
+    }
+
+    private static List<Integer> ropeTransferAnchorYs(Rope rope) {
+        List<Integer> ys = new ArrayList<>();
+        int step = Math.max(1, BotPhysicsEngine.climbStepPerTick());
+        for (int y = rope.topY(); y <= rope.bottomY(); y += step) {
+            ys.add(y);
+        }
+        if (ys.isEmpty() || ys.getLast() != rope.bottomY()) {
+            ys.add(rope.bottomY());
+        }
         return ys;
     }
 

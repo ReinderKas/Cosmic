@@ -760,7 +760,7 @@ public class BotManager {
         }
 
         // Follow mode: attack monsters already in attack range without chasing
-        if (entry.following && runAiTick && !entry.inAir && !entry.climbing
+        if (entry.following && runAiTick && !entry.climbing
                 && Math.abs(botPos.x - owner.getPosition().x) <= BotMovementManager.cfg.FOLLOW_DIST * 5) {
             Monster followTarget = BotCombatManager.findGrindTarget(bot);
             if (followTarget != null) {
@@ -797,14 +797,10 @@ public class BotManager {
             if (!entry.climbing) {
                 if (BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)) {
                     // In range — attack if grounded, or during ascent of a jump
-                    if (!entry.inAir || entry.velY < 0) {
-                        BotCombatManager.attackMonster(entry, bot, attackPlan);
-                        if (!entry.inAir) return;
-                        // airborne: fall through so tickAirborne still runs this tick
-                    }
-                } else if (attackPlan.skillId == 0
-                        && !entry.inAir
-                        && BotCombatManager.isTargetJumpable(botPos, tp)
+                    BotCombatManager.attackMonster(entry, bot, attackPlan);
+                    if (!entry.inAir) return;
+                } else if (!entry.inAir
+                        && BotCombatManager.isTargetJumpable(attackPlan.isCloseRangeRoute(), botPos, tp)
                         && entry.jumpCooldownMs == 0) {
                     // Target is above but within jump height — jump toward it
                     BotMovementManager.initiateJump(entry, bot, tp.x - botPos.x);
