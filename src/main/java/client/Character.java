@@ -195,6 +195,14 @@ import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
 public class Character extends AbstractCharacterObject {
+    private static final byte MAX_INVENTORY_SLOTS = 96;
+    private static final InventoryType[] STANDARD_INVENTORY_TYPES = {
+            InventoryType.EQUIP,
+            InventoryType.USE,
+            InventoryType.SETUP,
+            InventoryType.ETC
+    };
+
     private static final Logger log = LoggerFactory.getLogger(Character.class);
     private static final String LEVEL_200 = "[Congrats] %s has reached Level %d! Congratulate %s on such an amazing achievement!";
     private static final String[] BLOCKED_NAMES = {"admin", "owner", "moderator", "intern", "donor", "administrator", "FREDRICK", "help", "helper", "alert", "notice", "maplestory", "fuck", "wizet", "fucking", "negro", "fuk", "fuc", "penis", "pussy", "asshole", "gay",
@@ -474,10 +482,7 @@ public class Character extends AbstractCharacterObject {
         ret.accountid = c.getAccID();
         ret.buddylist = new BuddyList(20);
         ret.maplemount = null;
-        ret.getInventory(InventoryType.EQUIP).setSlotLimit(96);
-        ret.getInventory(InventoryType.USE).setSlotLimit(96);
-        ret.getInventory(InventoryType.SETUP).setSlotLimit(96);
-        ret.getInventory(InventoryType.ETC).setSlotLimit(96);
+        applyInitialInventorySlotLimits(ret);
 
         // Select a keybinding method
         int[] selectedKey;
@@ -508,6 +513,45 @@ public class Character extends AbstractCharacterObject {
         }
 
         return ret;
+    }
+
+    private static void applyInitialInventorySlotLimits(Character chr) {
+        if (YamlConfig.config.server.ALWAYS_MAX_INVENTORY_SLOTS) {
+            setStandardInventorySlotLimits(chr, MAX_INVENTORY_SLOTS);
+        }
+    }
+
+    private static boolean normalizeInventorySlotLimits(Character chr) {
+        if (!YamlConfig.config.server.ALWAYS_MAX_INVENTORY_SLOTS) {
+            return false;
+        }
+
+        boolean changed = false;
+        for (InventoryType type : STANDARD_INVENTORY_TYPES) {
+            if (chr.getInventory(type).getSlotLimit() != MAX_INVENTORY_SLOTS) {
+                chr.getInventory(type).setSlotLimit(MAX_INVENTORY_SLOTS);
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    private static void setStandardInventorySlotLimits(Character chr, int slotLimit) {
+        for (InventoryType type : STANDARD_INVENTORY_TYPES) {
+            chr.getInventory(type).setSlotLimit(slotLimit);
+        }
+    }
+
+    private static void persistInventorySlotLimits(Connection con, Character chr) throws SQLException {
+        try (PreparedStatement ps = con.prepareStatement("UPDATE characters SET equipslots = ?, useslots = ?, setupslots = ?, etcslots = ? WHERE id = ?")) {
+            ps.setByte(1, chr.getInventory(InventoryType.EQUIP).getSlotLimit());
+            ps.setByte(2, chr.getInventory(InventoryType.USE).getSlotLimit());
+            ps.setByte(3, chr.getInventory(InventoryType.SETUP).getSlotLimit());
+            ps.setByte(4, chr.getInventory(InventoryType.ETC).getSlotLimit());
+            ps.setInt(5, chr.getId());
+            ps.executeUpdate();
+        }
     }
 
     public boolean isLoggedinWorld() {
@@ -6989,6 +7033,10 @@ public class Character extends AbstractCharacterObject {
                     ret.getInventory(InventoryType.SETUP).setSlotLimit(rs.getByte("setupslots"));
                     ret.getInventory(InventoryType.ETC).setSlotLimit(rs.getByte("etcslots"));
 
+                    if (normalizeInventorySlotLimits(ret)) {
+                        persistInventorySlotLimits(con, ret);
+                    }
+
                     short sandboxCheck = 0x0;
                     for (Pair<Item, InventoryType> item : ItemFactory.INVENTORY.loadItems(ret.id, !channelserver)) {
                         sandboxCheck |= item.getLeft().getFlag();
@@ -8169,7 +8217,7 @@ public class Character extends AbstractCharacterObject {
 
             try {
                 // Character info
-                try (PreparedStatement ps = con.prepareStatement("INSERT INTO characters (str, dex, luk, `int`, gm, skincolor, gender, job, hair, face, map, meso, spawnpoint, accountid, name, world, hp, mp, maxhp, maxmp, level, ap, sp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", Statement.RETURN_GENERATED_KEYS)) {
+                try (PreparedStatement ps = con.prepareStatement("INSERT INTO characters (str, dex, luk, `int`, gm, skincolor, gender, job, hair, face, map, meso, spawnpoint, accountid, name, world, hp, mp, maxhp, maxmp, level, ap, sp, equipslots, useslots, setupslots, etcslots) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", Statement.RETURN_GENERATED_KEYS)) {
                     ps.setInt(1, str);
                     ps.setInt(2, dex);
                     ps.setInt(3, luk);
@@ -8200,6 +8248,10 @@ public class Character extends AbstractCharacterObject {
                     }
                     String sp = sps.toString();
                     ps.setString(23, sp.substring(0, sp.length() - 1));
+                    ps.setByte(24, getInventory(InventoryType.EQUIP).getSlotLimit());
+                    ps.setByte(25, getInventory(InventoryType.USE).getSlotLimit());
+                    ps.setByte(26, getInventory(InventoryType.SETUP).getSlotLimit());
+                    ps.setByte(27, getInventory(InventoryType.ETC).getSlotLimit());
 
                     int updateRows = ps.executeUpdate();
                     if (updateRows < 1) {
