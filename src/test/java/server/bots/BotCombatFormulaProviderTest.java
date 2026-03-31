@@ -36,6 +36,22 @@ class BotCombatFormulaProviderTest {
     }
 
     @Test
+    void shouldUseIntAndLukForMagicAccuracyOnly() {
+        Character bot = mock(Character.class);
+        Inventory equipped = mock(Inventory.class);
+        Equip weapon = mock(Equip.class);
+
+        when(bot.getTotalInt()).thenReturn(123);
+        when(bot.getTotalLuk()).thenReturn(47);
+        when(bot.getBuffedValue(BuffStat.ACC)).thenReturn(50);
+        when(weapon.getAcc()).thenReturn((short) 40);
+        when(bot.getInventory(InventoryType.EQUIPPED)).thenReturn(equipped);
+        when(equipped.iterator()).thenReturn(List.<client.inventory.Item>of(weapon).iterator());
+
+        assertEquals(16, provider.getTotalMagicAccuracy(bot));
+    }
+
+    @Test
     void shouldIncludeDerivedEquipAndBuffAvoidability() {
         Character bot = mock(Character.class);
         Inventory equipped = mock(Inventory.class);
@@ -55,9 +71,16 @@ class BotCombatFormulaProviderTest {
 
     @Test
     void shouldMatchOpenStoryMobHitChanceFormula() {
-        double hitChance = provider.calculateMobHitChance(36, 50, 55, 20);
+        double hitChance = provider.calculatePhysicalMobHitChance(36, 50, 55, 20);
 
         assertEquals(0.8035714285714286d, hitChance, 1.0e-12d);
+    }
+
+    @Test
+    void shouldApplyMagicMobHitChanceFormulaFromGuidance() {
+        double hitChance = provider.calculateMagicMobHitChance(16, 50, 55, 20);
+
+        assertEquals(0.6305418719211823d, hitChance, 1.0e-12d);
     }
 
     @Test
@@ -69,8 +92,10 @@ class BotCombatFormulaProviderTest {
 
     @Test
     void shouldClampHitChanceBetweenOnePercentAndOneHundredPercent() {
-        assertEquals(0.01d, provider.calculateMobHitChance(0, 20, 120, 999), 1.0e-12d);
-        assertEquals(1.0d, provider.calculateMobHitChance(9999, 200, 1, 0), 1.0e-12d);
+        assertEquals(0.01d, provider.calculatePhysicalMobHitChance(0, 20, 120, 999), 1.0e-12d);
+        assertEquals(1.0d, provider.calculatePhysicalMobHitChance(9999, 200, 1, 0), 1.0e-12d);
+        assertEquals(0.01d, provider.calculateMagicMobHitChance(0, 20, 120, 999), 1.0e-12d);
+        assertEquals(1.0d, provider.calculateMagicMobHitChance(9999, 200, 1, 0), 1.0e-12d);
         assertEquals(0.01d, provider.calculateBotAvoidChance(0, 20, 120, 999), 1.0e-12d);
         assertEquals(1.0d, provider.calculateBotAvoidChance(9999, 120, 20, 0), 1.0e-12d);
     }

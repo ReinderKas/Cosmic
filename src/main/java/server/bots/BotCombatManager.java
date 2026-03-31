@@ -452,7 +452,8 @@ class BotCombatManager {
 
         for (Monster target : attackPlan.targets) {
             attack.targets.put(target.getObjectId(),
-                    makeTarget(bot, target, attackPlan.numDamage, minDmg, maxDmg, attackPlan.hitDelayMs));
+                    makeTarget(bot, target, attackPlan.numDamage, minDmg, maxDmg, attackPlan.hitDelayMs,
+                            attackPlan.route == AttackRoute.MAGIC));
         }
 
         applyAttackRoute(attackPlan.route, attack, bot);
@@ -1075,8 +1076,11 @@ class BotCombatManager {
         return 1.7f - (attackSpeed / 10f);
     }
 
-    private static AbstractDealDamageHandler.AttackTarget makeTarget(Character bot, Monster monster, int hits, int minDmg, int maxDmg, int hitDelayMs) {
-        List<Integer> lines = BotCombatFormulaProvider.getInstance().rollDamageLines(bot, monster, hits, minDmg, maxDmg);
+    private static AbstractDealDamageHandler.AttackTarget makeTarget(Character bot, Monster monster, int hits,
+                                                                     int minDmg, int maxDmg, int hitDelayMs,
+                                                                     boolean magicAttack) {
+        List<Integer> lines = BotCombatFormulaProvider.getInstance()
+                .rollDamageLines(bot, monster, hits, minDmg, maxDmg, magicAttack);
         int normalizedHitDelay = Math.max(0, Math.min(Short.MAX_VALUE, hitDelayMs));
         return new AbstractDealDamageHandler.AttackTarget((short) normalizedHitDelay, lines);
     }

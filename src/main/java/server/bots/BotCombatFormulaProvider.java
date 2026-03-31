@@ -25,18 +25,47 @@ final class BotCombatFormulaProvider {
         return Math.max(0, derivedAccuracy + getFlatAccuracy(bot));
     }
 
+    int getTotalMagicAccuracy(Character bot) {
+        int derivedMagicAccuracy = (int) Math.floor(bot.getTotalInt() * 0.1d)
+                + (int) Math.floor(bot.getTotalLuk() * 0.1d);
+        return Math.max(0, derivedMagicAccuracy);
+    }
+
     int getTotalAvoidability(Character bot) {
         int derivedAvoidability = (int) Math.floor(bot.getTotalDex() * 0.25d + bot.getTotalLuk() * 0.5d);
         return Math.max(0, derivedAvoidability + getFlatAvoidability(bot));
     }
 
     double calculateMobHitChance(Character bot, Monster monster) {
-        return calculateMobHitChance(getTotalAccuracy(bot), bot.getLevel(), monster.getLevel(), monster.getAvoidability());
+        return calculateMobHitChance(bot, monster, false);
+    }
+
+    double calculateMobHitChance(Character bot, Monster monster, boolean magicAttack) {
+        if (magicAttack) {
+            return calculateMagicMobHitChance(getTotalMagicAccuracy(bot), bot.getLevel(), monster.getLevel(), monster.getAvoidability());
+        }
+        return calculatePhysicalMobHitChance(getTotalAccuracy(bot), bot.getLevel(), monster.getLevel(), monster.getAvoidability());
     }
 
     double calculateMobHitChance(int accuracy, int botLevel, int monsterLevel, int monsterAvoidability) {
+        return calculatePhysicalMobHitChance(accuracy, botLevel, monsterLevel, monsterAvoidability);
+    }
+
+    double calculatePhysicalMobHitChance(int accuracy, int botLevel, int monsterLevel, int monsterAvoidability) {
         int levelDelta = Math.max(0, monsterLevel - botLevel);
         double hitChance = accuracy / (((1.84d + 0.07d * levelDelta) * monsterAvoidability) + 1.0d);
+        hitChance = Math.max(MIN_HIT_CHANCE, hitChance);
+        return Math.min(MAX_HIT_CHANCE, hitChance);
+    }
+
+    double calculateMagicMobHitChance(int magicAccuracy, int botLevel, int monsterLevel, int monsterAvoidability) {
+        int levelDelta = Math.max(0, monsterLevel - botLevel);
+        double requiredAccuracyForGuaranteedHit = (monsterAvoidability + 1.0d) * (1.0d + (levelDelta / 24.0d));
+        if (requiredAccuracyForGuaranteedHit <= 0.0d) {
+            return MAX_HIT_CHANCE;
+        }
+
+        double hitChance = magicAccuracy / requiredAccuracyForGuaranteedHit;
         hitChance = Math.max(MIN_HIT_CHANCE, hitChance);
         return Math.min(MAX_HIT_CHANCE, hitChance);
     }
@@ -62,7 +91,11 @@ final class BotCombatFormulaProvider {
     }
 
     List<Integer> rollDamageLines(Character bot, Monster monster, int hits, int minDamage, int maxDamage) {
-        return rollDamageLines(hits, minDamage, maxDamage, calculateMobHitChance(bot, monster));
+        return rollDamageLines(bot, monster, hits, minDamage, maxDamage, false);
+    }
+
+    List<Integer> rollDamageLines(Character bot, Monster monster, int hits, int minDamage, int maxDamage, boolean magicAttack) {
+        return rollDamageLines(hits, minDamage, maxDamage, calculateMobHitChance(bot, monster, magicAttack));
     }
 
     List<Integer> rollDamageLines(int hits, int minDamage, int maxDamage, double hitChance) {
