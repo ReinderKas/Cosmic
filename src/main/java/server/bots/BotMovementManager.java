@@ -79,7 +79,7 @@ class BotMovementManager {
 
         public int JUMP_Y_THRESH = 30;
         public int JUMP_COOLDOWN_MS = 1000;
-        public int TELEPORT_DIST = 2000;
+        public int TELEPORT_DIST = 4000;
     }
 
     static Config cfg = bindConfig(new Config());
@@ -239,6 +239,25 @@ class BotMovementManager {
             }
 
             Point nextPos = BotPhysicsEngine.advanceAirbornePosition(entry, bot);
+
+            // Wall foothold collision — stop horizontal movement if a wall foothold
+            // blocks the path at the previous Y level.  This prevents knockback and
+            // jump drift from pushing the bot through (or off) a map wall.
+            if (entry.airVelX != 0) {
+                int prevX = previousPos.x;
+                int nextX = nextPos.x;
+                int scanY = previousPos.y;
+                Point wallFrom = new Point(Math.min(prevX, nextX), scanY);
+                Point wallTo   = new Point(Math.max(prevX, nextX), scanY);
+                if (wallFrom.x < wallTo.x
+                        && bot.getMap().getFootholds().findWall(wallFrom, wallTo) != null) {
+                    entry.airVelX = 0;
+                    entry.physX   = prevX;
+                    nextPos = new Point(prevX, nextPos.y);
+                    bot.setPosition(nextPos);
+                }
+            }
+
             if (entry.velY > 0 && BotPhysicsEngine.canLand(entry)) {
                 Point floorPoint = bot.getMap().getPointBelow(new Point(nextPos.x, previousPos.y + 1));
                 if (floorPoint != null && floorPoint.y <= nextPos.y) {
