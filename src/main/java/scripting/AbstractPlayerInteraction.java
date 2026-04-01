@@ -1191,8 +1191,19 @@ public class AbstractPlayerInteraction {
         return null;
     }
 
+    // Keyed by characterId — stores the pending list dialog text for the dressingroom script
+    private static final java.util.concurrent.ConcurrentHashMap<Integer, String> pendingNpcTalkMessages =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Returns and removes the stored dialog text for the given character, or null if none. */
+    public static String pollNpcTalkMessage(int characterId) {
+        return pendingNpcTalkMessages.remove(characterId);
+    }
+
     public void npcTalk(int npcid, String message) {
-        c.sendPacket(PacketCreator.getNPCTalk(npcid, (byte) 0, message, "00 00", (byte) 0));
+        pendingNpcTalkMessages.put(c.getPlayer().getId(), message);
+        NPCScriptManager.getInstance().dispose(c);
+        NPCScriptManager.getInstance().start(c, npcid, "dressingroom", null);
     }
 
     public long getCurrentTime() {
