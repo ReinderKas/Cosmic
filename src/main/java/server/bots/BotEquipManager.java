@@ -502,7 +502,13 @@ class BotEquipManager {
         } else {
             main = str; sec = dex;
         }
-        return (int) Math.ceil((wtype.getMaxDamageMultiplier() * main + sec) / 100.0 * watk);
+        int dmg = (int) Math.ceil((wtype.getMaxDamageMultiplier() * main + sec) / 100.0 * watk);
+        // Bias by attack speed: lower number = faster; ±10% per level vs baseline 6 (normal).
+        if (candidate != null && ItemConstants.isWeapon(candidate.getItemId())) {
+            int spd = ii.getWeaponAttackSpeed(candidate.getItemId());
+            dmg = (int) Math.round(dmg * (1.0 + (6 - spd) * 0.10));
+        }
+        return dmg;
     }
 
     private static int dmgScore(Character bot, ItemInformationProvider ii, WeaponType wt,

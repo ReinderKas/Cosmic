@@ -1653,6 +1653,12 @@ public class ItemInformationProvider {
         return consume;
     }
 
+    public int getWeaponAttackSpeed(int itemId) {
+        Data data = getItemData(itemId);
+        if (data == null) return 6;
+        return DataTool.getIntConvert("info/attackSpeed", data, 6);
+    }
+
     public final boolean isTwoHanded(int itemId) {
         switch (getWeaponType(itemId)) {
             case GENERAL2H_SWING:
