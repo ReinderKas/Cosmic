@@ -6,6 +6,7 @@ import client.inventory.InventoryType;
 import client.inventory.Item;
 import client.inventory.manipulator.InventoryManipulator;
 import constants.game.GameConstants;
+import constants.inventory.ItemConstants;
 import server.ItemInformationProvider;
 import server.Trade;
 import tools.PacketCreator;
@@ -69,6 +70,9 @@ class BotDropManager {
         }
 
         if (!trade.isFullTrade()) {
+            // Only accept on bot's behalf when the owner was the initiator (bot is slot 1).
+            // When bot is slot 0 (bot initiated via "trade me"), wait for owner to accept.
+            if (trade.getNumber() != 1) return;
             Trade.visitTrade(bot, owner);
             trade = bot.getTrade();
             if (trade == null || !trade.isFullTrade()) return;
@@ -79,8 +83,11 @@ class BotDropManager {
         }
 
         if (trade.isPartnerConfirmed()) {
-            completeTradeAndThank(bot, trade);
+            completeTradeAndThank(entry, bot, trade);
             BotEquipManager.autoEquip(bot, owner, null);
+            // Any received equip that autoEquip equipped is now in the EQUIPPED bag — remove
+            // it from ownerGivenItems since it's no longer in the EQUIP bag anyway.
+            entry.ownerGivenItems.removeIf(item -> !hasItem(bot, item));
         }
     }
 
@@ -119,6 +126,10 @@ class BotDropManager {
         if (isMesoCategory(category)) {
             startTradeMesoTransfer(category, entry, bot);
             return;
+        }
+        // Explicit "give equips" request — owner wants everything, including items they gave back.
+        if ("equips".equals(category)) {
+            entry.ownerGivenItems.clear();
         }
 
         Character owner = entry.owner;
@@ -354,7 +365,7 @@ class BotDropManager {
         if (!entry.pendingTradeBotDone) {
             entry.pendingTradeTimerMs += BotMovementManager.cfg.TICK_MS;
             if (trade.isPartnerConfirmed()) {
-                completeTradeAndThank(bot, trade);
+                completeTradeAndThank(entry, bot, trade);
                 entry.pendingTradeBotDone = true;
                 entry.pendingTradeTimerMs = 0;
             } else if (entry.pendingTradeTimerMs > 60_000) { // 60 s timeout
@@ -385,7 +396,16 @@ class BotDropManager {
         entry.pendingTradeSingleBatch = false;
     }
 
-    private static void completeTradeAndThank(Character bot, Trade trade) {
+    private static void completeTradeAndThank(BotEntry entry, Character bot, Trade trade) {
+        // Snapshot equips the owner is giving us before the trade clears their side.
+        // Trade reuses the same item objects, so identity comparison in ownerGivenItems works.
+        if (trade.getPartner() != null) {
+            for (Item item : trade.getPartner().getItems()) {
+                if (ItemConstants.getInventoryType(item.getItemId()) == InventoryType.EQUIP) {
+                    entry.ownerGivenItems.add(item);
+                }
+            }
+        }
         boolean receivedSomething = trade.getPartner() != null && trade.getPartner().hasAnyOffer();
         Trade.completeTrade(bot);
         if (receivedSomething) {
@@ -447,7 +467,8 @@ class BotDropManager {
             case "pots"    -> collectFromBag(bot, result, InventoryType.USE,
                     item -> item.getItemId() >= 2000000 && item.getItemId() < 2023000);
             case "use"     -> collectFromBag(bot, result, InventoryType.USE, item -> true);
-            case "equips"  -> collectFromBag(bot, result, InventoryType.EQUIP, item -> true);
+            case "equips"  -> collectFromBag(bot, result, InventoryType.EQUIP,
+                    item -> !entry.ownerGivenItems.contains(item));
             case "etc"     -> collectFromBag(bot, result, InventoryType.ETC,   item -> true);
             default -> {
                 if (category.startsWith("name:")) {

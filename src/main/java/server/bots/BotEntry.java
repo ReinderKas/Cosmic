@@ -9,9 +9,12 @@ import server.maps.Rope;
 import java.awt.*;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -134,6 +137,10 @@ public class BotEntry {
 
     // Party-quest state (one slot per PQ type; null = not in that PQ)
     public server.bots.pq.BotKpqState kpq = new server.bots.pq.BotKpqState();
+
+    // Equips received from the owner in a trade — excluded from automatic re-offer batches.
+    // Cleared when owner explicitly requests all equips back.
+    Set<Item> ownerGivenItems = Collections.newSetFromMap(new IdentityHashMap<>());
 
     // Last reason an edge execution was blocked (for debug logs)
     String lastEdgeBlockReason = null;
