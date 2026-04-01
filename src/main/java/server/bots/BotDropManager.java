@@ -80,6 +80,7 @@ class BotDropManager {
 
         if (trade.isPartnerConfirmed()) {
             completeTradeAndThank(bot, trade);
+            BotEquipManager.autoEquip(bot, owner, null);
         }
     }
 

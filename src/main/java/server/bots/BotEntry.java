@@ -143,6 +143,8 @@ public class BotEntry {
     boolean navPreciseTarget = false;
     boolean debugPromptSent = false;
     long nextGearSuggestionAt = 0L;
+    long nextUpgradeRequestAt = 0L;
+    boolean pendingLootOfferBotRequesting = false; // true = bot asked for owner's item
 
     // Path logging (debug)
     BotPathLogger pathLogger = null;

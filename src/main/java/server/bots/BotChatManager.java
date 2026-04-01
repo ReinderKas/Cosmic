@@ -940,6 +940,46 @@ public class BotChatManager {
         entry.nextGearSuggestionAt = now + 60_000L;
     }
 
+    static void tickIdleUpgradeRequest(BotEntry entry, Character bot) {
+        Character owner = entry.owner;
+        long now = System.currentTimeMillis();
+        if (owner == null
+                || now < entry.nextUpgradeRequestAt
+                || entry.pendingAction != null
+                || entry.pendingTradeCategory != null) {
+            return;
+        }
+
+        List<BotEquipManager.EquipRecommendation> recs = BotEquipManager.findRecommendedEquips(bot, owner);
+        if (recs.isEmpty()) {
+            entry.nextUpgradeRequestAt = now + 5 * 60_000L;
+            return;
+        }
+
+        requestUpgradeFromOwner(entry, bot, owner, recs.get(0).candidate());
+    }
+
+    private static void requestUpgradeFromOwner(BotEntry entry, Character bot, Character owner, Item ownerItem) {
+        ItemInformationProvider ii = ItemInformationProvider.getInstance();
+        String itemName = ii.getName(ownerItem.getItemId());
+        if (itemName == null || itemName.isBlank()) itemName = String.valueOf(ownerItem.getItemId());
+
+        entry.pendingAction = RECOMMENDED_TRADE_ACTION;
+        entry.pendingDropCategory = null;
+        entry.pendingLootOfferItem = ownerItem;
+        entry.pendingLootOfferRecipientId = owner.getId();
+        entry.pendingLootOfferExpiresAt = System.currentTimeMillis() + 45_000L;
+        entry.pendingLootOfferBotRequesting = true;
+        entry.nextUpgradeRequestAt = System.currentTimeMillis() + 10 * 60_000L;
+
+        List<String> prompts = List.of(
+                "hey " + owner.getName() + ", that " + itemName + " would be an upgrade for me, trade it? (yes/no)",
+                owner.getName() + " your " + itemName + " would be better on me! trade it over? (yes/no)",
+                "I could use that " + itemName + " of yours " + owner.getName() + ", mind trading? (yes/no)",
+                owner.getName() + " that " + itemName + " is an upgrade for me, want to trade? (yes/no)");
+        queueBotSay(entry, BotManager.randomReply(prompts));
+    }
+
     private static void offerGearItem(BotEntry entry, Character bot, Character owner, Item item) {
         if (entry.pendingAction != null || entry.pendingTradeCategory != null
                 || !BotDropManager.hasItem(bot, item)) {
@@ -974,10 +1014,17 @@ public class BotChatManager {
         }
 
         if (LOGOUT_CONFIRM_PATTERN.matcher(message).find()) {
-            Item item = entry.pendingLootOfferItem;
-            clearPendingLootOffer(entry);
-            TimerManager.getInstance().schedule(
-                    () -> BotDropManager.startTradeTransfer(item, speaker, entry, entry.bot), 500);
+            if (entry.pendingLootOfferBotRequesting) {
+                clearPendingLootOffer(entry);
+                TimerManager.getInstance().schedule(
+                        () -> BotManager.getInstance().botSay(entry.bot,
+                                "ok! open a trade with me and drop it in"), 500);
+            } else {
+                Item item = entry.pendingLootOfferItem;
+                clearPendingLootOffer(entry);
+                TimerManager.getInstance().schedule(
+                        () -> BotDropManager.startTradeTransfer(item, speaker, entry, entry.bot), 500);
+            }
             return true;
         }
         if (NEGATIVE_CONFIRM_PATTERN.matcher(message).find()) {
@@ -1081,6 +1128,7 @@ public class BotChatManager {
         entry.pendingLootOfferItem = null;
         entry.pendingLootOfferRecipientId = 0;
         entry.pendingLootOfferExpiresAt = 0L;
+        entry.pendingLootOfferBotRequesting = false;
     }
 
     private static void handleSkillTreeChoice(BotEntry entry, Character bot, String message) {

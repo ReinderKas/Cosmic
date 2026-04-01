@@ -736,6 +736,9 @@ public class BotManager {
                     BotMovementManager.broadcastMovement(entry);
                 }
             }
+            if (runAiTick) {
+                BotChatManager.tickIdleUpgradeRequest(entry, bot);
+            }
             return;
         }
 
