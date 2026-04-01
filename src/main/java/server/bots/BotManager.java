@@ -721,6 +721,9 @@ public class BotManager {
             BotCombatManager.tickBuffs(entry, bot);
             BotCombatManager.tickSupportHealing(entry, bot);
         }
+        if (runAiTick) {
+            BotChatManager.tickIdleUpgradeRequest(entry, bot);
+        }
         if (tickActionLocked(entry)) {
             return;
         }
@@ -736,9 +739,6 @@ public class BotManager {
                     BotPhysicsEngine.idleOnGround(entry, bot);
                     BotMovementManager.broadcastMovement(entry);
                 }
-            }
-            if (runAiTick) {
-                BotChatManager.tickIdleUpgradeRequest(entry, bot);
             }
             return;
         }

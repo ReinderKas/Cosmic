@@ -54,7 +54,9 @@ final class BotPathLogger {
                 botRegionId,
                 physState(entry),
                 navEdgeSummary(entry),
-                entry.lastNavDecision,
+                entry.lastEdgeBlockReason != null
+                        ? entry.lastNavDecision + "[" + entry.lastEdgeBlockReason + "]"
+                        : entry.lastNavDecision,
                 navTargetSummary(entry),
                 consumedTick,
                 computeStuck(botPos.x, botPos.y)
@@ -123,7 +125,11 @@ final class BotPathLogger {
         sb.append("Nav edge:   ").append(navEdgeSummary(entry)).append("\n");
         sb.append("Nav target: ").append(navTargetSummary(entry))
                 .append("  targetRegion=").append(entry.navTargetRegionId).append("\n");
-        sb.append("Last nav decision: ").append(entry.lastNavDecision).append("\n");
+        sb.append("Last nav decision: ").append(entry.lastNavDecision);
+        if (entry.lastEdgeBlockReason != null) {
+            sb.append("  [blocked: ").append(entry.lastEdgeBlockReason).append("]");
+        }
+        sb.append("\n");
         sb.append("Cooldowns:  jumpMs=").append(entry.jumpCooldownMs)
                 .append("  ropeGrabMs=").append(entry.ropeGrabCooldownMs).append("\n");
         sb.append("Mode:       ").append(entry.following ? "follow" : entry.grinding ? "grind" : "idle").append("\n");

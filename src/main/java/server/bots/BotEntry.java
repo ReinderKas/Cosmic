@@ -135,6 +135,9 @@ public class BotEntry {
     // Party-quest state (one slot per PQ type; null = not in that PQ)
     public server.bots.pq.BotKpqState kpq = new server.bots.pq.BotKpqState();
 
+    // Last reason an edge execution was blocked (for debug logs)
+    String lastEdgeBlockReason = null;
+
     // Cached movement state shared across ticks
     int lastDesiredDirection = 0;
     Point navTargetPos = null;

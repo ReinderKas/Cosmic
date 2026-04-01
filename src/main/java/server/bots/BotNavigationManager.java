@@ -168,9 +168,11 @@ final class BotNavigationManager {
                     }
                 }
             }
+            entry.lastEdgeBlockReason = "jump-pos";
             return null;
         }
 
+        entry.lastEdgeBlockReason = null;
         entry.navPreciseTarget = false;
         entry.navTargetPos = new Point(edge.endPoint);
         entry.jumpCooldownMs = BotMovementManager.delayAfterCurrentTick(BotMovementManager.cfg.JUMP_COOLDOWN_MS);
@@ -233,21 +235,25 @@ final class BotNavigationManager {
             return null;
         }
         if (!canExecuteClimbEntryFromCurrentPosition(bot.getMap(), botPos, edge, rope)) {
+            entry.lastEdgeBlockReason = "climb-pos";
             return null;
         }
 
         if (canGrabRopeAtCurrentPosition(botPos, rope)
                 || canGrabRopeFromTopPlatform(edge, botPos, rope)) {
+            entry.lastEdgeBlockReason = null;
             startClimbing(entry, bot, rope, edge.endPoint.y);
             return new NavigationDirective(rawTargetPos, true);
         }
 
         if (entry.jumpCooldownMs == 0 && BotMovementManager.canReachRopeFromGround(bot.getMap(), botPos, rope)) {
+            entry.lastEdgeBlockReason = null;
             entry.jumpCooldownMs = BotMovementManager.delayAfterCurrentTick(BotMovementManager.cfg.JUMP_COOLDOWN_MS);
             BotMovementManager.initiateRopeJump(entry, bot, rope.x() - botPos.x);
             return new NavigationDirective(rawTargetPos, true);
         }
 
+        entry.lastEdgeBlockReason = "climb-reach";
         return null;
     }
 
@@ -539,12 +545,27 @@ final class BotNavigationManager {
         }
 
         BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateJumpLanding(map, botPos, edge.launchStepX);
-        if (landing == null) {
-            return false;
+        if (landing != null) {
+            int landingRegionId = graph.regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1);
+            if (landingRegionId == edge.toRegionId) {
+                return true;
+            }
         }
 
-        int landingRegionId = graph.regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1);
-        return landingRegionId == edge.toRegionId;
+        // Fallback: if the bot stopped slightly off the anchor (within isReadyForEdge JUMP tolerance),
+        // try simulating from the edge's recorded start point instead. This avoids a 1-4px positional
+        // drift causing the simulated landing to miss the target foothold.
+        int dx = Math.abs(botPos.x - edge.startPoint.x);
+        int dy = Math.abs(botPos.y - edge.startPoint.y);
+        if (dx <= 10 && dy <= BotMovementManager.cfg.JUMP_Y_THRESH) {
+            BotPhysicsEngine.JumpLanding anchorLanding = BotPhysicsEngine.simulateJumpLanding(map, edge.startPoint, edge.launchStepX);
+            if (anchorLanding != null) {
+                int regionId = graph.regionIdByFootholdId.getOrDefault(anchorLanding.foothold().getId(), -1);
+                return regionId == edge.toRegionId;
+            }
+        }
+
+        return false;
     }
 
     private static int intraRegionTravelCost(Point from, Point to) {

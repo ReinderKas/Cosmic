@@ -973,7 +973,8 @@ public class BotChatManager {
         entry.nextUpgradeRequestAt = System.currentTimeMillis() + 10 * 60_000L;
 
         List<String> prompts = List.of(
-                "hey " + owner.getName() + ", that " + itemName + " would be an upgrade for me, can i have it pls?",
+                "hey, that " + itemName + " would be an upgrade for me, can i have it pls?",
+                "Can I have your " + itemName + "?",
                 "Your " + itemName + " would be better on me! trade it over?",
                 "I could use that " + itemName + " of yours ;)",
                 "that " + itemName + " is an upgrade for me, want to trade?");
