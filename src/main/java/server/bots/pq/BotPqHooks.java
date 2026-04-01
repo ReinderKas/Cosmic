@@ -22,11 +22,14 @@ public final class BotPqHooks {
         return BotKpqStage1.isNpcLocked(entry);
     }
 
-    /**
-     * Returns true if the bot is in a PQ map that requires grind mode to be active.
-     */
+    /** Returns true if the bot is in a PQ map that requires grind mode (KPQ stage 1). */
     public static boolean requiresGrind(BotEntry entry, Character bot) {
+        return bot.getMapId() == BotKpqStage1.KPQ_STAGE1_MAP;
+    }
+
+    /** Returns true if the bot is in a PQ map that should default to follow mode (KPQ stages 2-5). */
+    public static boolean requiresFollow(BotEntry entry, Character bot) {
         int mapId = bot.getMapId();
-        return mapId >= BotKpqStage1.KPQ_MAP_MIN && mapId <= BotKpqStage1.KPQ_MAP_MAX;
+        return mapId >= 103000801 && mapId <= 103000805;
     }
 }

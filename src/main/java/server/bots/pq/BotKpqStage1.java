@@ -20,8 +20,7 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 final class BotKpqStage1 {
 
-    static final int KPQ_MAP_MIN  = 103000800;
-    static final int KPQ_MAP_MAX  = 103000805;
+    static final int KPQ_STAGE1_MAP = 103000800;
     private static final int NPC_CLOTO    = 9020001;
     private static final int ITEM_COUPON  = 4001007;
     private static final int ITEM_PASS    = 4001008;
@@ -55,7 +54,7 @@ final class BotKpqStage1 {
 
     static void tick(BotEntry entry, Character bot, Character owner) {
         int mapId = bot.getMapId();
-        if (mapId < KPQ_MAP_MIN || mapId > KPQ_MAP_MAX) {
+        if (mapId != KPQ_STAGE1_MAP) {
             if (entry.kpq.state != IDLE) reset(entry);
             return;
         }

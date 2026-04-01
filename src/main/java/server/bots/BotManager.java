@@ -723,6 +723,7 @@ public class BotManager {
         BotDropManager.tickManualTrade(entry, bot);
         BotPqHooks.tick(entry, bot, owner);
         if (BotPqHooks.requiresGrind(entry, bot) && !entry.grinding) entry.grinding = true;
+        if (BotPqHooks.requiresFollow(entry, bot) && !entry.following) { entry.following = true; entry.grinding = false; }
         if (BotPqHooks.isNpcLocked(entry)) return;
         BotCombatManager.tickActionLock(entry);
         if (runAiTick) {
