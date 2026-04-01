@@ -1,7 +1,9 @@
 package server.bots.pq;
 
 import client.Character;
+import client.inventory.Inventory;
 import client.inventory.InventoryType;
+import client.inventory.Item;
 import client.inventory.manipulator.InventoryManipulator;
 import scripting.event.EventInstanceManager;
 import server.bots.BotChatManager;
@@ -23,8 +25,17 @@ final class BotKpqStage1 {
     private static final int ITEM_COUPON  = 4001007;
     private static final int ITEM_PASS    = 4001008;
 
-    // Question index (1-7) → required coupon count; index 0 unused
-    private static final int[] ANSWERS = {0, 10, 35, 20, 25, 25, 30, 8};
+    // Question index (1-9) → required coupon count; index 0 unused.
+    //What Level do you need to become a Magician? (8)
+    //What Level do you need to become a Bowman? (10)
+    //What Level do you need to become a Thief? (10)
+    //What Level do you need to become a Warrior? (10)
+    //How much EXP is required from lvl 1 to lvl 2? (15)
+    //How much INT is required to become a Magician? (20)
+    //How much DEX is required to become a Thief? (25)
+    //How much DEX is required to become a Bowman? (25)
+    //How much STR is required to become a Warrior? (35)
+    private static final int[] ANSWERS = {0, 8, 10, 10, 10, 15, 20, 25, 25, 35};
 
     static final int IDLE         = 0;
     static final int FIRST_WALK   = 1;  // walking to Cloto for assignment
@@ -38,8 +49,6 @@ final class BotKpqStage1 {
     private static final int NEAR_NPC_PX    = 80;
     private static final int NEAR_OWNER_PX  = 80;
     private static final long WAIT_MS       = 1800;
-    private static final int CHAT_TICKS_MIN = 25;
-    private static final int CHAT_TICKS_VAR = 15;
 
     // ── entry point ─────────────────────────────────────────────────────────
 
@@ -97,7 +106,11 @@ final class BotKpqStage1 {
         }
         int target = (question < ANSWERS.length) ? ANSWERS[question] : ANSWERS[1];
         entry.kpq.couponTarget = target;
-        BotChatManager.queueBotSay(entry, "I need " + target + " coupons. Let's hunt!");
+        if (target >= 25) {
+            BotChatManager.queueBotSay(entry, "I need " + target + ", smh");
+        } else {
+            BotChatManager.queueBotSay(entry, "I need " + target + ", Let's go!");
+        }
         to(entry, GRINDING);
     }
 
@@ -105,19 +118,18 @@ final class BotKpqStage1 {
         int have = bot.getItemQuantity(ITEM_COUPON, false);
         int need = entry.kpq.couponTarget;
 
-        if (entry.kpq.chatCooldown <= 0) {
-            entry.kpq.chatCooldown = CHAT_TICKS_MIN + ThreadLocalRandom.current().nextInt(CHAT_TICKS_VAR);
-            if (have < need) {
-                BotChatManager.queueBotSay(entry, have + " / " + need + " coupons.");
-            }
-        } else {
-            entry.kpq.chatCooldown--;
-        }
-
         if (have >= need) {
-            BotChatManager.queueBotSay(entry, "Got " + need + "! Turning in now.");
+            BotChatManager.queueBotSay(entry, "Got " + need + "!");
             to(entry, SECOND_WALK);
             entry.kpq.navTarget = getNpcPos(bot);
+            return;
+        }
+
+        // Report at every 5-coupon milestone
+        int milestone = (have / 5) * 5;
+        if (milestone > entry.kpq.lastReportedCoupons) {
+            entry.kpq.lastReportedCoupons = milestone;
+            BotChatManager.queueBotSay(entry, have + " / " + need);
         }
     }
 
@@ -151,9 +163,10 @@ final class BotKpqStage1 {
         entry.kpq.navTarget = ownerPos;
         if (near(bot, ownerPos, NEAR_OWNER_PX)) {
             entry.kpq.navTarget = null;
-            if (bot.getItemQuantity(ITEM_PASS, false) > 0) {
-                InventoryManipulator.removeById(bot.getClient(), InventoryType.ETC, ITEM_PASS, 1, false, false);
-                InventoryManipulator.addById(owner.getClient(), ITEM_PASS, (short) 1);
+            Inventory etc = bot.getInventory(InventoryType.ETC);
+            Item pass = etc.findById(ITEM_PASS);
+            if (pass != null) {
+                InventoryManipulator.drop(bot.getClient(), InventoryType.ETC, pass.getPosition(), (short) 1);
             }
             BotChatManager.queueBotSay(entry, "Here's your pass!");
             to(entry, DONE);
@@ -164,15 +177,15 @@ final class BotKpqStage1 {
 
     private static void to(BotEntry entry, int newState) {
         entry.kpq.state = newState;
-        entry.kpq.chatCooldown = 0;
+        entry.kpq.lastReportedCoupons = 0;
     }
 
     private static void reset(BotEntry entry) {
-        entry.kpq.state        = IDLE;
-        entry.kpq.couponTarget = -1;
-        entry.kpq.waitUntilMs  = 0;
-        entry.kpq.chatCooldown = 0;
-        entry.kpq.navTarget    = null;
+        entry.kpq.state               = IDLE;
+        entry.kpq.couponTarget        = -1;
+        entry.kpq.waitUntilMs         = 0;
+        entry.kpq.lastReportedCoupons = 0;
+        entry.kpq.navTarget           = null;
     }
 
     private static Point getNpcPos(Character bot) {

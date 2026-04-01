@@ -1074,6 +1074,7 @@ public class BotManager {
                 continue;
             }
             if (!drop.canBePickedBy(bot)) continue;
+            if (drop.getItemId() == 4001008) continue; // KPQ pass — only the party leader should pick this up
             if (System.currentTimeMillis() - drop.getDropTime() < 3000) continue; // wait 3s after spawn
             Point dp = drop.getPosition();
             if (Math.abs(dp.x - botPos.x) > cfg.LOOT_RADIUS
