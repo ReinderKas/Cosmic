@@ -9,6 +9,7 @@ import scripting.event.EventInstanceManager;
 import server.bots.BotChatManager;
 import server.bots.BotEntry;
 import server.life.NPC;
+import server.maps.MapItem;
 
 import java.awt.*;
 import java.util.concurrent.ThreadLocalRandom;
@@ -19,8 +20,8 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 final class BotKpqStage1 {
 
-    private static final int KPQ_MAP_MIN  = 103000800;
-    private static final int KPQ_MAP_MAX  = 103000805;
+    static final int KPQ_MAP_MIN  = 103000800;
+    static final int KPQ_MAP_MAX  = 103000805;
     private static final int NPC_CLOTO    = 9020001;
     private static final int ITEM_COUPON  = 4001007;
     private static final int ITEM_PASS    = 4001008;
@@ -58,7 +59,6 @@ final class BotKpqStage1 {
             if (entry.kpq.state != IDLE) reset(entry);
             return;
         }
-
         switch (entry.kpq.state) {
             case IDLE        -> tickIdle(entry, bot);
             case FIRST_WALK  -> tickFirstWalk(entry, bot);
@@ -77,11 +77,8 @@ final class BotKpqStage1 {
     // ── state ticks ─────────────────────────────────────────────────────────
 
     private static void tickIdle(BotEntry entry, Character bot) {
-        // Trigger when bot picks up the first coupon
-        if (bot.getItemQuantity(ITEM_COUPON, false) > 0) {
-            to(entry, FIRST_WALK);
-            entry.kpq.navTarget = getNpcPos(bot);
-        }
+        to(entry, FIRST_WALK);
+        entry.kpq.navTarget = getNpcPos(bot);
     }
 
     private static void tickFirstWalk(BotEntry entry, Character bot) {
@@ -114,9 +111,22 @@ final class BotKpqStage1 {
         to(entry, GRINDING);
     }
 
+    private static final int COUPON_SEEK_RANGE = 600;
+
     private static void tickGrinding(BotEntry entry, Character bot) {
         int have = bot.getItemQuantity(ITEM_COUPON, false);
         int need = entry.kpq.couponTarget;
+
+        // Drop excess coupons so teammates can use them.
+        if (have > need) {
+            int excess = have - need;
+            Inventory etc = bot.getInventory(InventoryType.ETC);
+            Item coupon = etc.findById(ITEM_COUPON);
+            if (coupon != null) {
+                InventoryManipulator.drop(bot.getClient(), InventoryType.ETC, coupon.getPosition(), (short) excess);
+            }
+            have = need;
+        }
 
         if (have >= need) {
             BotChatManager.queueBotSay(entry, "Got " + need + "!");
@@ -125,12 +135,31 @@ final class BotKpqStage1 {
             return;
         }
 
+        // Seek coupon drops on the ground if any are nearby.
+        MapItem groundCoupon = findNearestDrop(bot, ITEM_COUPON, COUPON_SEEK_RANGE);
+        entry.kpq.navTarget = (groundCoupon != null) ? groundCoupon.getPosition() : null;
+
         // Report at every 5-coupon milestone
         int milestone = (have / 5) * 5;
         if (milestone > entry.kpq.lastReportedCoupons) {
             entry.kpq.lastReportedCoupons = milestone;
             BotChatManager.queueBotSay(entry, have + " / " + need);
         }
+    }
+
+    private static MapItem findNearestDrop(Character bot, int itemId, int range) {
+        Point pos = bot.getPosition();
+        MapItem nearest = null;
+        double bestDist = Double.MAX_VALUE;
+        for (MapItem drop : bot.getMap().getDroppedItems()) {
+            if (drop.getItemId() != itemId || drop.isPickedUp()) continue;
+            if (!drop.canBePickedBy(bot)) continue;
+            Point dp = drop.getPosition();
+            if (Math.abs(dp.x - pos.x) > range || Math.abs(dp.y - pos.y) > range) continue;
+            double dist = pos.distanceSq(dp);
+            if (dist < bestDist) { bestDist = dist; nearest = drop; }
+        }
+        return nearest;
     }
 
     private static void tickSecondWalk(BotEntry entry, Character bot) {

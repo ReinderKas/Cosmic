@@ -722,6 +722,7 @@ public class BotManager {
         BotDropManager.tickTrade(entry, bot);
         BotDropManager.tickManualTrade(entry, bot);
         BotPqHooks.tick(entry, bot, owner);
+        if (BotPqHooks.requiresGrind(entry, bot) && !entry.grinding) entry.grinding = true;
         if (BotPqHooks.isNpcLocked(entry)) return;
         BotCombatManager.tickActionLock(entry);
         if (runAiTick) {
@@ -1075,6 +1076,8 @@ public class BotManager {
             }
             if (!drop.canBePickedBy(bot)) continue;
             if (drop.getItemId() == 4001008) continue; // KPQ pass — only the party leader should pick this up
+            if (drop.getItemId() == 4001007 && entry.kpq.couponTarget > 0
+                    && bot.getItemQuantity(4001007, false) >= entry.kpq.couponTarget) continue; // already have enough coupons
             if (System.currentTimeMillis() - drop.getDropTime() < 3000) continue; // wait 3s after spawn
             Point dp = drop.getPosition();
             if (Math.abs(dp.x - botPos.x) > cfg.LOOT_RADIUS

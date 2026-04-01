@@ -21,4 +21,12 @@ public final class BotPqHooks {
     public static boolean isNpcLocked(BotEntry entry) {
         return BotKpqStage1.isNpcLocked(entry);
     }
+
+    /**
+     * Returns true if the bot is in a PQ map that requires grind mode to be active.
+     */
+    public static boolean requiresGrind(BotEntry entry, Character bot) {
+        int mapId = bot.getMapId();
+        return mapId >= BotKpqStage1.KPQ_MAP_MIN && mapId <= BotKpqStage1.KPQ_MAP_MAX;
+    }
 }
