@@ -172,6 +172,19 @@ final class BotNavigationManager {
             return null;
         }
 
+        // Pre-launch wall check: mirrors tickAirborne's wall detection.
+        // If the first horizontal step is immediately blocked, the bot would bounce
+        // vertically in place forever — don't fire, let it walk to the actual start point.
+        if (edge.launchStepX != 0) {
+            int nextX = botPos.x + edge.launchStepX;
+            Point wallFrom = new Point(Math.min(botPos.x, nextX), botPos.y);
+            Point wallTo   = new Point(Math.max(botPos.x, nextX), botPos.y);
+            if (wallFrom.x < wallTo.x && bot.getMap().getFootholds().findWall(wallFrom, wallTo) != null) {
+                entry.lastEdgeBlockReason = "jump-wall";
+                return null;
+            }
+        }
+
         entry.lastEdgeBlockReason = null;
         entry.navPreciseTarget = false;
         entry.navTargetPos = new Point(edge.endPoint);
