@@ -85,18 +85,43 @@ class BotEquipManager {
             bySlot.computeIfAbsent(key, k -> new ArrayList<>());
         }
 
-        // Sort slots: weapon (-11) first so damage scoring reflects the new weapon
+        // Sort slots: weapon (-11) first so damage scoring reflects the new weapon;
+        // overall/top (-5) before pants (-6) so overall blocks pants correctly.
         List<Short> nonRingSlots = bySlot.keySet().stream()
                 .filter(s -> !isRingSlot(s))
-                .sorted((a, b) -> a == -11 ? -1 : b == -11 ? 1 : Short.compare(a, b))
+                .sorted((a, b) -> {
+                    if (a == -11) return -1; if (b == -11) return 1;
+                    if (a == -5)  return -1; if (b == -5)  return 1;
+                    return Short.compare(a, b);
+                })
                 .collect(Collectors.toList());
 
+        boolean overallEquipped = isOverall(eqdInv.getItem((short) -5), ii);
         for (short slot : nonRingSlots) {
+            // Skip shield if a 2H weapon is active — would unequip the weapon causing a loop.
+            Item wSlot = eqdInv.getItem((short) -11);
+            if (slot == (short) -10 && wSlot != null && ii.isTwoHanded(wSlot.getItemId())) continue;
+            // Skip pants if an overall occupies the top+bottom slot.
+            if (slot == (short) -6 && overallEquipped) continue;
+
             Equip current = (Equip) eqdInv.getItem(slot);
             Equip best = findBest(bot, ii, weaponType, current, bySlot.get(slot));
+            // 2H weapon displaces shield — only upgrade if 2H beats current weapon+shield combined.
+            if (slot == (short) -11 && best != null && best != current && ii.isTwoHanded(best.getItemId())) {
+                Equip shield = (Equip) eqdInv.getItem((short) -10);
+                if (compareScores(scoreEquipWithLoss(bot, ii, weaponType, current, best, shield),
+                                  scoreEquip(bot, ii, weaponType, current, current)) <= 0) best = current;
+            }
+            // Overall displaces pants — only upgrade if overall beats current top+pants combined.
+            if (slot == (short) -5 && best != null && best != current && isOverall(best, ii)) {
+                Equip pants = (Equip) eqdInv.getItem((short) -6);
+                if (compareScores(scoreEquipWithLoss(bot, ii, weaponType, current, best, pants),
+                                  scoreEquip(bot, ii, weaponType, current, current)) <= 0) best = current;
+            }
             if (best != null && best != current) {
                 InventoryManipulator.handleItemMove(bot.getClient(), InventoryType.EQUIP, best.getPosition(), slot, (short) 1);
                 if (slot == -11) weaponType = currentWeaponType(bot, ii);
+                if (slot == -5)  overallEquipped = isOverall(eqdInv.getItem((short) -5), ii);
             }
         }
 
@@ -139,13 +164,32 @@ class BotEquipManager {
 
         List<Short> nonRingSlots = bySlot.keySet().stream()
                 .filter(slot -> !isRingSlot(slot))
-                .sorted((a, b) -> a == -11 ? -1 : b == -11 ? 1 : Short.compare(a, b))
+                .sorted((a, b) -> {
+                    if (a == -11) return -1; if (b == -11) return 1;
+                    if (a == -5)  return -1; if (b == -5)  return 1;
+                    return Short.compare(a, b);
+                })
                 .collect(Collectors.toList());
+        boolean overallRec = isOverall(receiverEquippedInv.getItem((short) -5), ii);
         for (short slot : nonRingSlots) {
+            if (slot == (short) -6 && overallRec) continue;
             Equip current = (Equip) receiverEquippedInv.getItem(slot);
             Equip best = findBest(receiver, ii, weaponType, current, bySlot.get(slot));
+            // 2H weapon displaces shield — only recommend if 2H beats current weapon+shield combined.
+            if (slot == (short) -11 && best != null && best != current && ii.isTwoHanded(best.getItemId())) {
+                Equip shield = (Equip) receiverEquippedInv.getItem((short) -10);
+                if (compareScores(scoreEquipWithLoss(receiver, ii, weaponType, current, best, shield),
+                                  scoreEquip(receiver, ii, weaponType, current, current)) <= 0) best = current;
+            }
+            // Overall displaces pants — only recommend if overall beats current top+pants combined.
+            if (slot == (short) -5 && best != null && best != current && isOverall(best, ii)) {
+                Equip pants = (Equip) receiverEquippedInv.getItem((short) -6);
+                if (compareScores(scoreEquipWithLoss(receiver, ii, weaponType, current, best, pants),
+                                  scoreEquip(receiver, ii, weaponType, current, current)) <= 0) best = current;
+            }
             if (best != null && best != current && isBetterThanCurrent(receiver, ii, weaponType, current, best)) {
                 recommendations.add(new EquipRecommendation(slot, current, best));
+                if (slot == (short) -5) overallRec = isOverall(best, ii);
             }
         }
 
@@ -397,7 +441,12 @@ class BotEquipManager {
 
     private static EquipScore scoreEquip(Character bot, ItemInformationProvider ii, WeaponType wt,
                                          Equip replacing, Equip candidate) {
-        return new EquipScore(dmgScore(bot, ii, wt, replacing, candidate), defScore(candidate), statSum(candidate));
+        return scoreEquipWithLoss(bot, ii, wt, replacing, candidate, null);
+    }
+
+    private static EquipScore scoreEquipWithLoss(Character bot, ItemInformationProvider ii, WeaponType wt,
+                                                  Equip replacing, Equip candidate, Equip loss) {
+        return new EquipScore(dmgScore(bot, ii, wt, replacing, candidate, loss), defScore(candidate), statSum(candidate));
     }
 
     private static int compareScores(EquipScore left, EquipScore right) {
@@ -415,15 +464,16 @@ class BotEquipManager {
     }
 
     /**
-     * Simulates max damage if we replace {@code replacing} (currently equipped in its slot)
-     * with {@code candidate}. Null means the slot is empty.
+     * Simulates max damage replacing {@code replacing} with {@code candidate},
+     * and simultaneously removing {@code loss} (e.g. pants when equipping an overall,
+     * or shield when equipping a 2H weapon). {@code loss} may be null.
      */
     private static int dmgScore(Character bot, ItemInformationProvider ii, WeaponType wt,
-                                  Equip replacing, Equip candidate) {
-        int str  = bot.getTotalStr()  + delta(candidate, replacing, e -> e.getStr());
-        int dex  = bot.getTotalDex()  + delta(candidate, replacing, e -> e.getDex());
-        int luk  = bot.getTotalLuk()  + delta(candidate, replacing, e -> e.getLuk());
-        int watk = bot.getTotalWatk() + delta(candidate, replacing, e -> e.getWatk());
+                                  Equip replacing, Equip candidate, Equip loss) {
+        int str  = bot.getTotalStr()  + delta(candidate, replacing, e -> e.getStr())  - (loss != null ? loss.getStr()  : 0);
+        int dex  = bot.getTotalDex()  + delta(candidate, replacing, e -> e.getDex())  - (loss != null ? loss.getDex()  : 0);
+        int luk  = bot.getTotalLuk()  + delta(candidate, replacing, e -> e.getLuk())  - (loss != null ? loss.getLuk()  : 0);
+        int watk = bot.getTotalWatk() + delta(candidate, replacing, e -> e.getWatk()) - (loss != null ? loss.getWatk() : 0);
 
         WeaponType wtype = wt;
         if (candidate != null && ItemConstants.isWeapon(candidate.getItemId())) {
@@ -444,6 +494,11 @@ class BotEquipManager {
             main = str; sec = dex;
         }
         return (int) Math.ceil((wtype.getMaxDamageMultiplier() * main + sec) / 100.0 * watk);
+    }
+
+    private static int dmgScore(Character bot, ItemInformationProvider ii, WeaponType wt,
+                                  Equip replacing, Equip candidate) {
+        return dmgScore(bot, ii, wt, replacing, candidate, null);
     }
 
     private static int delta(Equip candidate, Equip replacing, ToIntFunction<Equip> getter) {
@@ -486,6 +541,11 @@ class BotEquipManager {
             case -21 -> "belt";
             default -> "slot " + slot;
         };
+    }
+
+    private static boolean isOverall(Item item, ItemInformationProvider ii) {
+        if (item == null) return false;
+        return "MaPn".equals(ii.getEquipmentSlot(item.getItemId()));
     }
 
     private static WeaponType currentWeaponType(Character bot, ItemInformationProvider ii) {
