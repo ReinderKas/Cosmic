@@ -170,8 +170,11 @@ class BotEquipManager {
                     return Short.compare(a, b);
                 })
                 .collect(Collectors.toList());
+        Item receiverWeapon = receiverEquippedInv.getItem((short) -11);
+        boolean receiverHas2H = receiverWeapon != null && ii.isTwoHanded(receiverWeapon.getItemId());
         boolean overallRec = isOverall(receiverEquippedInv.getItem((short) -5), ii);
         for (short slot : nonRingSlots) {
+            if (slot == (short) -10 && receiverHas2H) continue;
             if (slot == (short) -6 && overallRec) continue;
             Equip current = (Equip) receiverEquippedInv.getItem(slot);
             Equip best = findBest(receiver, ii, weaponType, current, bySlot.get(slot));
@@ -235,6 +238,12 @@ class BotEquipManager {
 
         if (!ii.canWearEquipment(receiver, candidate, primarySlot)) {
             return null;
+        }
+
+        // Shield is unusable with a 2H weapon.
+        if (primarySlot == (short) -10) {
+            Item weapon = receiverEquippedInv.getItem((short) -11);
+            if (weapon != null && ii.isTwoHanded(weapon.getItemId())) return null;
         }
 
         Equip current = (Equip) receiverEquippedInv.getItem(primarySlot);
