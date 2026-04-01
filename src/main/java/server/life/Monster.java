@@ -1743,6 +1743,14 @@ public class Monster extends AbstractLoadedLife {
         return stats.getAvoidability();
     }
 
+    public int getWdef() {
+        return stats.getPDDamage();
+    }
+
+    public int getMdef() {
+        return stats.getMDDamage();
+    }
+
     public Map<MonsterStatus, MonsterStatusEffect> getStati() {
         statiLock.lock();
         try {

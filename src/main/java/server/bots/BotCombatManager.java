@@ -459,10 +459,11 @@ class BotCombatManager {
         attack.magic = attackPlan.route == AttackRoute.MAGIC;
         attack.targets = new HashMap<>();
 
+        boolean isMagic = attackPlan.route == AttackRoute.MAGIC;
         for (Monster target : attackPlan.targets) {
+            int[] adj = applyMonsterDefense(bot, target, minDmg, maxDmg, isMagic);
             attack.targets.put(target.getObjectId(),
-                    makeTarget(bot, target, attackPlan.numDamage, minDmg, maxDmg, attackPlan.hitDelayMs,
-                            attackPlan.route == AttackRoute.MAGIC));
+                    makeTarget(bot, target, attackPlan.numDamage, adj[0], adj[1], attackPlan.hitDelayMs, isMagic));
         }
 
         applyAttackRoute(attackPlan.route, attack, bot);
@@ -1083,6 +1084,25 @@ class BotCombatManager {
 
     private static float toAttackSpeedFactor(int attackSpeed) {
         return 1.7f - (attackSpeed / 10f);
+    }
+
+    /** Applies monster WDEF/MDEF to raw [min, max] damage. Returns {adjMin, adjMax}. */
+    private static int[] applyMonsterDefense(Character bot, Monster target, int minDmg, int maxDmg, boolean magic) {
+        int D = Math.max(0, target.getLevel() - bot.getLevel());
+        double adjMin, adjMax;
+        if (magic) {
+            int mdef = target.getMdef();
+            adjMax = maxDmg - mdef * 0.5 * (1.0 + 0.01 * D);
+            adjMin = minDmg - mdef * 0.6 * (1.0 + 0.01 * D);
+        } else {
+            int wdef = target.getWdef();
+            double factor = 1.0 - 0.01 * D;
+            adjMax = maxDmg * factor - wdef * 0.5;
+            adjMin = minDmg * factor - wdef * 0.6;
+        }
+        int adjMinI = Math.max(1, (int) adjMin);
+        int adjMaxI = Math.max(adjMinI, (int) adjMax);
+        return new int[]{adjMinI, adjMaxI};
     }
 
     private static AbstractDealDamageHandler.AttackTarget makeTarget(Character bot, Monster monster, int hits,
