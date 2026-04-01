@@ -76,6 +76,7 @@ class BotMovementManager {
     static class Config extends BotPhysicsEngine.Config {
         public int STOP_DIST = 30;
         public int FOLLOW_DIST = 80;
+        public int GRIND_EDGE_MARGIN = 40; // keep bot this many px from foothold edge while grinding
 
         public int JUMP_Y_THRESH = 30;
         public int JUMP_COOLDOWN_MS = 1000;
@@ -330,6 +331,17 @@ class BotMovementManager {
             if (entry.downJumpPending) {
                 performDownJump(entry);
                 return;
+            }
+
+            // While grinding, clamp target X away from foothold edges so knockback
+            // doesn't send the bot off the platform (same issue real players face).
+            // Skip when a navEdge is active — the bot intentionally walks to the edge then.
+            if (entry.grinding && entry.navEdge == null) {
+                int safeLeft  = currentFh.getX1() + cfg.GRIND_EDGE_MARGIN;
+                int safeRight = currentFh.getX2() - cfg.GRIND_EDGE_MARGIN;
+                if (safeLeft < safeRight) {
+                    targetPos = new Point(Math.max(safeLeft, Math.min(safeRight, targetPos.x)), targetPos.y);
+                }
             }
 
             MoveAction action = planGroundAction(entry, botPos, targetPos);
