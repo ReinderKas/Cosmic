@@ -27,6 +27,11 @@ public final class BotPqHooks {
         return bot.getMapId() == BotKpqStage1.KPQ_STAGE1_MAP;
     }
 
+    /** True once the bot no longer needs coupons — suppress coupon loot. */
+    public static boolean shouldSkipCouponLoot(BotEntry entry) {
+        return BotKpqStage1.shouldSkipCouponLoot(entry);
+    }
+
     /** Returns true if the bot is in a PQ map that should default to follow mode (KPQ stages 2-5). */
     public static boolean requiresFollow(BotEntry entry, Character bot) {
         int mapId = bot.getMapId();

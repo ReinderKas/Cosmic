@@ -69,6 +69,11 @@ final class BotKpqStage1 {
         }
     }
 
+    /** True once the bot no longer needs coupons (exchange done or delivering). */
+    static boolean shouldSkipCouponLoot(BotEntry entry) {
+        return entry.kpq.state >= SECOND_WALK;
+    }
+
     static boolean isNpcLocked(BotEntry entry) {
         return entry.kpq.state == FIRST_WAIT || entry.kpq.state == SECOND_WAIT;
     }
@@ -192,6 +197,11 @@ final class BotKpqStage1 {
         if (near(bot, ownerPos, NEAR_OWNER_PX)) {
             entry.kpq.navTarget = null;
             Inventory etc = bot.getInventory(InventoryType.ETC);
+            // Drop leftover coupons for teammates before delivering the pass.
+            Item leftover = etc.findById(ITEM_COUPON);
+            if (leftover != null) {
+                InventoryManipulator.drop(bot.getClient(), InventoryType.ETC, leftover.getPosition(), leftover.getQuantity());
+            }
             Item pass = etc.findById(ITEM_PASS);
             if (pass != null) {
                 InventoryManipulator.drop(bot.getClient(), InventoryType.ETC, pass.getPosition(), (short) 1);
