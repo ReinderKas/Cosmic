@@ -1063,7 +1063,11 @@ public class BotManager {
                     && pickedItemId > 0
                     && ItemConstants.getInventoryType(pickedItemId) == InventoryType.EQUIP
                     && BotDropManager.hasItem(bot, pickedItem)) {
-                BotChatManager.scheduleLootOfferPrompt(entry, bot, pickedItem, 5_000L);
+                BotEquipManager.autoEquip(bot, entry.owner, null);
+                if (BotDropManager.hasItem(bot, pickedItem)) {
+                    BotChatManager.scheduleLootOfferPrompt(entry, bot, pickedItem, 5_000L);
+                }
+                // else: item was an upgrade — bot self-equipped it, no offer needed
             }
         }
     }
