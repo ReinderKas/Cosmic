@@ -127,6 +127,7 @@ public class Trade {
         for (Item item : exchangeItems) {
             KarmaManipulator.toggleKarmaFlagToUntradeable(item);
             InventoryManipulator.addFromDrop(chr.getClient(), item, show);
+            server.bots.BotManager.getInstance().notifyOwnerGainedItem(chr, item);
         }
 
         if (exchangeMeso > 0) {

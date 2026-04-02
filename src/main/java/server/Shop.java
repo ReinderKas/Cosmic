@@ -107,6 +107,7 @@ public class Shop {
                         InventoryManipulator.addById(c, itemId, quantity, "", -1);
                         c.getPlayer().gainMeso(-item.getPrice(), false);
                     }
+                    notifyBotIfEquipBought(c, itemId);
                     c.sendPacket(PacketCreator.shopTransaction((byte) 0));
                 } else {
                     c.sendPacket(PacketCreator.shopTransaction((byte) 3));
@@ -130,6 +131,7 @@ public class Shop {
                         InventoryManipulator.addById(c, itemId, quantity, "", -1);
                         InventoryManipulator.removeById(c, InventoryType.ETC, ItemId.PERFECT_PITCH, amount, false, false);
                     }
+                    notifyBotIfEquipBought(c, itemId);
                     c.sendPacket(PacketCreator.shopTransaction((byte) 0));
                 } else {
                     c.sendPacket(PacketCreator.shopTransaction((byte) 3));
@@ -151,6 +153,7 @@ public class Shop {
                         InventoryManipulator.addById(c, itemId, quantity, "", -1, -1);
                     }
                     c.getPlayer().gainMeso(diff, false);
+                    notifyBotIfEquipBought(c, itemId);
                 } else {
                     c.sendPacket(PacketCreator.shopTransaction((byte) 3));
                 }
@@ -158,6 +161,14 @@ public class Shop {
             } else {
                 c.sendPacket(PacketCreator.shopTransaction((byte) 2));
             }
+        }
+    }
+
+    private static void notifyBotIfEquipBought(Client c, int itemId) {
+        if (ItemConstants.getInventoryType(itemId) != InventoryType.EQUIP) return;
+        Item bought = c.getPlayer().getInventory(InventoryType.EQUIP).findById(itemId);
+        if (bought != null) {
+            server.bots.BotManager.getInstance().notifyOwnerGainedItem(c.getPlayer(), bought);
         }
     }
 
