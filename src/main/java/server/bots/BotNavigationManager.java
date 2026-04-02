@@ -95,10 +95,10 @@ final class BotNavigationManager {
         entry.navPreciseTarget = false;
     }
 
-    private static BotNavigationGraph.Edge reuseCommittedEdge(BotNavigationGraph graph,
-                                                              BotEntry entry,
-                                                              int startRegionId,
-                                                              int targetRegionId) {
+    static BotNavigationGraph.Edge reuseCommittedEdge(BotNavigationGraph graph,
+                                                      BotEntry entry,
+                                                      int startRegionId,
+                                                      int targetRegionId) {
         BotNavigationGraph.Edge edge = entry.navEdge;
         if (edge == null) {
             return null;
@@ -122,6 +122,11 @@ final class BotNavigationManager {
         // (returns the platform below/behind the rope as the "current" region), which would
         // otherwise drop the exit edge the moment the bot enters the destination region's Y range.
         if (entry.inAir && (startRegionId < 0 || startRegionId != edge.toRegionId)) {
+            return edge;
+        }
+        // Collapsed WALK edges bridge multiple regions (e.g. r358→r359→r355 collapsed to r358→r355).
+        // Keep the edge while the bot traverses any intermediate region — only drop once it arrives.
+        if (edge.type == BotNavigationGraph.EdgeType.WALK && startRegionId >= 0) {
             return edge;
         }
         return null;

@@ -81,6 +81,37 @@ class BotMovementManagerTest {
     }
 
     @Test
+    void shouldUseTightStopDistForNonWalkPreciseNavEntryPoints() {
+        // Regression: pathlog-CRASH-2026-04-02 — bot 2px from CLIMB entry (969 vs 967),
+        // stopDist=4 caused it to idle short of the entry, blocking canExecuteClimbEntry forever.
+        // Non-WALK precise edges require stopDist=1 so the bot reaches the exact entry position.
+        BotNavigationGraph.Edge climbEdge = new BotNavigationGraph.Edge(
+                3, 27, BotNavigationGraph.EdgeType.CLIMB,
+                new Point(967, 1545), new Point(879, 1545),
+                0, 0, 879, 1503, 1545, 787
+        );
+        BotNavigationGraph.Edge jumpEdge = new BotNavigationGraph.Edge(
+                1, 2, BotNavigationGraph.EdgeType.JUMP,
+                new Point(100, 0), new Point(200, -50),
+                8, 0, 0, 0, 0, 300
+        );
+        BotNavigationGraph.Edge walkEdge = new BotNavigationGraph.Edge(
+                358, 355, BotNavigationGraph.EdgeType.WALK,
+                new Point(46, -61), new Point(54, -58),
+                0, 0, 0, 0, 0, 100
+        );
+
+        assertEquals(1, BotMovementManager.preciseNavStopDist(climbEdge),
+                "CLIMB entry must use stopDist=1 to reach exact anchor");
+        assertEquals(1, BotMovementManager.preciseNavStopDist(jumpEdge),
+                "JUMP entry must use stopDist=1 to reach exact anchor");
+        assertEquals(4, BotMovementManager.preciseNavStopDist(walkEdge),
+                "WALK traversal keeps stopDist=4 to absorb terrain micro-bumps");
+        assertEquals(4, BotMovementManager.preciseNavStopDist(null),
+                "null edge falls back to WALK tolerance");
+    }
+
+    @Test
     void shouldKeepRopeGrabEnabledWhenJumpingFromRopeToRope() {
         Character bot = mock(Character.class);
         MapleMap map = mock(MapleMap.class);

@@ -1,5 +1,7 @@
 package server.bots;
 
+import client.Character;
+import server.maps.MapleMap;
 import server.maps.Rope;
 import org.junit.jupiter.api.Test;
 
@@ -11,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class BotNavigationManagerTest {
     @Test
@@ -84,6 +88,48 @@ class BotNavigationManagerTest {
 
         assertTrue(BotNavigationManager.shouldUsePreciseWalkTarget(walkHandoff));
         assertFalse(BotNavigationManager.shouldUsePreciseWalkTarget(noMoveWalk));
+    }
+
+    @Test
+    void shouldKeepCollapsedWalkEdgeWhenBotEntersIntermediateRegion() {
+        // Regression: pathlog-SLASH-2026-04-02 — collapsed r358→r355 WALK edge (via r359),
+        // bot steps into r359 mid-traverse; old code returned null here (fromRegionId mismatch),
+        // dropping the edge every tick and causing an oscillation loop.
+        BotNavigationGraph.Edge collapsedWalk = new BotNavigationGraph.Edge(
+                358, 355, BotNavigationGraph.EdgeType.WALK,
+                new Point(46, -61), new Point(54, -58),
+                0, 0, 0, 0, 0, 100
+        );
+        Character bot = mock(Character.class);
+        when(bot.getMap()).thenReturn(mock(MapleMap.class));
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.navEdge = collapsedWalk;
+        entry.navTargetRegionId = 355;
+        BotNavigationGraph graph = mock(BotNavigationGraph.class);
+
+        // Bot is in intermediate region 359 — neither source (358) nor destination (355)
+        BotNavigationGraph.Edge result = BotNavigationManager.reuseCommittedEdge(graph, entry, 359, 355);
+
+        assertNotNull(result, "Collapsed WALK edge must survive bot entering an intermediate region");
+    }
+
+    @Test
+    void shouldDropCollapsedWalkEdgeOnceDestinationRegionReached() {
+        BotNavigationGraph.Edge collapsedWalk = new BotNavigationGraph.Edge(
+                358, 355, BotNavigationGraph.EdgeType.WALK,
+                new Point(46, -61), new Point(54, -58),
+                0, 0, 0, 0, 0, 100
+        );
+        Character bot = mock(Character.class);
+        when(bot.getMap()).thenReturn(mock(MapleMap.class));
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.navEdge = collapsedWalk;
+        entry.navTargetRegionId = 355;
+        BotNavigationGraph graph = mock(BotNavigationGraph.class);
+
+        BotNavigationGraph.Edge result = BotNavigationManager.reuseCommittedEdge(graph, entry, 355, 355);
+
+        assertNull(result, "WALK edge must be dropped once bot reaches destination region");
     }
 
     @Test

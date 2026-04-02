@@ -358,8 +358,21 @@ class BotMovementManager {
         }
     }
 
+    /**
+     * Stop-distance used when navPreciseTarget is true.
+     * WALK edges use 4px to absorb terrain micro-bumps on sloped footholds.
+     * All other edge types (JUMP, DROP, CLIMB, PORTAL) use 1px — the bot must reach
+     * the exact entry anchor for jump/climb simulations to succeed reliably.
+     */
+    static int preciseNavStopDist(BotNavigationGraph.Edge navEdge) {
+        if (navEdge != null && navEdge.type != BotNavigationGraph.EdgeType.WALK) {
+            return 1;
+        }
+        return 4;
+    }
+
     private static MoveAction planGroundAction(BotEntry entry, Point botPos, Point targetPos) {
-        int stopDist = entry.navPreciseTarget ? 4 : cfg.STOP_DIST;
+        int stopDist = entry.navPreciseTarget ? preciseNavStopDist(entry.navEdge) : cfg.STOP_DIST;
         // No hysteresis when navigating to an edge — always move toward the waypoint
         int followDist = (entry.navEdge != null || entry.navPreciseTarget) ? stopDist : cfg.FOLLOW_DIST;
         int stepX = updateStepX(entry, entry.bot.getMap(), botPos.x, targetPos.x, stopDist, followDist);
