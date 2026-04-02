@@ -46,19 +46,26 @@ public final class BotBuffManager {
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
         Map<BuffStat, List<int[]>> candidates = new LinkedHashMap<>(); // stat -> [[itemId, statValue]]
 
-        // Only include items actually sold in NPC shops (shopitems table is ground truth)
-        Set<Integer> shopSoldIds = new HashSet<>();
+        // Only include items actually sold in NPC shops at a normal price (10 < price <= 10000).
+        // shopitems.price = 0 means "use WZ info/price". GM shops sell rare buffs at 1 meso — excluded.
+        Map<Integer, Integer> shopPrices = new HashMap<>(); // itemId -> lowest explicit shop price (0 = use WZ)
         try (Connection con = DatabaseConnection.getConnection();
              PreparedStatement ps = con.prepareStatement(
-                     "SELECT DISTINCT itemid FROM shopitems WHERE itemid >= 2000000 AND itemid < 2010000")) {
+                     "SELECT itemid, MIN(price) AS min_price FROM shopitems" +
+                     " WHERE itemid >= 2000000 AND itemid < 2010000 GROUP BY itemid")) {
             try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) shopSoldIds.add(rs.getInt("itemid"));
+                while (rs.next()) shopPrices.put(rs.getInt("itemid"), rs.getInt("min_price"));
             }
         } catch (Exception e) {
             System.err.println("[BotBuff] Failed to load shop items from DB: " + e.getMessage());
         }
 
-        for (int itemId : shopSoldIds) {
+        for (Map.Entry<Integer, Integer> shopEntry : shopPrices.entrySet()) {
+            int itemId   = shopEntry.getKey();
+            int shopPrice = shopEntry.getValue();
+            // price=0 means shop defers to WZ; resolve actual price
+            int price = shopPrice > 0 ? shopPrice : ii.getPrice(itemId, 1);
+            if (price <= 10 || price > 10_000) continue;
             StatEffect fx;
             try { fx = ii.getItemEffect(itemId); } catch (Exception e) { continue; }
             if (fx == null || fx.getStatups().isEmpty()) continue;
