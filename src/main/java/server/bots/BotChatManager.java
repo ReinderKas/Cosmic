@@ -133,6 +133,10 @@ public class BotChatManager {
             "\\b(any\\s+upgrades?|better\\s+gear|recommended\\s+gear|gear\\s+recommendations?|"
             + "any\\s+(better|recommended)\\s+(gear|equips?|equipment))\\b",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern REQUEST_UPGRADE_PATTERN = Pattern.compile(
+            "\\brequest\\s*\\?|\\bneed\\s+anything\\b|\\bdo\\s+you\\s+need\\s+(anything|something)\\b"
+            + "|\\bwhat\\s+do\\s+you\\s+need\\b|\\bwhat.?s\\s+(on\\s+your\\s+)?wish\\s*list\\b",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern SUPPORT_ON_PATTERN = Pattern.compile(
             "\\b(support\\s+(me|us|party)|support\\s+on|auto\\s+support)\\b",
             Pattern.CASE_INSENSITIVE);
@@ -669,6 +673,10 @@ public class BotChatManager {
         }
 
         // Info commands
+        if (REQUEST_UPGRADE_PATTERN.matcher(message).find()) {
+            TimerManager.getInstance().schedule(() -> handleRequestUpgradeCommand(entry, entry.bot), 600);
+            return;
+        }
         if (RECOMMENDED_GEAR_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> reportRecommendedGear(entry, entry.bot), 600);
             return;
@@ -761,7 +769,7 @@ public class BotChatManager {
         if (!entry.spawnUpgradeCheckDone) {
             entry.spawnUpgradeCheckDone = true;
             Character owner = entry.owner;
-            if (owner != null && !isOwnerIdle(entry)) {
+            if (owner != null && !isOwnerIdle(entry) && entry.pendingAction == null) {
                 List<BotEquipManager.EquipRecommendation> recs = BotEquipManager.findRecommendedEquips(bot, owner);
                 if (!recs.isEmpty()) {
                     Item candidate = recs.get(0).candidate();
@@ -1036,6 +1044,23 @@ public class BotChatManager {
                 "I could use that " + itemName + " of yours ;)",
                 "that " + itemName + " is an upgrade for me, want to trade?");
         queueBotSay(entry, BotManager.randomReply(prompts));
+    }
+
+    private static void handleRequestUpgradeCommand(BotEntry entry, Character bot) {
+        Character owner = entry.owner;
+        if (owner == null) return;
+        if (entry.pendingAction != null || entry.pendingTradeCategory != null) {
+            BotManager.getInstance().botSay(bot, "busy rn, ask me again in a bit");
+            return;
+        }
+        List<BotEquipManager.EquipRecommendation> recs = BotEquipManager.findRecommendedEquips(bot, owner);
+        if (recs.isEmpty()) {
+            BotManager.getInstance().botSay(bot, "nothing i need from you rn, im good!");
+            return;
+        }
+        Item candidate = recs.get(0).candidate();
+        entry.requestedUpgradeItemIds.add(candidate.getItemId());
+        requestUpgradeFromOwner(entry, bot, owner, candidate);
     }
 
     private static void offerGearItem(BotEntry entry, Character bot, Character owner, Item item) {
