@@ -137,7 +137,31 @@ public final class BotBuffManager {
         return hitRate < ACC_HIT_THRESHOLD;
     }
 
-    // ── debug ─────────────────────────────────────────────────────────────
+    // ── chat / debug ───────────────────────────────────────────────────────
+
+    /**
+     * Returns a single chat-line summary of which items the bot would use,
+     * based on current cheap/max mode. Example:
+     *   "buff pots on (cheap): warrior potion (ATK), accuracy potion (ACC)"
+     */
+    public static String getChatSummary(boolean enabled, boolean cheapMode) {
+        ensureInit();
+        if (safeItems.isEmpty()) return "no buff pots available in shop data";
+        ItemInformationProvider ii = ItemInformationProvider.getInstance();
+        StringBuilder sb = new StringBuilder();
+        sb.append("buff pots ").append(enabled ? "on" : "off")
+          .append(" (").append(cheapMode ? "cheap" : "max").append("): ");
+        boolean first = true;
+        for (Map.Entry<BuffStat, int[]> e : safeItems.entrySet()) {
+            int itemId = cheapMode ? e.getValue()[0] : e.getValue()[1];
+            String name = ii.getName(itemId);
+            if (name == null) name = String.valueOf(itemId);
+            if (!first) sb.append(", ");
+            sb.append(name.toLowerCase()).append(" (").append(e.getKey().name()).append(")");
+            first = false;
+        }
+        return sb.toString();
+    }
 
     /** Returns a printable summary of the safe buff list. */
     public static String getSafeListSummary() {

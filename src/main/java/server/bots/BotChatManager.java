@@ -158,7 +158,7 @@ public class BotChatManager {
             "\\bbuff\\s+(pots?\\s+)?(max|best|good)\\b",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern BUFF_LIST_PATTERN = Pattern.compile(
-            "\\bbuff\\s+(pots?\\s+)?list\\b",
+            "\\bbuff\\s+(pots?\\s+)?list\\b|\\bbuffs?\\s*\\?|\\bwhat\\s+buffs?\\b|\\bwhich\\s+buffs?\\b",
             Pattern.CASE_INSENSITIVE);
     private static final String SCROLL_WORDS = "scrolls?";
     private static final String POTION_WORDS = "(?:pots?|potions?|hp\\s+pots?|mp\\s+pots?|supplies)";
@@ -529,9 +529,8 @@ public class BotChatManager {
         }
         if (BUFF_LIST_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
-                String summary = BotBuffManager.getSafeListSummary();
-                System.out.println("[BotBuff] Requested by " + entry.owner.getName() + ":\n" + summary);
-                BotManager.getInstance().botSay(entry.bot, "buff list printed to console (" + summary.lines().count() + " entries)");
+                String summary = BotBuffManager.getChatSummary(entry.buffConsumablesEnabled, entry.buffCheapMode);
+                BotManager.getInstance().botSay(entry.bot, summary);
             }, 600);
             return;
         }
