@@ -30,6 +30,8 @@ class BotNavigationGraphProviderTest {
     private static BotNavigationGraph henesysGraph;
     private static MapleMap ellinia;
     private static BotNavigationGraph elliniaGraph;
+    private static MapleMap perion;
+    private static BotNavigationGraph perionGraph;
 
     @BeforeAll
     static void loadMaps() {
@@ -40,6 +42,9 @@ class BotNavigationGraphProviderTest {
 
         ellinia = BotNavigationMapLoader.loadMapGeometry(101000000);
         elliniaGraph = BotNavigationGraphProvider.rebuildGraph(ellinia);
+
+        perion = BotNavigationMapLoader.loadMapGeometry(102000000);
+        perionGraph = BotNavigationGraphProvider.rebuildGraph(perion);
     }
 
     @Test
@@ -78,6 +83,20 @@ class BotNavigationGraphProviderTest {
         assertEquals(1, path.size());
         assertEquals(BotNavigationGraph.EdgeType.JUMP, path.getFirst().type);
         assertEquals(new Point(926, 274), path.getFirst().endPoint);
+    }
+
+    @Test
+    void shouldResolveOwnerToUpperPlatformWhenPositionHasSubpixelRounding() {
+        // Regression: pathlog-SLASH-2026-04-02T125933 — owner at (2596,1696), bot at (2573,1935),
+        // both resolved to region 187. findGroundFoothold returned the lower foothold because the
+        // sloped upper foothold's interpolated Y rounds to 1px above the stored position, causing
+        // findBelow to skip it. Must resolve to different regions.
+        int ownerRegionId = perionGraph.findRegionId(perion, new Point(2596, 1696));
+        int botRegionId = perionGraph.findRegionId(perion, new Point(2573, 1935));
+
+        assertTrue(ownerRegionId > 0, "Owner position (2596,1696) must resolve to a valid region");
+        assertTrue(botRegionId > 0, "Bot position (2573,1935) must resolve to a valid region");
+        assertNotEquals(ownerRegionId, botRegionId, "Owner on upper platform and bot on lower platform must be in different regions");
     }
 
     @Test

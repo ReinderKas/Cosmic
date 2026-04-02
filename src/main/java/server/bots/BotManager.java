@@ -38,6 +38,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledFuture;
@@ -953,11 +954,16 @@ public class BotManager {
      * @return int[2]: [hpCount, mpCount]
      */
     int[] countPotions(Character bot) {
+        List<Item> items = bot.getInventory(InventoryType.USE).list().stream()
+                .filter(item -> BotDropManager.isRecoveryPotion(item.getItemId()))
+                .toList();
+        return countPotions(items, BotDropManager::itemEffect);
+    }
+
+    static int[] countPotions(List<Item> items, Function<Integer, StatEffect> effectLookup) {
         int hp = 0, mp = 0;
-        for (Item item : bot.getInventory(InventoryType.USE).list()) {
-            int id = item.getItemId();
-            if (!BotDropManager.isRecoveryPotion(id)) continue;
-            StatEffect eff = BotDropManager.itemEffect(id);
+        for (Item item : items) {
+            StatEffect eff = effectLookup.apply(item.getItemId());
             if (eff == null) continue;
             int qty = item.getQuantity();
             if (eff.getHp() > 0 || eff.getHpRate() > 0) hp += qty;

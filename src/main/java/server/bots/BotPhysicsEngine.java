@@ -125,11 +125,19 @@ final class BotPhysicsEngine {
             return null;
         }
 
-        Foothold foothold = map.getFootholds().findBelow(position);
-        if (foothold != null) {
-            return foothold;
-        }
-        return map.getFootholds().findBelow(new Point(position.x, position.y - cfg.MAX_SLOPE_UP));
+        Foothold exact = map.getFootholds().findBelow(position);
+        Foothold offset = map.getFootholds().findBelow(new Point(position.x, position.y - cfg.MAX_SLOPE_UP));
+        if (exact == null) return offset;
+        if (offset == null) return exact;
+
+        // On sloped footholds, integer truncation of the interpolated Y can make the foothold's
+        // computed Y fall 1px above the player's stored position, causing findBelow to skip it
+        // and return a distant platform instead. Mirror findGroundPoint: pick the closer result.
+        Point exactGround = map.getPointBelow(position);
+        Point offsetGround = map.getPointBelow(new Point(position.x, position.y - cfg.MAX_SLOPE_UP));
+        if (exactGround == null) return offset;
+        if (offsetGround == null) return exact;
+        return Math.abs(offsetGround.y - position.y) < Math.abs(exactGround.y - position.y) ? offset : exact;
     }
 
     static Point findGroundPoint(MapleMap map, Point position) {
