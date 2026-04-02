@@ -244,8 +244,9 @@ class BotMovementManager {
             }
 
             // Air steering — nudge horizontal velocity toward target each tick.
-            // Applied even during edge navigation (allows course correction mid-air).
-            if (targetPos != null) {
+            // Suppressed during the down-jump grace period: down-jump must stay vertical
+            // so runtime matches graph simulation (simulateLanding uses stepX=0, no steering).
+            if (targetPos != null && entry.downJumpGracePeriodMS == 0L) {
                 BotPhysicsEngine.applyAirSteering(entry, targetPos.x - botPos.x);
             }
 
@@ -379,10 +380,10 @@ class BotMovementManager {
         if (stepX == 0) {
             return MoveAction.idle();
         }
-        if (!isPathWalkable(entry.bot, botPos, stepX)) {
-            if (entry.navEdge != null) {
-                clearNavigationState(entry);
-            }
+        // Skip walkability check when actively navigating — elevated rope platforms produce
+        // false dy (height to floor below exceeds MAX_SNAP_DROP) causing infinite clearNavigationState.
+        // Walking off a rope edge is intentional; lostGround() in applyGroundMotion handles the fall.
+        if (entry.navEdge == null && !isPathWalkable(entry.bot, botPos, stepX)) {
             return MoveAction.idle();
         }
         return MoveAction.walk(stepX);

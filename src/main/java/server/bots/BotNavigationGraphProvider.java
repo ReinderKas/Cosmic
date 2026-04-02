@@ -25,11 +25,11 @@ import java.util.concurrent.ConcurrentHashMap;
 final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
-    private static final int GRAPH_VERSION = 10;
+    private static final int GRAPH_VERSION = 12;
     private static final int WALK_CONNECTION_GAP_PX = 12;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
     private static final int ROPE_ANCHOR_INTERVAL_PX = 30;
-    private static final double REGION_MERGE_MIN_CONTINUATION_COSINE = 0.94;
+    private static final double REGION_MERGE_MIN_CONTINUATION_COSINE = 0.5; // 1 = straight, 0 = 90degree, negative = u-turn
     private static final Path CACHE_DIR = Path.of("cache", "bot-nav", "v" + GRAPH_VERSION);
     private static final Map<Integer, BotNavigationGraph> GRAPHS = new ConcurrentHashMap<>();
 
@@ -206,7 +206,14 @@ final class BotNavigationGraphProvider {
 
         EndpointConnection connection = sharedEndpointConnection(first, second);
         if (connection == null) {
-            return false;
+            // Some maps have linked footholds whose stored endpoints are off by a couple pixels.
+            // Accept a 2px Manhattan close-match so runtime walking can still bridge it.
+            connection = closestEndpointConnection(first, second);
+            if (connection == null ||
+                    (Math.abs(connection.to.x - connection.from.x)
+                            + Math.abs(connection.to.y - connection.from.y)) > 2) {
+                return false;
+            }
         }
 
         return isWalkConnection(connection)

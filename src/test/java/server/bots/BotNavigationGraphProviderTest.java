@@ -32,6 +32,8 @@ class BotNavigationGraphProviderTest {
     private static BotNavigationGraph elliniaGraph;
     private static MapleMap perion;
     private static BotNavigationGraph perionGraph;
+    private static MapleMap swamp1;
+    private static BotNavigationGraph swamp1Graph;
 
     @BeforeAll
     static void loadMaps() {
@@ -45,6 +47,9 @@ class BotNavigationGraphProviderTest {
 
         perion = BotNavigationMapLoader.loadMapGeometry(102000000);
         perionGraph = BotNavigationGraphProvider.rebuildGraph(perion);
+
+        swamp1 = BotNavigationMapLoader.loadMapGeometry(107000000);
+        swamp1Graph = BotNavigationGraphProvider.rebuildGraph(swamp1);
     }
 
     @Test
@@ -261,6 +266,11 @@ class BotNavigationGraphProviderTest {
 
         assertEquals(reuseCase.edge().toRegionId,
                 BotNavigationManager.resolveTargetRegionId(elliniaGraph, entry, ellinia, owner.getPosition()));
+    }
+
+    @Test
+    void bumpyKerningSwampIsSameRegion() {
+        assertEquals(swamp1Graph.findRegionId(swamp1, new Point(1378, 123)), swamp1Graph.findRegionId(swamp1, new Point(-1723, 118)));
     }
 
     private static List<BotNavigationGraph.Edge> findPath(BotNavigationGraph graph,

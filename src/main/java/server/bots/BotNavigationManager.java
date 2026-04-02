@@ -124,6 +124,12 @@ final class BotNavigationManager {
         if (entry.inAir && (startRegionId < 0 || startRegionId != edge.toRegionId)) {
             return edge;
         }
+        // DROP/JUMP arcs may enter the destination region before the bot touches down.
+        // Keep the edge until landing so the bot doesn't replan mid-arc.
+        if (entry.inAir && (edge.type == BotNavigationGraph.EdgeType.DROP
+                || edge.type == BotNavigationGraph.EdgeType.JUMP)) {
+            return edge;
+        }
         // Collapsed WALK edges bridge multiple regions (e.g. r358→r359→r355 collapsed to r358→r355).
         // Keep the edge while the bot traverses any intermediate region — only drop once it arrives.
         if (edge.type == BotNavigationGraph.EdgeType.WALK && startRegionId >= 0) {
