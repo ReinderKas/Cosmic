@@ -175,13 +175,10 @@ class BotMovementManager {
                 return;
             }
 
-            // When navigating to an edge launch point, allow a small overshoot tolerance
-            // on the "above target" side only — the bot must always reach at least the
-            // target Y before stopping, so no tolerance is applied when climbing toward it.
-            int yTolAbove = entry.navEdge != null ? 5 : 0;
+            // Committed climb edges must reach the exact launch anchor so execution can hand off.
             MoveAction action = dy < 0
                     ? MoveAction.climbUp()
-                    : dy > yTolAbove ? MoveAction.climbDown() : MoveAction.idle();
+                    : dy > 0 ? MoveAction.climbDown() : MoveAction.idle();
             applyClimbAction(entry, bot, action);
         } finally {
             BotPerformanceMonitor.record("move-climb", System.nanoTime() - startedAt);

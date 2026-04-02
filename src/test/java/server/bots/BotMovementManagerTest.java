@@ -112,6 +112,34 @@ class BotMovementManagerTest {
     }
 
     @Test
+    void shouldKeepClimbingTowardCommittedExitAnchorWhenStillAboveIt() {
+        Character bot = mock(Character.class);
+        MapleMap map = mock(MapleMap.class);
+        AtomicReference<Point> position = new AtomicReference<>(new Point(-157, -28));
+        when(bot.getPosition()).thenAnswer(invocation -> new Point(position.get()));
+        doAnswer(invocation -> {
+            position.set(new Point(invocation.getArgument(0)));
+            return null;
+        }).when(bot).setPosition(any(Point.class));
+        when(bot.getMap()).thenReturn(map);
+        when(bot.getId()).thenReturn(1);
+        when(bot.getHp()).thenReturn(100);
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.climbing = true;
+        entry.climbRope = new Rope(-157, -115, 118, false);
+        entry.navEdge = new BotNavigationGraph.Edge(
+                47, 39, BotNavigationGraph.EdgeType.CLIMB,
+                new Point(-157, -25), new Point(-61, 121),
+                8, 0, -157, -115, 118, 650
+        );
+
+        BotMovementManager.tickClimbing(entry, new Point(-157, -25), false);
+
+        assertEquals(new Point(-157, -23), bot.getPosition());
+    }
+
+    @Test
     void shouldKeepRopeGrabEnabledWhenJumpingFromRopeToRope() {
         Character bot = mock(Character.class);
         MapleMap map = mock(MapleMap.class);
