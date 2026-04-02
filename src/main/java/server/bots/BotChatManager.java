@@ -529,7 +529,7 @@ public class BotChatManager {
         }
         if (BUFF_LIST_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
-                String summary = BotBuffManager.getChatSummary(entry.buffConsumablesEnabled, entry.buffCheapMode);
+                String summary = BotBuffManager.getChatSummary(entry.buffConsumablesEnabled, entry.buffCheapMode, entry.bot);
                 BotManager.getInstance().botSay(entry.bot, summary);
             }, 600);
             return;

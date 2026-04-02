@@ -140,26 +140,30 @@ public final class BotBuffManager {
     // ── chat / debug ───────────────────────────────────────────────────────
 
     /**
-     * Returns a single chat-line summary of which items the bot would use,
-     * based on current cheap/max mode. Example:
-     *   "buff pots on (cheap): warrior potion (ATK), accuracy potion (ACC)"
+     * Returns a chat-line showing only buff items the bot currently has in inventory,
+     * with quantities, based on cheap/max mode. Example:
+     *   "buff pots on (cheap): warrior potion x3, accuracy potion x12"
      */
-    public static String getChatSummary(boolean enabled, boolean cheapMode) {
+    public static String getChatSummary(boolean enabled, boolean cheapMode, Character bot) {
         ensureInit();
         if (safeItems.isEmpty()) return "no buff pots available in shop data";
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
+        Inventory use = bot.getInventory(InventoryType.USE);
         StringBuilder sb = new StringBuilder();
         sb.append("buff pots ").append(enabled ? "on" : "off")
           .append(" (").append(cheapMode ? "cheap" : "max").append("): ");
         boolean first = true;
         for (Map.Entry<BuffStat, int[]> e : safeItems.entrySet()) {
             int itemId = cheapMode ? e.getValue()[0] : e.getValue()[1];
+            Item item = use.findById(itemId);
+            if (item == null || item.getQuantity() <= 0) continue;
             String name = ii.getName(itemId);
             if (name == null) name = String.valueOf(itemId);
             if (!first) sb.append(", ");
-            sb.append(name.toLowerCase()).append(" (").append(e.getKey().name()).append(")");
+            sb.append(name.toLowerCase()).append(" x").append(item.getQuantity());
             first = false;
         }
+        if (first) sb.append("none in bag");
         return sb.toString();
     }
 
