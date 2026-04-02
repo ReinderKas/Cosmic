@@ -502,11 +502,18 @@ class BotEquipManager {
         } else {
             main = str; sec = dex;
         }
-        int dmg = (int) Math.ceil((wtype.getMaxDamageMultiplier() * main + sec) / 100.0 * watk);
-        // Bias by attack speed: lower number = faster; ±10% per level vs baseline 6 (normal).
+        // Spear/polearm: bot alternates stab and swing — average the two multipliers.
+        double mult = switch (wtype) {
+            case SPEAR_STAB     -> (WeaponType.SPEAR_STAB.getMaxDamageMultiplier()    + WeaponType.SPEAR_SWING.getMaxDamageMultiplier())  / 2.0;
+            case POLE_ARM_SWING -> (WeaponType.POLE_ARM_SWING.getMaxDamageMultiplier() + WeaponType.POLE_ARM_STAB.getMaxDamageMultiplier()) / 2.0;
+            default             -> wtype.getMaxDamageMultiplier();
+        };
+        int dmg = (int) Math.ceil((mult * main + sec) / 100.0 * watk);
+        // For weapon comparisons, convert max-hit to DPS (hit * 1000 / cycleMs) to avoid
+        // slow-but-high-damage bias.
         if (candidate != null && ItemConstants.isWeapon(candidate.getItemId())) {
-            int spd = ii.getWeaponAttackSpeed(candidate.getItemId());
-            dmg = (int) Math.round(dmg * (1.0 + (6 - spd) * 0.10));
+            int cycleMs = weaponCycleMs(candidate.getItemId());
+            if (cycleMs > 0) dmg = (int) (dmg * 1000.0 / cycleMs);
         }
         return dmg;
     }
@@ -514,6 +521,26 @@ class BotEquipManager {
     private static int dmgScore(Character bot, ItemInformationProvider ii, WeaponType wt,
                                   Equip replacing, Equip candidate) {
         return dmgScore(bot, ii, wt, replacing, candidate, null);
+    }
+
+    /**
+     * Returns the effective attack cycle in milliseconds for a weapon using the same formula
+     * as BotCombatManager: {@code rawAnimationMs / (1.7 - attackSpeed / 10)}.
+     * The raw animation comes from the weapon's WZ XML; the speed value scales playback rate,
+     * so two weapons with the same speed tier but different base animations have different DPS.
+     * Returns 0 if no WZ profile is available — caller skips DPS scaling.
+     */
+    private static int weaponCycleMs(int itemId) {
+        BotAttackDataProvider.NormalAttackProfile profile =
+                BotAttackDataProvider.getInstance().getNormalAttackProfile(itemId);
+        if (profile == null || profile.getAttackDelayMillis() <= 0) {
+            return 0;
+        }
+        float speedFactor = 1.7f - (profile.getAttackSpeed() / 10f);
+        if (speedFactor <= 0f) {
+            return profile.getAttackDelayMillis();
+        }
+        return Math.max(1, Math.round(profile.getAttackDelayMillis() / speedFactor));
     }
 
     private static int delta(Equip candidate, Equip replacing, ToIntFunction<Equip> getter) {
