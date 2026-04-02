@@ -5143,8 +5143,9 @@ public class Character extends AbstractCharacterObject {
     }
 
     public List<Ring> getFriendshipRings() {
-        Collections.sort(friendshipRings);
-        return friendshipRings;
+        List<Ring> copy = new ArrayList<>(friendshipRings);
+        Collections.sort(copy);
+        return copy;
     }
 
     public int getGender() {

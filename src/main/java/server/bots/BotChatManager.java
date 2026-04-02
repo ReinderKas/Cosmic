@@ -761,10 +761,6 @@ public class BotChatManager {
         } else {
             BotBuildManager.autoAssignAp(entry, bot);
         }
-        if (!entry.debugPromptSent) {
-            queueBotSay(entry, "ask me for debug stats if you want my attack cooldown");
-            entry.debugPromptSent = true;
-        }
         maybeSuggestRecommendedGear(entry, bot);
         if (!entry.spawnUpgradeCheckDone) {
             entry.spawnUpgradeCheckDone = true;

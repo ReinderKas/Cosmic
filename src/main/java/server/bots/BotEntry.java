@@ -159,7 +159,6 @@ public class BotEntry {
     BotNavigationGraph.Edge navEdge = null;
     int navTargetRegionId = -1;
     boolean navPreciseTarget = false;
-    boolean debugPromptSent = false;
     long nextGearSuggestionAt = 0L;
     boolean spawnUpgradeCheckDone = false;
     final Set<Integer> requestedUpgradeItemIds = ConcurrentHashMap.newKeySet();
