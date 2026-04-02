@@ -42,7 +42,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.function.IntFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -949,24 +948,16 @@ public class BotManager {
 
     /**
      * Counts HP and MP potions in the bot's USE inventory.
-     * Items restoring both (elixirs) count toward both totals.
+     * Uses isRecoveryPotion (heals only, no statups) so combo pots don't inflate the count.
+     * Items restoring both HP and MP (elixirs) count toward both totals.
      * @return int[2]: [hpCount, mpCount]
      */
     int[] countPotions(Character bot) {
-        ItemInformationProvider ii = ItemInformationProvider.getInstance();
-        return countPotions(bot.getInventory(InventoryType.USE).list(), itemId -> {
-            try {
-                return ii.getItemEffect(itemId);
-            } catch (Exception e) {
-                return null;
-            }
-        });
-    }
-
-    static int[] countPotions(Iterable<Item> items, IntFunction<StatEffect> effectResolver) {
         int hp = 0, mp = 0;
-        for (Item item : items) {
-            StatEffect eff = effectResolver.apply(item.getItemId());
+        for (Item item : bot.getInventory(InventoryType.USE).list()) {
+            int id = item.getItemId();
+            if (!BotDropManager.isRecoveryPotion(id)) continue;
+            StatEffect eff = BotDropManager.itemEffect(id);
             if (eff == null) continue;
             int qty = item.getQuantity();
             if (eff.getHp() > 0 || eff.getHpRate() > 0) hp += qty;

@@ -495,19 +495,19 @@ class BotDropManager {
         return result;
     }
 
-    private static StatEffect itemEffect(int itemId) {
+    static StatEffect itemEffect(int itemId) {
         try { return ItemInformationProvider.getInstance().getItemEffect(itemId); }
         catch (Exception e) { return null; }
     }
 
-    private static boolean isRecoveryPotion(int itemId) {
+    static boolean isRecoveryPotion(int itemId) {
         StatEffect fx = itemEffect(itemId);
         if (fx == null) return false;
         boolean heals = fx.getHp() > 0 || fx.getMp() > 0 || fx.getHpRate() > 0 || fx.getMpRate() > 0;
         return heals && fx.getStatups().isEmpty();
     }
 
-    private static boolean isBuffConsumable(int itemId) {
+    static boolean isBuffConsumable(int itemId) {
         StatEffect fx = itemEffect(itemId);
         return fx != null && !fx.getStatups().isEmpty();
     }
@@ -643,6 +643,7 @@ class BotDropManager {
             if (type == InventoryType.USE) {
                 int scrolls = 0, pots = 0, buffs = 0;
                 for (Item item : inv.list()) {
+                    if (!isSafeToDrop(item)) continue;
                     int id = item.getItemId();
                     if (ItemConstants.isEquipScroll(id)) scrolls += item.getQuantity();
                     else if (isRecoveryPotion(id))       pots    += item.getQuantity();
@@ -680,7 +681,7 @@ class BotDropManager {
         return count;
     }
 
-    private static boolean isSafeToDrop(Item item) {
+    static boolean isSafeToDrop(Item item) {
         if (item.isUntradeable()) return false;
         if (ItemInformationProvider.getInstance().isQuestItem(item.getItemId())) return false;
         return true;
