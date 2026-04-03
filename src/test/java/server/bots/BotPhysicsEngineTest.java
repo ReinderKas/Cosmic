@@ -424,6 +424,94 @@ class BotPhysicsEngineTest {
         return bot;
     }
 
+    @Test
+    void shouldPermitWalkableEndpointStep() {
+        assertTrue(BotPhysicsEngine.isWalkableEndpointStep(0, -1));
+        assertTrue(BotPhysicsEngine.isWalkableEndpointStep(BotPhysicsEngine.WALK_GAP_PX, 0));
+    }
+
+    @Test
+    void shouldBlockWalkBetweenFootholdsForFloatingPlatformAbove() {
+        // Current foothold ends at X=10; floating platform spans far above with no nearby endpoint.
+        Foothold platform  = new Foothold(new Point(0, 10),    new Point(10, 10),   1);
+        Foothold floating  = new Foothold(new Point(-100, -16), new Point(100, -16), 2);
+
+        assertFalse(BotPhysicsEngine.canWalkBetweenFootholds(platform, floating));
+    }
+
+    @Test
+    void shouldNotLoseGroundWalkingOntoConnectedStep() {
+        // Bot on a platform walking right onto a step that starts 1px higher at the same X endpoint.
+        // The footholds are chain-linked (prev/next), so applyGroundMotion must not report lostGround.
+        MapleMap map = createEmptyTestMap(910000010);
+        server.maps.FootholdTree footholds = map.getFootholds();
+        Foothold platform = new Foothold(new Point(0, 10), new Point(10, 10), 1);
+        Foothold step     = new Foothold(new Point(10, 9), new Point(40, 9),  2);
+        platform.setNext(2);
+        step.setPrev(1);
+        footholds.insert(platform);
+        footholds.insert(step);
+
+        // Bot at (4, 10) on the platform; physX advanced to 14 (past the boundary onto the step).
+        Character bot = mockBot(new Point(4, 10), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotPhysicsEngine.resetMotion(entry, bot.getPosition());
+        entry.physX = 14;
+        entry.hspeed = 0;
+
+        BotPhysicsEngine.GroundMotion motion = BotPhysicsEngine.applyGroundMotion(entry, bot, platform, 1);
+
+        assertFalse(motion.lostGround());
+        assertEquals(9, bot.getPosition().y);
+    }
+
+    @Test
+    void shouldKeepGroundWalkingOntoGeometricallyConnectedStepEvenWithoutChainLink() {
+        // The branch contract is geometry-based merged walk regions, not prev/next-only chains.
+        // If two footholds form a physically walkable endpoint step, grounded motion should stay
+        // on the merged walk region even when the raw foothold links are absent.
+        MapleMap map = createEmptyTestMap(910000012);
+        server.maps.FootholdTree footholds = map.getFootholds();
+        Foothold platform = new Foothold(new Point(0, 10), new Point(10, 10), 1);
+        Foothold adjacent = new Foothold(new Point(10, 1), new Point(40, 1),  2);
+        footholds.insert(platform);
+        footholds.insert(adjacent);
+
+        Character bot = mockBot(new Point(4, 10), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotPhysicsEngine.resetMotion(entry, bot.getPosition());
+        entry.physX = 14;
+        entry.hspeed = 0;
+
+        BotPhysicsEngine.GroundMotion motion = BotPhysicsEngine.applyGroundMotion(entry, bot, platform, 1);
+
+        assertFalse(motion.lostGround());
+        assertEquals(1, bot.getPosition().y);
+    }
+
+    @Test
+    void shouldLoseGroundWalkingOffLedgeWithFloatingPlatformAbove() {
+        // Bot on a platform walking right off the edge. A wide platform sits MAX_SLOPE_UP above
+        // with no endpoint near the ledge — the bot must fall, not snap up.
+        MapleMap map = createEmptyTestMap(910000011);
+        server.maps.FootholdTree footholds = map.getFootholds();
+        Foothold platform = new Foothold(new Point(0, 10),    new Point(10, 10),   1);
+        Foothold floating = new Foothold(new Point(-100, -16), new Point(100, -16), 2);
+        footholds.insert(platform);
+        footholds.insert(floating);
+
+        // Bot at (4, 10) on platform; physX advanced to 14 (past the ledge at X=10).
+        Character bot = mockBot(new Point(4, 10), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotPhysicsEngine.resetMotion(entry, bot.getPosition());
+        entry.physX = 14;
+        entry.hspeed = 0;
+
+        BotPhysicsEngine.GroundMotion motion = BotPhysicsEngine.applyGroundMotion(entry, bot, platform, 1);
+
+        assertTrue(motion.lostGround());
+    }
+
     private record StandingLookupCase(Point point, Foothold exactFoothold, Foothold offsetFoothold) {
     }
 }

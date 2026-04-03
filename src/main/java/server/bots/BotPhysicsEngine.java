@@ -10,6 +10,9 @@ import java.awt.*;
 final class BotPhysicsEngine {
     private static final double CLIENT_GROUND_STEP_MS = 8.0;
     private static final double CLIENT_GROUND_STEP_S = CLIENT_GROUND_STEP_MS / 1000.0;
+    // Max horizontal gap between adjacent foothold endpoints that the bot can walk across.
+    // Shared with BotNavigationGraphProvider so walk-edge generation and physics agree.
+    static final int WALK_GAP_PX = 12;
 
     static class Config {
         public int TICK_MS = 50;
@@ -199,7 +202,7 @@ final class BotPhysicsEngine {
 
         int dx = Math.abs(connection.to().x - connection.from().x);
         int dy = connection.to().y - connection.from().y;
-        if (dx > 12 || dy > cfg.MAX_SNAP_DROP || dy < -cfg.MAX_SLOPE_UP) {
+        if (!isWalkableEndpointStep(dx, dy)) {
             return false;
         }
 
@@ -487,7 +490,7 @@ final class BotPhysicsEngine {
 
         // Snap-up to a *different* foothold means the bot walked off the edge and a separate
         // platform happens to be within MAX_SLOPE_UP above. That is not an uphill slope of the
-        // current foothold — the bot should fall, not jump up to the unconnected platform.
+        // current foothold - the bot should fall, not jump up to the unconnected platform.
         if (step.lostGround()) {
             abortGroundMotion(entry, bot);
             return new GroundMotion(0, true);
@@ -898,6 +901,19 @@ final class BotPhysicsEngine {
             return 0.0;
         }
         return Math.max(-0.5, Math.min(0.5, foothold.slope()));
+    }
+
+    // True if a step between two endpoint positions is physically walkable (same criteria as
+    // graph walk-edge generation, so physics and graph agree on which transitions are valid).
+    static boolean isWalkableEndpointStep(int dx, int dy) {
+        return dx <= WALK_GAP_PX
+                && dy <= cfg.MAX_SNAP_DROP
+                && dy >= -cfg.MAX_SLOPE_UP;
+    }
+
+    // Legacy alias kept for tests and call sites that care only about the endpoint step check.
+    static boolean canWalkBetweenFootholds(Foothold a, Foothold b) {
+        return canWalkAcrossFootholds(a, b);
     }
 
     private static double mapGroundSpeedScale(MapleMap map) {

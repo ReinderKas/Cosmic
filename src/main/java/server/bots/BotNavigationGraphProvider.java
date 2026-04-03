@@ -26,7 +26,6 @@ final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
     private static final int GRAPH_VERSION = 17;
-    private static final int WALK_CONNECTION_GAP_PX = 12;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
     private static final int ROPE_ANCHOR_INTERVAL_PX = 30;
     private static final double REGION_MERGE_MIN_CONTINUATION_COSINE = 0.5; // 1 = straight, 0 = 90degree, negative = u-turn
@@ -322,15 +321,8 @@ final class BotNavigationGraphProvider {
                                                            int anchorX,
                                                            int launchStepX,
                                                            int targetRegionId) {
-        int minX = anchorX;
-        while (minX > from.minX && landsJumpInRegion(map, regionIdByFootholdId, from.pointAt(minX - 1), launchStepX, targetRegionId)) {
-            minX--;
-        }
-
-        int maxX = anchorX;
-        while (maxX < from.maxX && landsJumpInRegion(map, regionIdByFootholdId, from.pointAt(maxX + 1), launchStepX, targetRegionId)) {
-            maxX++;
-        }
+        int minX = findJumpLaunchBoundary(from, map, regionIdByFootholdId, anchorX, launchStepX, targetRegionId, true);
+        int maxX = findJumpLaunchBoundary(from, map, regionIdByFootholdId, anchorX, launchStepX, targetRegionId, false);
 
         int representativeX = (minX + maxX) / 2;
         Point representativeStart = from.pointAt(representativeX);
@@ -346,6 +338,49 @@ final class BotNavigationGraphProvider {
         }
 
         return new JumpLaunchWindow(minX, maxX, representativeStart, representativeLanding.point());
+    }
+
+    private static int findJumpLaunchBoundary(BotNavigationGraph.Region from,
+                                              MapleMap map,
+                                              Map<Integer, Integer> regionIdByFootholdId,
+                                              int anchorX,
+                                              int launchStepX,
+                                              int targetRegionId,
+                                              boolean searchLeft) {
+        int validX = anchorX;
+        int invalidX = anchorX;
+        int step = 1;
+
+        while (true) {
+            int probeX = searchLeft
+                    ? Math.max(from.minX, anchorX - step)
+                    : Math.min(from.maxX, anchorX + step);
+            if (probeX == validX) {
+                break;
+            }
+
+            if (!landsJumpInRegion(map, regionIdByFootholdId, from.pointAt(probeX), launchStepX, targetRegionId)) {
+                invalidX = probeX;
+                break;
+            }
+
+            validX = probeX;
+            if (probeX == (searchLeft ? from.minX : from.maxX)) {
+                return probeX;
+            }
+            step *= 2;
+        }
+
+        while (Math.abs(validX - invalidX) > 1) {
+            int probeX = (validX + invalidX) / 2;
+            boolean valid = landsJumpInRegion(map, regionIdByFootholdId, from.pointAt(probeX), launchStepX, targetRegionId);
+            if (valid) {
+                validX = probeX;
+            } else {
+                invalidX = probeX;
+            }
+        }
+        return validX;
     }
 
     private static boolean landsJumpInRegion(MapleMap map,
@@ -713,9 +748,7 @@ final class BotNavigationGraphProvider {
     private static boolean isWalkConnection(EndpointConnection connection) {
         int dx = Math.abs(connection.to.x - connection.from.x);
         int dy = connection.to.y - connection.from.y;
-        return dx <= WALK_CONNECTION_GAP_PX
-                && dy <= BotMovementManager.cfg.MAX_SNAP_DROP
-                && dy >= -BotMovementManager.cfg.MAX_SLOPE_UP;
+        return BotPhysicsEngine.isWalkableEndpointStep(dx, dy);
     }
 
     private static void addEdge(int fromRegionId,
