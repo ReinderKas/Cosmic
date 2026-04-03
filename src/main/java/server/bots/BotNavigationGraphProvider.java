@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
-    private static final int GRAPH_VERSION = 12;
+    private static final int GRAPH_VERSION = 13;
     private static final int WALK_CONNECTION_GAP_PX = 12;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
     private static final int ROPE_ANCHOR_INTERVAL_PX = 30;
