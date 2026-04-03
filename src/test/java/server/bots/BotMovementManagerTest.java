@@ -91,7 +91,7 @@ class BotMovementManagerTest {
         Character bot = mock(Character.class);
         when(bot.getMap()).thenReturn(map);
 
-        assertTrue(BotMovementManager.isPathWalkable(bot, new Point(-73, 151), 8));
+        assertTrue(BotPhysicsEngine.canWalkGroundStep(map, new Point(-73, 151), 8));
     }
 
     @Test

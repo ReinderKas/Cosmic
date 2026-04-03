@@ -708,8 +708,7 @@ final class BotNavigationManager {
             if (graph.findRegionId(map, current) != regionId) {
                 return false;
             }
-            int dy = current.y - previous.y;
-            if (dy > BotPhysicsEngine.cfg.MAX_SNAP_DROP || dy < -BotPhysicsEngine.cfg.MAX_SLOPE_UP) {
+            if (!BotPhysicsEngine.isWalkableEndpointStep(Math.abs(current.x - previous.x), current.y - previous.y)) {
                 return false;
             }
             previous = current;
@@ -883,12 +882,7 @@ final class BotNavigationManager {
     }
 
     private static boolean shouldPreferRopeRegion(MapleMap map, Point position) {
-        if (map == null || position == null) {
-            return false;
-        }
-
-        Point ground = map.getPointBelow(position);
-        return ground == null || ground.y > position.y + BotPhysicsEngine.cfg.MAX_SNAP_DROP;
+        return BotPhysicsEngine.isGroundFarBelow(map, position);
     }
 
     private static boolean isRopeOrLadderStance(int stance) {

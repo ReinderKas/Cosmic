@@ -10,6 +10,7 @@ import java.awt.*;
 final class BotPhysicsEngine {
     private static final double CLIENT_GROUND_STEP_MS = 8.0;
     private static final double CLIENT_GROUND_STEP_S = CLIENT_GROUND_STEP_MS / 1000.0;
+    private static final int REGION_STITCH_GAP_PX = 2;
     // Max horizontal gap between adjacent foothold endpoints that the bot can walk across.
     // Shared with BotNavigationGraphProvider so walk-edge generation and physics agree.
     static final int WALK_GAP_PX = 12;
@@ -62,6 +63,12 @@ final class BotPhysicsEngine {
                             int stepX,
                             int velocityX,
                             boolean lostGround) {
+    }
+
+    private record GroundRegionSample(Point point, Foothold foothold) {
+    }
+
+    private record GroundStepPreview(int baseY, Point point, Foothold foothold, boolean lostGround) {
     }
 
     record MovementSnapshot(int velX, int velY, int stance) {
@@ -206,7 +213,7 @@ final class BotPhysicsEngine {
             return false;
         }
 
-        return hasCompatiblePlatformShape(first, second, connection.from());
+        return hasCompatiblePlatformShape(first, second, connection);
     }
 
     private record EndpointConnection(Point from, Point to) {
@@ -256,17 +263,17 @@ final class BotPhysicsEngine {
         return null;
     }
 
-    private static boolean hasCompatiblePlatformShape(Foothold first, Foothold second, Point sharedPoint) {
-        Point firstOther = otherEndpoint(first, sharedPoint);
-        Point secondOther = otherEndpoint(second, sharedPoint);
+    private static boolean hasCompatiblePlatformShape(Foothold first, Foothold second, EndpointConnection connection) {
+        Point firstOther = otherEndpoint(first, connection.from());
+        Point secondOther = otherEndpoint(second, connection.to());
         if (firstOther == null || secondOther == null) {
             return false;
         }
 
-        double firstDx = sharedPoint.x - firstOther.x;
-        double firstDy = sharedPoint.y - firstOther.y;
-        double secondDx = secondOther.x - sharedPoint.x;
-        double secondDy = secondOther.y - sharedPoint.y;
+        double firstDx = connection.from().x - firstOther.x;
+        double firstDy = connection.from().y - firstOther.y;
+        double secondDx = secondOther.x - connection.to().x;
+        double secondDy = secondOther.y - connection.to().y;
         double firstLength = Math.hypot(firstDx, firstDy);
         double secondLength = Math.hypot(secondDx, secondDy);
         if (firstLength == 0.0 || secondLength == 0.0) {
@@ -298,6 +305,146 @@ final class BotPhysicsEngine {
         int firstRegionId = graph.regionIdByFootholdId.getOrDefault(first.getId(), -1);
         int secondRegionId = graph.regionIdByFootholdId.getOrDefault(second.getId(), -1);
         return firstRegionId >= 0 && firstRegionId == secondRegionId;
+    }
+
+    static Point findWalkRegionGroundPoint(MapleMap map, Foothold foothold, int x, int referenceY) {
+        GroundRegionSample sample = findWalkRegionGroundSample(map, foothold, x, referenceY);
+        return sample == null ? null : sample.point();
+    }
+
+    static boolean canWalkGroundStep(MapleMap map, Point currentPos, int stepX) {
+        if (map == null || currentPos == null) {
+            return false;
+        }
+        Foothold foothold = findGroundFoothold(map, currentPos);
+        GroundStepPreview preview = previewGroundStep(map, currentPos, foothold, currentPos.x + stepX);
+        return preview != null && !preview.lostGround();
+    }
+
+    static boolean isGroundFarBelow(MapleMap map, Point position) {
+        if (map == null || position == null) {
+            return true;
+        }
+        Point ground = findGroundPoint(map, position);
+        return ground == null || ground.y > position.y + cfg.MAX_SNAP_DROP;
+    }
+
+    private static boolean hasWalkRegion(MapleMap map, Foothold foothold) {
+        if (map == null || foothold == null) {
+            return false;
+        }
+        BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(map);
+        return graph.regionIdByFootholdId.getOrDefault(foothold.getId(), -1) >= 0;
+    }
+
+    private static GroundRegionSample findWalkRegionGroundSample(MapleMap map, Foothold foothold, int x, int referenceY) {
+        if (map == null || foothold == null) {
+            return null;
+        }
+
+        BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(map);
+        int regionId = graph.regionIdByFootholdId.getOrDefault(foothold.getId(), -1);
+        BotNavigationGraph.Region region = graph.getRegion(regionId);
+        if (region == null || region.isRopeRegion) {
+            return null;
+        }
+
+        BotNavigationGraph.Segment bestSegment = null;
+        Point bestPoint = null;
+        int bestScore = Integer.MAX_VALUE;
+        boolean foundContainingSegment = false;
+        for (BotNavigationGraph.Segment segment : region.segments) {
+            int dx = distanceToSegmentX(segment, x);
+            boolean containsX = segment.containsX(x);
+            if (!containsX && dx > REGION_STITCH_GAP_PX) {
+                continue;
+            }
+            if (containsX) {
+                foundContainingSegment = true;
+            }
+        }
+
+        for (BotNavigationGraph.Segment segment : region.segments) {
+            int dx = distanceToSegmentX(segment, x);
+            boolean containsX = segment.containsX(x);
+            if (!containsX && (foundContainingSegment || dx > REGION_STITCH_GAP_PX)) {
+                continue;
+            }
+
+            Point candidate = segment.pointAt(x);
+            int dy = candidate.y - referenceY;
+            if (dy > cfg.MAX_SNAP_DROP || dy < -cfg.MAX_SLOPE_UP) {
+                continue;
+            }
+
+            int score = dx * 1000 + Math.abs(dy);
+            if (bestPoint == null
+                    || score < bestScore
+                    || (score == bestScore && candidate.y > bestPoint.y)) {
+                bestSegment = segment;
+                bestPoint = candidate;
+                bestScore = score;
+            }
+        }
+
+        if (bestSegment == null || bestPoint == null || map.getFootholds() == null) {
+            return null;
+        }
+
+        int bestFootholdId = bestSegment.footholdId;
+        Foothold bestFoothold = map.getFootholds().getAllFootholds().stream()
+                .filter(candidate -> candidate.getId() == bestFootholdId)
+                .findFirst()
+                .orElse(null);
+        if (bestFoothold == null) {
+            return null;
+        }
+        return new GroundRegionSample(bestPoint, bestFoothold);
+    }
+
+    private static GroundStepPreview previewGroundStep(MapleMap map, Point currentPos, Foothold foothold, int nextX) {
+        if (map == null || currentPos == null) {
+            return null;
+        }
+
+        boolean constrainToWalkRegion = hasWalkRegion(map, foothold);
+        Point standingPoint = constrainToWalkRegion
+                ? findWalkRegionGroundPoint(map, foothold, currentPos.x, currentPos.y)
+                : null;
+        if (standingPoint == null) {
+            standingPoint = findGroundPoint(map, currentPos);
+        }
+
+        int baseY = standingPoint != null
+                && Math.abs(standingPoint.y - currentPos.y) <= cfg.MAX_SLOPE_UP
+                ? standingPoint.y
+                : currentPos.y;
+
+        Point snappedPoint;
+        Foothold snappedFoothold;
+        boolean lostGround;
+        if (constrainToWalkRegion) {
+            GroundRegionSample snappedSample = findWalkRegionGroundSample(map, foothold, nextX, baseY);
+            snappedPoint = snappedSample == null ? null : snappedSample.point();
+            snappedFoothold = snappedSample == null ? null : snappedSample.foothold();
+            lostGround = snappedPoint == null || snappedPoint.y > baseY + cfg.MAX_SNAP_DROP;
+        } else {
+            int probeY = Math.max(currentPos.y, baseY + 1);
+            snappedPoint = findGroundPoint(map, new Point(nextX, probeY));
+            lostGround = snappedPoint == null || snappedPoint.y > baseY + cfg.MAX_SNAP_DROP;
+            snappedFoothold = snappedPoint == null || map.getFootholds() == null
+                    ? null
+                    : map.getFootholds().findBelow(new Point(nextX, snappedPoint.y + 1));
+        }
+
+        return new GroundStepPreview(baseY, snappedPoint, snappedFoothold, lostGround);
+    }
+
+    private static int distanceToSegmentX(BotNavigationGraph.Segment segment, int x) {
+        if (segment.containsX(x)) {
+            return 0;
+        }
+        return x < segment.minX ? segment.minX - x : x - segment.maxX;
     }
 
     static void stopGroundMotion(BotEntry entry) {
@@ -532,32 +679,18 @@ final class BotPhysicsEngine {
         GroundTravelState displaced = applyGroundDisplacement(map, foothold, desiredDir, state);
         int newX = (int) Math.round(displaced.physX());
         int stepX = newX - currentPos.x;
-        Point standingPoint = findGroundPoint(map, currentPos);
-        int baselineY = standingPoint != null
-                && Math.abs(standingPoint.y - currentPos.y) <= cfg.MAX_SLOPE_UP
-                ? standingPoint.y
-                : currentPos.y;
-        int probeY = Math.max(currentPos.y, baselineY + 1);
-        Point snappedPoint = findGroundPoint(map, new Point(newX, probeY));
-        boolean lostGround = snappedPoint == null || snappedPoint.y > baselineY + cfg.MAX_SNAP_DROP;
-        Foothold snappedFoothold = snappedPoint == null || map.getFootholds() == null
-                ? null
-                : map.getFootholds().findBelow(new Point(newX, snappedPoint.y + 1));
-
-        if (!lostGround && snappedPoint.y < baselineY
-                && snappedFoothold != null
-                && !foothold.equals(snappedFoothold)
-                && !isSameWalkRegion(map, foothold, snappedFoothold)) {
-            lostGround = true;
+        GroundStepPreview preview = previewGroundStep(map, currentPos, foothold, newX);
+        if (preview == null) {
+            return new GroundStepResult(currentPos, foothold, state, 0, 0, true);
         }
 
-        if (lostGround) {
+        if (preview.lostGround()) {
             return new GroundStepResult(currentPos, foothold,
                     new GroundTravelState(currentPos.x, 0.0, 0.0),
                     0, 0, true);
         }
 
-        return new GroundStepResult(snappedPoint, snappedFoothold != null ? snappedFoothold : foothold, displaced,
+        return new GroundStepResult(preview.point(), preview.foothold() != null ? preview.foothold() : foothold, displaced,
                 stepX, velocityFromDeltaX(displaced.physX() - currentPos.x), false);
     }
 

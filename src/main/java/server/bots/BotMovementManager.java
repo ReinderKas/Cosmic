@@ -398,7 +398,7 @@ class BotMovementManager {
         // Skip walkability check when actively navigating — elevated rope platforms produce
         // false dy (height to floor below exceeds MAX_SNAP_DROP) causing infinite clearNavigationState.
         // Walking off a rope edge is intentional; lostGround() in applyGroundMotion handles the fall.
-        if (entry.navEdge == null && !isPathWalkable(entry.bot, botPos, stepX)) {
+        if (entry.navEdge == null && !BotPhysicsEngine.canWalkGroundStep(entry.bot.getMap(), botPos, stepX)) {
             return MoveAction.idle();
         }
         return MoveAction.walk(stepX);
@@ -476,22 +476,6 @@ class BotMovementManager {
         }
         entry.wasMovingX = true;
         return stepX;
-    }
-
-    static boolean isPathWalkable(Character bot, Point botPos, int stepX) {
-        Point standing = BotPhysicsEngine.findGroundPoint(bot.getMap(), botPos);
-        int baseY = standing != null
-                && Math.abs(standing.y - botPos.y) <= BotPhysicsEngine.cfg.MAX_SLOPE_UP
-                ? standing.y
-                : botPos.y;
-        Point next = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(botPos.x + stepX, baseY));
-        if (next == null) {
-            return false;
-        }
-
-        int dy = next.y - baseY;
-        return dy <= BotPhysicsEngine.cfg.MAX_SNAP_DROP
-                && dy >= -BotPhysicsEngine.cfg.MAX_SLOPE_UP;
     }
 
     static void initiateJump(BotEntry entry, Character bot, int dx) {

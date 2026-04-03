@@ -29,6 +29,7 @@ class BotPhysicsEngineTest {
     private static MapleMap henesys;
     private static MapleMap ellinia;
     private static MapleMap kerning;
+    private static MapleMap kpqS1;
 
     @BeforeAll
     static void loadMaps() {
@@ -36,6 +37,7 @@ class BotPhysicsEngineTest {
         henesys = BotNavigationMapLoader.loadMapGeometry(100000000);
         ellinia = BotNavigationMapLoader.loadMapGeometry(101000000);
         kerning = BotNavigationMapLoader.loadMapGeometry(103000000);
+        kpqS1 = BotNavigationMapLoader.loadMapGeometry(103000800);
     }
 
     @Test
@@ -281,6 +283,52 @@ class BotPhysicsEngineTest {
     }
 
     @Test
+    void shouldPreferCurrentWalkRegionSurfaceWhenParallelPlatformSitsAbove() {
+        MapleMap map = createEmptyTestMap(910000013);
+        server.maps.FootholdTree footholds = map.getFootholds();
+        Foothold lowerLeft = new Foothold(new Point(0, 100), new Point(20, 100), 1);
+        Foothold lowerRight = new Foothold(new Point(20, 100), new Point(40, 100), 2);
+        Foothold upper = new Foothold(new Point(10, 92), new Point(30, 92), 3);
+        lowerLeft.setNext(2);
+        lowerRight.setPrev(1);
+        footholds.insert(lowerLeft);
+        footholds.insert(lowerRight);
+        footholds.insert(upper);
+
+        Point ground = BotPhysicsEngine.findWalkRegionGroundPoint(map, lowerLeft, 24, 100);
+
+        assertNotNull(ground);
+        assertEquals(new Point(24, 100), ground);
+    }
+
+    @Test
+    void shouldKeepWalkingAcrossKpqPlatformEvenWithNearbyPlatformAbove() {
+        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(kpqS1);
+        Point start = new Point(-335, 116);
+        Point target = new Point(-170, 103);
+        int startRegionId = graph.findRegionId(kpqS1, start);
+
+        assertEquals(startRegionId, graph.findRegionId(kpqS1, target));
+
+        Character bot = mockBot(start, kpqS1);
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotPhysicsEngine.resetMotion(entry, bot.getPosition());
+
+        Foothold currentFoothold = BotPhysicsEngine.findGroundFoothold(kpqS1, bot.getPosition());
+        assertNotNull(currentFoothold);
+
+        for (int i = 0; i < 40 && bot.getPosition().x < target.x; i++) {
+            BotPhysicsEngine.GroundMotion motion = BotPhysicsEngine.applyGroundMotion(entry, bot, currentFoothold, 1);
+            assertFalse(motion.lostGround(), "Walking across the same KPQ region should not lose ground because of the nearby upper platform");
+            currentFoothold = BotPhysicsEngine.findGroundFoothold(kpqS1, bot.getPosition());
+            assertNotNull(currentFoothold);
+            assertEquals(startRegionId, graph.findRegionId(kpqS1, bot.getPosition()));
+        }
+
+        assertTrue(bot.getPosition().x > start.x);
+    }
+
+    @Test
     void shouldUseIntermediateBumpLandingInFallSimulation() {
         MapleMap map = createEmptyTestMap(910000004);
         server.maps.FootholdTree footholds = map.getFootholds();
@@ -441,52 +489,18 @@ class BotPhysicsEngineTest {
 
     @Test
     void shouldNotLoseGroundWalkingOntoConnectedStep() {
-        // Bot on a platform walking right onto a step that starts 1px higher at the same X endpoint.
-        // The footholds are chain-linked (prev/next), so applyGroundMotion must not report lostGround.
-        MapleMap map = createEmptyTestMap(910000010);
-        server.maps.FootholdTree footholds = map.getFootholds();
         Foothold platform = new Foothold(new Point(0, 10), new Point(10, 10), 1);
         Foothold step     = new Foothold(new Point(10, 9), new Point(40, 9),  2);
-        platform.setNext(2);
-        step.setPrev(1);
-        footholds.insert(platform);
-        footholds.insert(step);
 
-        // Bot at (4, 10) on the platform; physX advanced to 14 (past the boundary onto the step).
-        Character bot = mockBot(new Point(4, 10), map);
-        BotEntry entry = new BotEntry(bot, null, null);
-        BotPhysicsEngine.resetMotion(entry, bot.getPosition());
-        entry.physX = 14;
-        entry.hspeed = 0;
-
-        BotPhysicsEngine.GroundMotion motion = BotPhysicsEngine.applyGroundMotion(entry, bot, platform, 1);
-
-        assertFalse(motion.lostGround());
-        assertEquals(9, bot.getPosition().y);
+        assertTrue(BotPhysicsEngine.canWalkAcrossFootholds(platform, step));
     }
 
     @Test
-    void shouldKeepGroundWalkingOntoGeometricallyConnectedStepEvenWithoutChainLink() {
-        // The branch contract is geometry-based merged walk regions, not prev/next-only chains.
-        // If two footholds form a physically walkable endpoint step, grounded motion should stay
-        // on the merged walk region even when the raw foothold links are absent.
-        MapleMap map = createEmptyTestMap(910000012);
-        server.maps.FootholdTree footholds = map.getFootholds();
+    void shouldNotTreatSeparatedVerticalOffsetAsWalkableEndpointStep() {
         Foothold platform = new Foothold(new Point(0, 10), new Point(10, 10), 1);
         Foothold adjacent = new Foothold(new Point(10, 1), new Point(40, 1),  2);
-        footholds.insert(platform);
-        footholds.insert(adjacent);
 
-        Character bot = mockBot(new Point(4, 10), map);
-        BotEntry entry = new BotEntry(bot, null, null);
-        BotPhysicsEngine.resetMotion(entry, bot.getPosition());
-        entry.physX = 14;
-        entry.hspeed = 0;
-
-        BotPhysicsEngine.GroundMotion motion = BotPhysicsEngine.applyGroundMotion(entry, bot, platform, 1);
-
-        assertFalse(motion.lostGround());
-        assertEquals(1, bot.getPosition().y);
+        assertFalse(BotPhysicsEngine.canWalkAcrossFootholds(platform, adjacent));
     }
 
     @Test
