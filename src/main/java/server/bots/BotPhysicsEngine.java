@@ -363,6 +363,16 @@ final class BotPhysicsEngine {
         Point snappedPoint = findGroundPoint(map, new Point(newX, currentPos.y));
         boolean lostGround = snappedPoint == null || snappedPoint.y > currentPos.y + cfg.MAX_SNAP_DROP;
 
+        // Snap-up to a *different* foothold means the bot walked off the edge and a separate
+        // platform happens to be within MAX_SLOPE_UP above. That is not an uphill slope of the
+        // current foothold — the bot should fall, not jump up to the unconnected platform.
+        if (!lostGround && snappedPoint.y < currentPos.y) {
+            Foothold snappedFoothold = map.getFootholds().findBelow(new Point(newX, snappedPoint.y + 1));
+            if (!foothold.equals(snappedFoothold)) {
+                lostGround = true;
+            }
+        }
+
         if (lostGround) {
             abortGroundMotion(entry, bot);
             return new GroundMotion(0, true);
