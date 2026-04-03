@@ -276,6 +276,9 @@ public final class BotNavigationProbe {
         if (edge.launchStepX != 0) {
             parts.add("stepX=" + edge.launchStepX);
         }
+        if (edge.type == BotNavigationGraph.EdgeType.JUMP && edge.launchMinX != edge.launchMaxX) {
+            parts.add("launchX=" + edge.launchMinX + ".." + edge.launchMaxX);
+        }
         if (edge.portalId != 0) {
             parts.add("portal=" + edge.portalId);
         }

@@ -379,8 +379,19 @@ final class BotNavigationManager {
         return switch (edge.type) {
             case WALK -> new Point(edge.endPoint);
             case CLIMB -> selectClimbWaypoint(entry, botPos, edge);
-            case JUMP, DROP, PORTAL -> entry.inAir ? new Point(edge.endPoint) : new Point(edge.startPoint);
+            case JUMP -> entry.inAir ? new Point(edge.endPoint) : selectJumpWaypoint(entry, botPos, edge);
+            case DROP, PORTAL -> entry.inAir ? new Point(edge.endPoint) : new Point(edge.startPoint);
         };
+    }
+
+    static Point selectJumpWaypoint(BotEntry entry, Point botPos, BotNavigationGraph.Edge edge) {
+        BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(entry.bot.getMap());
+        BotNavigationGraph.Region fromRegion = graph.getRegion(edge.fromRegionId);
+        if (fromRegion == null) {
+            return new Point(edge.startPoint);
+        }
+
+        return fromRegion.pointAt(edge.clampLaunchX(botPos.x));
     }
 
     static Point selectClimbWaypoint(BotEntry entry, Point botPos, BotNavigationGraph.Edge edge) {
@@ -530,7 +541,7 @@ final class BotNavigationManager {
 
         BotNavigationGraph.Edge next = path.get(walkCount);
         return new BotNavigationGraph.Edge(first.fromRegionId, next.toRegionId, next.type,
-                next.startPoint, next.endPoint, next.launchStepX, next.portalId,
+                next.startPoint, next.endPoint, next.launchMinX, next.launchMaxX, next.launchStepX, next.portalId,
                 next.ropeX, next.ropeTopY, next.ropeBottomY, totalCost + next.cost);
     }
 
@@ -580,37 +591,33 @@ final class BotNavigationManager {
             return false;
         }
 
+        if (!isWithinJumpLaunchWindow(graph, botPos, edge)) {
+            return false;
+        }
+
         BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateJumpLanding(map, botPos, edge.launchStepX);
-        if (landing != null) {
-            int landingRegionId = graph.regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1);
-            if (landingRegionId == edge.toRegionId) {
-                return true;
-            }
+        if (landing == null) {
+            return false;
         }
 
-        // Fallback: if the bot stopped slightly off the anchor (within isReadyForEdge JUMP tolerance),
-        // try simulating from the edge's recorded start point instead. This avoids 1-4px positional
-        // drift causing the simulated landing to miss the target foothold.
-        // For vertical jumps (launchStepX==0) the tolerance is much tighter: horizontal position
-        // is the sole determinant of landing foothold, so 9px offset causes an infinite bounce loop.
-        int dx = Math.abs(botPos.x - edge.startPoint.x);
-        int dy = Math.abs(botPos.y - edge.startPoint.y);
-        if (isWithinJumpFallbackTolerance(edge, dx, dy)) {
-            BotPhysicsEngine.JumpLanding anchorLanding = BotPhysicsEngine.simulateJumpLanding(map, edge.startPoint, edge.launchStepX);
-            if (anchorLanding != null) {
-                int regionId = graph.regionIdByFootholdId.getOrDefault(anchorLanding.foothold().getId(), -1);
-                return regionId == edge.toRegionId;
-            }
-        }
-
-        return false;
+        int landingRegionId = graph.regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1);
+        return landingRegionId == edge.toRegionId;
     }
 
-    /** Exposed for testing. Vertical jumps use a tight X tolerance (3px) because landing
-     *  foothold is determined purely by horizontal position; horizontal jumps use 10px. */
-    static boolean isWithinJumpFallbackTolerance(BotNavigationGraph.Edge edge, int dx, int dy) {
-        int xTol = edge.launchStepX == 0 ? 3 : 10;
-        return dx <= xTol && dy <= BotMovementManager.cfg.JUMP_Y_THRESH;
+    static boolean isWithinJumpLaunchWindow(BotNavigationGraph graph,
+                                            Point botPos,
+                                            BotNavigationGraph.Edge edge) {
+        if (botPos == null || edge.type != BotNavigationGraph.EdgeType.JUMP || !edge.containsLaunchX(botPos.x)) {
+            return false;
+        }
+
+        BotNavigationGraph.Region fromRegion = graph.getRegion(edge.fromRegionId);
+        if (fromRegion == null) {
+            return false;
+        }
+
+        Point expectedLaunchPoint = fromRegion.pointAt(botPos.x);
+        return Math.abs(botPos.y - expectedLaunchPoint.y) <= BotMovementManager.cfg.JUMP_Y_THRESH;
     }
 
     private static int intraRegionTravelCost(Point from, Point to) {

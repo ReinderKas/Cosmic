@@ -229,6 +229,7 @@ final class BotPathLogger {
         return e.type + " r" + e.fromRegionId + "->r" + e.toRegionId
                 + " (" + e.startPoint.x + "," + e.startPoint.y
                 + ")->(" + e.endPoint.x + "," + e.endPoint.y + ")"
+                + launchWindowSummary(e)
                 + (e.launchStepX != 0 ? " stepX=" + e.launchStepX : "");
     }
 
@@ -244,7 +245,15 @@ final class BotPathLogger {
         return e.type + " r" + e.fromRegionId + "->r" + e.toRegionId
                 + "  (" + e.startPoint.x + "," + e.startPoint.y
                 + ")->(" + e.endPoint.x + "," + e.endPoint.y + ")"
+                + launchWindowSummary(e)
                 + (e.launchStepX != 0 ? "  stepX=" + e.launchStepX : "")
                 + "  cost=" + e.cost;
+    }
+
+    private static String launchWindowSummary(BotNavigationGraph.Edge edge) {
+        if (edge.type != BotNavigationGraph.EdgeType.JUMP || edge.launchMinX == edge.launchMaxX) {
+            return "";
+        }
+        return " window=[" + edge.launchMinX + "," + edge.launchMaxX + "]";
     }
 }

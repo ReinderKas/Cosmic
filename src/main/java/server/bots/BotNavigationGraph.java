@@ -175,6 +175,8 @@ final class BotNavigationGraph implements Serializable {
         final EdgeType type;
         final Point startPoint;
         final Point endPoint;
+        final int launchMinX;
+        final int launchMaxX;
         final int launchStepX;
         final int portalId;
         final int ropeX;
@@ -187,6 +189,8 @@ final class BotNavigationGraph implements Serializable {
              EdgeType type,
              Point startPoint,
              Point endPoint,
+             int launchMinX,
+             int launchMaxX,
              int launchStepX,
              int portalId,
              int ropeX,
@@ -198,12 +202,47 @@ final class BotNavigationGraph implements Serializable {
             this.type = type;
             this.startPoint = new Point(startPoint);
             this.endPoint = new Point(endPoint);
+            this.launchMinX = Math.min(launchMinX, launchMaxX);
+            this.launchMaxX = Math.max(launchMinX, launchMaxX);
             this.launchStepX = launchStepX;
             this.portalId = portalId;
             this.ropeX = ropeX;
             this.ropeTopY = ropeTopY;
             this.ropeBottomY = ropeBottomY;
             this.cost = cost;
+        }
+
+        Edge(int fromRegionId,
+             int toRegionId,
+             EdgeType type,
+             Point startPoint,
+             Point endPoint,
+             int launchStepX,
+             int portalId,
+             int ropeX,
+             int ropeTopY,
+             int ropeBottomY,
+             int cost) {
+            this(fromRegionId, toRegionId, type, startPoint, endPoint,
+                    startPoint.x, startPoint.x, launchStepX, portalId, ropeX, ropeTopY, ropeBottomY, cost);
+        }
+
+        boolean hasLaunchWindow() {
+            return type == EdgeType.JUMP && launchMinX != launchMaxX;
+        }
+
+        boolean containsLaunchX(int x) {
+            return x >= launchMinX && x <= launchMaxX;
+        }
+
+        int clampLaunchX(int x) {
+            if (x < launchMinX) {
+                return launchMinX;
+            }
+            if (x > launchMaxX) {
+                return launchMaxX;
+            }
+            return x;
         }
     }
 

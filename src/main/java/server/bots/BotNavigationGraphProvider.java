@@ -25,13 +25,16 @@ import java.util.concurrent.ConcurrentHashMap;
 final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
-    private static final int GRAPH_VERSION = 13;
+    private static final int GRAPH_VERSION = 14;
     private static final int WALK_CONNECTION_GAP_PX = 12;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
     private static final int ROPE_ANCHOR_INTERVAL_PX = 30;
     private static final double REGION_MERGE_MIN_CONTINUATION_COSINE = 0.5; // 1 = straight, 0 = 90degree, negative = u-turn
     private static final Path CACHE_DIR = Path.of("cache", "bot-nav", "v" + GRAPH_VERSION);
     private static final Map<Integer, BotNavigationGraph> GRAPHS = new ConcurrentHashMap<>();
+
+    private record JumpLaunchWindow(int minX, int maxX, Point startPoint, Point endPoint) {
+    }
 
     static BotNavigationGraph getGraph(MapleMap map) {
         return GRAPHS.computeIfAbsent(map.getId(), ignored -> loadOrBuildGraph(map));
@@ -319,10 +322,63 @@ final class BotNavigationGraphProvider {
                     continue;
                 }
 
-                addEdge(from.id, to.id, BotNavigationGraph.EdgeType.JUMP, anchor, landing.point(), launchStepX, 0,
-                        estimateJumpCost(anchor, landing.point()), outgoing, edgeKeys);
+                JumpLaunchWindow launchWindow = expandJumpLaunchWindow(from, map, regionIdByFootholdId,
+                        anchor.x, launchStepX, to.id);
+                if (launchWindow == null) {
+                    continue;
+                }
+
+                addEdge(from.id, to.id, BotNavigationGraph.EdgeType.JUMP,
+                        launchWindow.startPoint(), launchWindow.endPoint(),
+                        launchWindow.minX(), launchWindow.maxX(),
+                        launchStepX, 0, estimateJumpCost(launchWindow.startPoint(), launchWindow.endPoint()),
+                        outgoing, edgeKeys);
             }
         }
+    }
+
+    private static JumpLaunchWindow expandJumpLaunchWindow(BotNavigationGraph.Region from,
+                                                           MapleMap map,
+                                                           Map<Integer, Integer> regionIdByFootholdId,
+                                                           int anchorX,
+                                                           int launchStepX,
+                                                           int targetRegionId) {
+        int minX = anchorX;
+        while (minX > from.minX && landsJumpInRegion(map, regionIdByFootholdId, from.pointAt(minX - 1), launchStepX, targetRegionId)) {
+            minX--;
+        }
+
+        int maxX = anchorX;
+        while (maxX < from.maxX && landsJumpInRegion(map, regionIdByFootholdId, from.pointAt(maxX + 1), launchStepX, targetRegionId)) {
+            maxX++;
+        }
+
+        int representativeX = (minX + maxX) / 2;
+        Point representativeStart = from.pointAt(representativeX);
+        BotPhysicsEngine.JumpLanding representativeLanding =
+                BotPhysicsEngine.simulateJumpLanding(map, representativeStart, launchStepX);
+        if (representativeLanding == null) {
+            return null;
+        }
+
+        int landingRegionId = regionIdByFootholdId.getOrDefault(representativeLanding.foothold().getId(), -1);
+        if (landingRegionId != targetRegionId) {
+            return null;
+        }
+
+        return new JumpLaunchWindow(minX, maxX, representativeStart, representativeLanding.point());
+    }
+
+    private static boolean landsJumpInRegion(MapleMap map,
+                                             Map<Integer, Integer> regionIdByFootholdId,
+                                             Point start,
+                                             int launchStepX,
+                                             int targetRegionId) {
+        BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateJumpLanding(map, start, launchStepX);
+        if (landing == null) {
+            return false;
+        }
+        return regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1) == targetRegionId;
     }
 
     // --- Rope entry edges: ground/rope region → rope region ---
@@ -678,12 +734,14 @@ final class BotNavigationGraphProvider {
                                 BotNavigationGraph.EdgeType type,
                                 Point startPoint,
                                 Point endPoint,
+                                int launchMinX,
+                                int launchMaxX,
                                 int launchStepX,
                                 int portalId,
                                 int cost,
                                 Map<Integer, List<BotNavigationGraph.Edge>> outgoing,
                                 Set<String> edgeKeys) {
-        addEdge(fromRegionId, toRegionId, type, startPoint, endPoint, launchStepX, portalId,
+        addEdge(fromRegionId, toRegionId, type, startPoint, endPoint, launchMinX, launchMaxX, launchStepX, portalId,
                 0, 0, 0, cost, outgoing, edgeKeys);
     }
 
@@ -694,6 +752,22 @@ final class BotNavigationGraphProvider {
                                 Point endPoint,
                                 int launchStepX,
                                 int portalId,
+                                int cost,
+                                Map<Integer, List<BotNavigationGraph.Edge>> outgoing,
+                                Set<String> edgeKeys) {
+        addEdge(fromRegionId, toRegionId, type, startPoint, endPoint, startPoint.x, startPoint.x, launchStepX, portalId,
+                0, 0, 0, cost, outgoing, edgeKeys);
+    }
+
+    private static void addEdge(int fromRegionId,
+                                int toRegionId,
+                                BotNavigationGraph.EdgeType type,
+                                Point startPoint,
+                                Point endPoint,
+                                int launchMinX,
+                                int launchMaxX,
+                                int launchStepX,
+                                int portalId,
                                 int ropeX,
                                 int ropeTopY,
                                 int ropeBottomY,
@@ -702,14 +776,14 @@ final class BotNavigationGraphProvider {
                                 Set<String> edgeKeys) {
         String key = fromRegionId + ":" + toRegionId + ":" + type + ":" + startPoint.x + ":" + startPoint.y + ":"
                 + endPoint.x + ":" + endPoint.y + ":" + launchStepX + ":" + portalId + ":"
-                + ropeX + ":" + ropeTopY + ":" + ropeBottomY;
+                + ropeX + ":" + ropeTopY + ":" + ropeBottomY + ":" + launchMinX + ":" + launchMaxX;
         if (!edgeKeys.add(key)) {
             return;
         }
 
         outgoing.computeIfAbsent(fromRegionId, ignored -> new ArrayList<>())
                 .add(new BotNavigationGraph.Edge(fromRegionId, toRegionId, type, startPoint, endPoint,
-                        launchStepX, portalId, ropeX, ropeTopY, ropeBottomY, cost));
+                        launchMinX, launchMaxX, launchStepX, portalId, ropeX, ropeTopY, ropeBottomY, cost));
     }
 
     private static EndpointConnection closestEndpointConnection(Foothold first, Foothold second) {

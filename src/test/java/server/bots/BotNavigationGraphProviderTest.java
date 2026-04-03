@@ -34,6 +34,8 @@ class BotNavigationGraphProviderTest {
     private static BotNavigationGraph perionGraph;
     private static MapleMap kerning;
     private static BotNavigationGraph kerningGraph;
+    private static MapleMap kpqS1;
+    private static BotNavigationGraph kpqS1Graph;
     private static MapleMap swamp1;
     private static BotNavigationGraph swamp1Graph;
 
@@ -53,6 +55,9 @@ class BotNavigationGraphProviderTest {
         kerning = BotNavigationMapLoader.loadMapGeometry(103000000);
         kerningGraph = BotNavigationGraphProvider.rebuildGraph(kerning);
 
+        kpqS1 = BotNavigationMapLoader.loadMapGeometry(103000800);
+        kpqS1Graph = BotNavigationGraphProvider.rebuildGraph(kpqS1);
+
         swamp1 = BotNavigationMapLoader.loadMapGeometry(107000000);
         swamp1Graph = BotNavigationGraphProvider.rebuildGraph(swamp1);
     }
@@ -68,12 +73,12 @@ class BotNavigationGraphProviderTest {
 
     @Test
     void shouldGenerateDirectHenesysJumpEdgeFromBelowToFoothold315() {
-        BotNavigationGraph.Edge edge = findNearbyEdge(henesysGraph, henesys, new Point(1080, 334),
-                BotNavigationGraph.EdgeType.JUMP, 24, 16);
+        BotNavigationGraph.Edge edge = findPath(henesysGraph, henesys, new Point(1080, 334), new Point(1275, 275)).getFirst();
 
         assertNotNull(edge);
-        assertEquals(new Point(1080, 334), edge.startPoint);
-        assertEquals(new Point(1080, 275), edge.endPoint);
+        assertEquals(BotNavigationGraph.EdgeType.JUMP, edge.type);
+        assertTrue(edge.containsLaunchX(1080));
+        assertEquals(new Point(1173, 275), edge.endPoint);
     }
 
     @Test
@@ -82,8 +87,8 @@ class BotNavigationGraphProviderTest {
 
         assertEquals(1, path.size());
         assertEquals(BotNavigationGraph.EdgeType.JUMP, path.getFirst().type);
-        assertEquals(new Point(1080, 334), path.getFirst().startPoint);
-        assertEquals(new Point(1139, 275), path.getFirst().endPoint);
+        assertTrue(path.getFirst().containsLaunchX(1080));
+        assertEquals(new Point(1173, 275), path.getFirst().endPoint);
     }
 
     @Test
@@ -92,7 +97,8 @@ class BotNavigationGraphProviderTest {
 
         assertEquals(1, path.size());
         assertEquals(BotNavigationGraph.EdgeType.JUMP, path.getFirst().type);
-        assertEquals(new Point(932, 274), path.getFirst().endPoint);
+        assertTrue(path.getFirst().containsLaunchX(990));
+        assertEquals(new Point(917, 274), path.getFirst().endPoint);
     }
 
     @Test
@@ -117,6 +123,20 @@ class BotNavigationGraphProviderTest {
         assertEquals(BotNavigationGraph.EdgeType.JUMP, path.getFirst().type);
         assertEquals(136, path.getFirst().toRegionId);
         assertEquals(new Point(-243, -53), path.getFirst().endPoint);
+    }
+
+    @Test
+    void shouldPrecomputeLaunchWindowForKerningConstructionSlopeJump() {
+        List<BotNavigationGraph.Edge> path = findPath(kpqS1Graph, kpqS1,
+                new Point(449, 113), new Point(1, -341));
+
+        assertFalse(path.isEmpty());
+        assertEquals(BotNavigationGraph.EdgeType.JUMP, path.getFirst().type);
+        assertTrue(path.getFirst().launchMinX < path.getFirst().launchMaxX);
+        assertTrue(path.getFirst().containsLaunchX(523),
+                "The slope-platform jump should expose a real launch interval around the valid takeoff point");
+        assertFalse(path.getFirst().containsLaunchX(518),
+                "The old repeated launch point at x=518 should no longer be treated as valid for this jump");
     }
 
     @Test
@@ -152,11 +172,11 @@ class BotNavigationGraphProviderTest {
     @Test
     void shouldGenerateElliniaJumpEdgeFromLowerRightPlatformToPlatformAbove() {
         BotNavigationGraph.Edge edge = findNearbyEdge(elliniaGraph, ellinia, new Point(1355, -888),
-                BotNavigationGraph.EdgeType.JUMP, 24, 16);
+                BotNavigationGraph.EdgeType.JUMP, 40, 16);
 
         assertNotNull(edge);
-        assertEquals(new Point(1355, -888), edge.startPoint);
-        assertEquals(new Point(1305, -956), edge.endPoint);
+        assertTrue(edge.containsLaunchX(1355));
+        assertEquals(new Point(1310, -955), edge.endPoint);
     }
 
     @Test
@@ -192,7 +212,7 @@ class BotNavigationGraphProviderTest {
 
         assertFalse(path.isEmpty());
         assertTrue(path.stream().allMatch(edge -> edge.type == BotNavigationGraph.EdgeType.JUMP));
-        assertEquals(new Point(1355, -888), path.getFirst().startPoint);
+        assertTrue(path.getFirst().containsLaunchX(1355));
         assertEquals(targetRegionId, path.getLast().toRegionId);
     }
 

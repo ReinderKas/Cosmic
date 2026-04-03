@@ -3,6 +3,7 @@ package server.bots;
 import client.Character;
 import org.junit.jupiter.api.BeforeAll;
 import server.maps.MapleMap;
+import server.maps.Foothold;
 import server.maps.Rope;
 import org.junit.jupiter.api.Test;
 
@@ -144,31 +145,46 @@ class BotNavigationManagerTest {
     }
 
     @Test
-    void shouldRejectVerticalJumpFallbackWhenBotIsNinePxFromAnchor() {
-        // Regression: GASH pathlog 2026-04-01 — bot at x=-906, vertical jump anchor at x=-915 (dx=9,
-        // launchStepX=0). Old code used dx<=10 for all jumps; bot was within tolerance, fallback fired,
-        // jump executed from wrong X, landed back on same platform, re-executed forever.
-        BotNavigationGraph.Edge verticalJump = new BotNavigationGraph.Edge(
-                284, 276, BotNavigationGraph.EdgeType.JUMP,
-                new Point(-915, 486), new Point(-915, 425),
-                0, 0, 0, 0, 0, 850
+    void shouldUseGraphDerivedJumpLaunchWindowInsteadOfGenericTolerance() {
+        Foothold foothold = new Foothold(new Point(500, 107), new Point(530, 107), 1);
+        BotNavigationGraph.Region fromRegion = new BotNavigationGraph.Region(20, List.of(new BotNavigationGraph.Segment(foothold)));
+        BotNavigationGraph graph = mock(BotNavigationGraph.class);
+        when(graph.getRegion(20)).thenReturn(fromRegion);
+
+        BotNavigationGraph.Edge jump = new BotNavigationGraph.Edge(
+                20, 15, BotNavigationGraph.EdgeType.JUMP,
+                new Point(520, 107), new Point(480, 36),
+                516, 523, -8, 0, 0, 0, 0, 850
         );
 
-        // dx=9 must be rejected for a vertical jump — bot must walk to anchor first
-        assertFalse(BotNavigationManager.isWithinJumpFallbackTolerance(verticalJump, 9, 0));
-        // tiny genuine drift (≤3px) is still accepted
-        assertTrue(BotNavigationManager.isWithinJumpFallbackTolerance(verticalJump, 3, 0));
-        assertTrue(BotNavigationManager.isWithinJumpFallbackTolerance(verticalJump, 0, 0));
+        assertFalse(BotNavigationManager.isWithinJumpLaunchWindow(graph, new Point(515, 107), jump));
+        assertTrue(BotNavigationManager.isWithinJumpLaunchWindow(graph, new Point(516, 107), jump));
+        assertTrue(BotNavigationManager.isWithinJumpLaunchWindow(graph, new Point(523, 107), jump));
+        assertFalse(BotNavigationManager.isWithinJumpLaunchWindow(graph, new Point(524, 107), jump));
+        assertFalse(BotNavigationManager.isWithinJumpLaunchWindow(graph, new Point(520, 160), jump));
+    }
 
-        // Horizontal jumps keep the 10px tolerance — stepX carries the bot to the landing foothold
-        BotNavigationGraph.Edge horizontalJump = new BotNavigationGraph.Edge(
-                21, 20, BotNavigationGraph.EdgeType.JUMP,
-                new Point(957, 465), new Point(1021, 405),
-                8, 0, 0, 0, 0, 850
+    @Test
+    void shouldClampJumpWaypointToNearestLaunchWindowPoint() {
+        MapleMap map = new MapleMap(910000010, 0, 0, 910000010, 1.0f);
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        footholds.insert(new Foothold(new Point(500, 107), new Point(530, 107), 1));
+        map.setFootholds(footholds);
+        BotNavigationGraphProvider.rebuildGraph(map);
+
+        Character bot = mock(Character.class);
+        when(bot.getMap()).thenReturn(map);
+        BotEntry entry = new BotEntry(bot, null, null);
+
+        BotNavigationGraph.Edge jump = new BotNavigationGraph.Edge(
+                1, 15, BotNavigationGraph.EdgeType.JUMP,
+                new Point(520, 107), new Point(480, 36),
+                516, 523, -8, 0, 0, 0, 0, 850
         );
-        assertTrue(BotNavigationManager.isWithinJumpFallbackTolerance(horizontalJump, 9, 0));
-        assertTrue(BotNavigationManager.isWithinJumpFallbackTolerance(horizontalJump, 10, 0));
-        assertFalse(BotNavigationManager.isWithinJumpFallbackTolerance(horizontalJump, 11, 0));
+
+        assertEquals(new Point(516, 107), BotNavigationManager.selectJumpWaypoint(entry, new Point(449, 113), jump));
+        assertEquals(new Point(523, 107), BotNavigationManager.selectJumpWaypoint(entry, new Point(540, 113), jump));
+        assertEquals(new Point(520, 107), BotNavigationManager.selectJumpWaypoint(entry, new Point(520, 113), jump));
     }
 
     @Test
