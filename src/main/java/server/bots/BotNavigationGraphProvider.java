@@ -25,8 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
-    private static final int GRAPH_VERSION = 15;
-    private static final int WALK_CONNECTION_GAP_PX = 12;
+    private static final int GRAPH_VERSION = 16;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
     private static final int ROPE_ANCHOR_INTERVAL_PX = 30;
     private static final double REGION_MERGE_MIN_CONTINUATION_COSINE = 0.5; // 1 = straight, 0 = 90degree, negative = u-turn
@@ -734,9 +733,7 @@ final class BotNavigationGraphProvider {
     private static boolean isWalkConnection(EndpointConnection connection) {
         int dx = Math.abs(connection.to.x - connection.from.x);
         int dy = connection.to.y - connection.from.y;
-        return dx <= WALK_CONNECTION_GAP_PX
-                && dy <= BotMovementManager.cfg.MAX_SNAP_DROP
-                && dy >= -BotMovementManager.cfg.MAX_SLOPE_UP;
+        return BotPhysicsEngine.isWalkableEndpointStep(dx, dy);
     }
 
     private static void addEdge(int fromRegionId,

@@ -10,6 +10,9 @@ import java.awt.*;
 final class BotPhysicsEngine {
     private static final double CLIENT_GROUND_STEP_MS = 8.0;
     private static final double CLIENT_GROUND_STEP_S = CLIENT_GROUND_STEP_MS / 1000.0;
+    // Max horizontal gap between adjacent foothold endpoints that the bot can walk across.
+    // Shared with BotNavigationGraphProvider so walk-edge generation and physics agree.
+    static final int WALK_GAP_PX = 12;
 
     static class Config {
         public int TICK_MS = 50;
@@ -363,15 +366,23 @@ final class BotPhysicsEngine {
         Point snappedPoint = findGroundPoint(map, new Point(newX, currentPos.y));
         boolean lostGround = snappedPoint == null || snappedPoint.y > currentPos.y + cfg.MAX_SNAP_DROP;
 
-        // Snap-up to a *different* foothold means the bot walked off the edge and a separate
-        // platform happens to be within MAX_SLOPE_UP above. That is not an uphill slope of the
-        // current foothold — the bot should fall, not jump up to the unconnected platform.
-//        if (!lostGround && snappedPoint.y < currentPos.y) {
-//            Foothold snappedFoothold = map.getFootholds().findBelow(new Point(newX, snappedPoint.y + 1));
-//            if (!foothold.equals(snappedFoothold)) {
-//                lostGround = true;
-//            }
-//        }
+        // Snap-up to an *unconnected* foothold means the bot walked off the edge and a floating
+        // platform happens to be within MAX_SLOPE_UP above. The bot should fall, not snap up to it.
+        // Exception: a walkably connected step is a valid uphill transition.
+        if (!lostGround && snappedPoint.y < currentPos.y) {
+            Foothold snappedFoothold = map.getFootholds().findBelow(new Point(newX, snappedPoint.y));
+            if (snappedFoothold != null && !foothold.equals(snappedFoothold)) {
+                // Only allow upward snap to a foothold that is the prev/next chain neighbor of the
+                // current foothold — the same constraint graph-gen uses for walk edges. Two footholds
+                // in different chains may have close endpoints by coincidence (BASH case: r10/r13 in
+                // Kerning) but are not intended to be walkably connected.
+                boolean chainLinked = snappedFoothold.getId() == foothold.getPrev()
+                        || snappedFoothold.getId() == foothold.getNext();
+                if (!chainLinked || !canWalkBetweenFootholds(foothold, snappedFoothold)) {
+                    lostGround = true;
+                }
+            }
+        }
 
         if (lostGround) {
             abortGroundMotion(entry, bot);
@@ -730,6 +741,34 @@ final class BotPhysicsEngine {
             return 0.0;
         }
         return Math.max(-0.5, Math.min(0.5, foothold.slope()));
+    }
+
+    // True if a step between two endpoint positions is physically walkable (same criteria as
+    // graph walk-edge generation, so physics and graph agree on which transitions are valid).
+    static boolean isWalkableEndpointStep(int dx, int dy) {
+        return dx <= WALK_GAP_PX
+                && dy <= cfg.MAX_SNAP_DROP
+                && dy >= -cfg.MAX_SLOPE_UP;
+    }
+
+    // True if any endpoint pair between two footholds forms a walkable step.
+    static boolean canWalkBetweenFootholds(Foothold a, Foothold b) {
+        if (a == null || b == null || a.isWall() || b.isWall()) return false;
+        int[][] aEnds = {{a.getX1(), a.getY1()}, {a.getX2(), a.getY2()}};
+        int[][] bEnds = {{b.getX1(), b.getY1()}, {b.getX2(), b.getY2()}};
+        int bestDist = Integer.MAX_VALUE;
+        int bestDx = 0, bestDy = 0;
+        for (int[] ae : aEnds) {
+            for (int[] be : bEnds) {
+                int dist = Math.abs(be[0] - ae[0]) + Math.abs(be[1] - ae[1]);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestDx = Math.abs(be[0] - ae[0]);
+                    bestDy = be[1] - ae[1];
+                }
+            }
+        }
+        return isWalkableEndpointStep(bestDx, bestDy);
     }
 
     private static double mapGroundSpeedScale(MapleMap map) {
