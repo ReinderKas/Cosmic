@@ -240,10 +240,11 @@ class BotMovementManager {
                 return;
             }
 
-            // Air steering — nudge horizontal velocity toward target each tick.
-            // Suppressed during the down-jump grace period: down-jump must stay vertical
-            // so runtime matches graph simulation (simulateLanding uses stepX=0, no steering).
-            if (targetPos != null && entry.downJumpGracePeriodMS == 0L) {
+            // Air steering is only for freeform airborne control.
+            // Committed nav jumps/drops must follow the same fixed ballistic path used by
+            // graph generation and canExecuteJumpFromCurrentPosition; steering here causes
+            // diagonal jumps onto sloped/angled platforms to overshoot or undershoot.
+            if (targetPos != null && shouldApplyAirSteering(entry)) {
                 BotPhysicsEngine.applyAirSteering(entry, targetPos.x - botPos.x);
             }
 
@@ -307,6 +308,17 @@ class BotMovementManager {
                 && left.topY() == right.topY()
                 && left.bottomY() == right.bottomY()
                 && left.isLadder() == right.isLadder();
+    }
+
+    private static boolean shouldApplyAirSteering(BotEntry entry) {
+        if (entry.downJumpGracePeriodMS != 0L) {
+            return false;
+        }
+        if (entry.navEdge == null) {
+            return true;
+        }
+        return entry.navEdge.type != BotNavigationGraph.EdgeType.JUMP
+                && entry.navEdge.type != BotNavigationGraph.EdgeType.DROP;
     }
 
     static void tickGrounded(BotEntry entry, Point targetPos) {

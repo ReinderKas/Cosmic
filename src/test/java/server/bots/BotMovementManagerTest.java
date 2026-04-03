@@ -246,6 +246,42 @@ class BotMovementManagerTest {
     }
 
     @Test
+    void shouldNotApplyAirSteeringDuringCommittedNavJump() {
+        MapleMap map = new MapleMap(910000009, 0, 0, 910000009, 1.0f);
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        footholds.insert(new Foothold(new Point(-200, 200), new Point(200, 200), 1));
+        map.setFootholds(footholds);
+
+        Character bot = mock(Character.class);
+        AtomicReference<Point> position = new AtomicReference<>(new Point(100, 100));
+        when(bot.getPosition()).thenAnswer(invocation -> new Point(position.get()));
+        doAnswer(invocation -> {
+            position.set(new Point(invocation.getArgument(0)));
+            return null;
+        }).when(bot).setPosition(any(Point.class));
+        when(bot.getMap()).thenReturn(map);
+        when(bot.getId()).thenReturn(1);
+        when(bot.getHp()).thenReturn(100);
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.inAir = true;
+        entry.physX = 100;
+        entry.physY = 100;
+        entry.velY = 0f;
+        entry.airVelX = -8;
+        entry.navEdge = new BotNavigationGraph.Edge(
+                1, 2, BotNavigationGraph.EdgeType.JUMP,
+                new Point(100, 100), new Point(50, 50),
+                -8, 0, 0, 0, 0, 300
+        );
+
+        BotMovementManager.tickAirborne(entry, new Point(-300, 100));
+
+        assertEquals(0.0, entry.airSteerVelX, 0.0001);
+        assertEquals(new Point(92, 103), bot.getPosition());
+    }
+
+    @Test
     void shouldKeepRopeGrabEnabledWhenJumpingFromRopeToRope() {
         Character bot = mock(Character.class);
         MapleMap map = mock(MapleMap.class);
