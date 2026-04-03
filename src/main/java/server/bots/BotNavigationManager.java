@@ -134,11 +134,6 @@ final class BotNavigationManager {
                 || edge.type == BotNavigationGraph.EdgeType.JUMP)) {
             return edge;
         }
-        // Collapsed WALK edges bridge multiple regions (e.g. r358→r359→r355 collapsed to r358→r355).
-        // Keep the edge while the bot traverses any intermediate region — only drop once it arrives.
-        if (edge.type == BotNavigationGraph.EdgeType.WALK && startRegionId >= 0) {
-            return edge;
-        }
         return null;
     }
 
@@ -521,22 +516,20 @@ final class BotNavigationManager {
             return first;
         }
 
-        BotNavigationGraph.Edge lastWalk = first;
-        int totalCost = first.cost;
-        int walkCount = 1;
-        for (int i = 1; i < path.size(); i++) {
-            BotNavigationGraph.Edge edge = path.get(i);
-            if (edge.type != BotNavigationGraph.EdgeType.WALK) {
-                break;
-            }
-            lastWalk = edge;
-            totalCost += edge.cost;
-            walkCount++;
+        if (!isNoMovementWalk(first.startPoint, first.endPoint)) {
+            return first;
         }
 
-        if (!isNoMovementWalk(first.startPoint, lastWalk.endPoint)) {
-            return new BotNavigationGraph.Edge(first.fromRegionId, lastWalk.toRegionId, BotNavigationGraph.EdgeType.WALK,
-                first.startPoint, lastWalk.endPoint, 0, 0, 0, 0, 0, totalCost);
+        int totalCost = 0;
+        int walkCount = 0;
+        while (walkCount < path.size()) {
+            BotNavigationGraph.Edge edge = path.get(walkCount);
+            if (edge.type != BotNavigationGraph.EdgeType.WALK
+                    || !isNoMovementWalk(edge.startPoint, edge.endPoint)) {
+                break;
+            }
+            totalCost += edge.cost;
+            walkCount++;
         }
 
         if (walkCount >= path.size()) {

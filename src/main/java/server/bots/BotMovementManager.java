@@ -395,10 +395,14 @@ class BotMovementManager {
         if (stepX == 0) {
             return MoveAction.idle();
         }
-        // Skip walkability check when actively navigating — elevated rope platforms produce
-        // false dy (height to floor below exceeds MAX_SNAP_DROP) causing infinite clearNavigationState.
-        // Walking off a rope edge is intentional; lostGround() in applyGroundMotion handles the fall.
-        if (entry.navEdge == null && !BotPhysicsEngine.canWalkGroundStep(entry.bot.getMap(), botPos, stepX)) {
+        boolean canWalkStep = BotPhysicsEngine.canWalkGroundStep(entry.bot.getMap(), botPos, stepX);
+        if (!canWalkStep) {
+            // Only committed WALK edges get cleared here. Other edge types intentionally allow
+            // walking to rope/jump/drop entries where a generic ground-step preview can produce
+            // false negatives, especially around rope platforms and ledges.
+            if (entry.navEdge != null && entry.navEdge.type == BotNavigationGraph.EdgeType.WALK) {
+                clearNavigationState(entry);
+            }
             return MoveAction.idle();
         }
         return MoveAction.walk(stepX);

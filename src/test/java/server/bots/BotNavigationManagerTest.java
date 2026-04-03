@@ -53,6 +53,29 @@ class BotNavigationManagerTest {
     }
 
     @Test
+    void shouldKeepFirstRealWalkInsteadOfCollapsingPastLaterZeroDistanceHandoff() {
+        BotNavigationGraph.Edge collapsed = BotNavigationManager.collapseLeadingWalkEdges(List.of(
+                new BotNavigationGraph.Edge(24, 22, BotNavigationGraph.EdgeType.WALK,
+                        new Point(-947, 153), new Point(-751, 142),
+                        0, 0, 0, 0, 0, 120),
+                new BotNavigationGraph.Edge(22, 20, BotNavigationGraph.EdgeType.WALK,
+                        new Point(-751, 142), new Point(-751, 142),
+                        0, 0, 0, 0, 0, 50),
+                new BotNavigationGraph.Edge(20, 27, BotNavigationGraph.EdgeType.CLIMB,
+                        new Point(-437, 121), new Point(-437, 84),
+                        0, 0, -437, 84, 121, 250)
+        ));
+
+        assertNotNull(collapsed);
+        assertEquals(BotNavigationGraph.EdgeType.WALK, collapsed.type);
+        assertEquals(24, collapsed.fromRegionId);
+        assertEquals(22, collapsed.toRegionId);
+        assertEquals(new Point(-947, 153), collapsed.startPoint);
+        assertEquals(new Point(-751, 142), collapsed.endPoint);
+        assertEquals(120, collapsed.cost);
+    }
+
+    @Test
     void shouldDropLeadingWalkChainWhenItConsumesNoMovement() {
         BotNavigationGraph.Edge collapsed = BotNavigationManager.collapseLeadingWalkEdges(List.of(
                 new BotNavigationGraph.Edge(181, 184, BotNavigationGraph.EdgeType.WALK,
@@ -103,7 +126,7 @@ class BotNavigationManagerTest {
     }
 
     @Test
-    void shouldKeepCollapsedWalkEdgeWhenBotEntersIntermediateRegion() {
+    void shouldDropStaleCollapsedWalkEdgeWhenBotEntersIntermediateRegion() {
         // Regression: pathlog-SLASH-2026-04-02 — collapsed r358→r355 WALK edge (via r359),
         // bot steps into r359 mid-traverse; old code returned null here (fromRegionId mismatch),
         // dropping the edge every tick and causing an oscillation loop.
@@ -122,7 +145,7 @@ class BotNavigationManagerTest {
         // Bot is in intermediate region 359 — neither source (358) nor destination (355)
         BotNavigationGraph.Edge result = BotNavigationManager.reuseCommittedEdge(graph, entry, 359, 355);
 
-        assertNotNull(result, "Collapsed WALK edge must survive bot entering an intermediate region");
+        assertNull(result, "Stale collapsed WALK edge must be dropped once the bot leaves its source region");
     }
 
     @Test
