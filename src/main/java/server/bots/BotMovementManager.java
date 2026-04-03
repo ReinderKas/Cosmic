@@ -425,15 +425,18 @@ class BotMovementManager {
         }
 
         if (motion.stepX() == 0) {
-            applyIdleOrInPlaceMotion(entry);
+            applyIdleOrInPlaceMotion(entry, action);
             return;
         }
 
         broadcastMovement(entry);
     }
 
-    private static void applyIdleOrInPlaceMotion(BotEntry entry) {
-        if (entry.movementVelX == 0) {
+    private static void applyIdleOrInPlaceMotion(BotEntry entry, MoveAction action) {
+        // Preserve ground momentum while still trying to walk/jump toward a nav target.
+        // Otherwise subpixel uphill/transition movement gets zeroed every tick and the bot
+        // can stall forever short of a valid launch window.
+        if (entry.movementVelX == 0 && action.type() == ActionType.IDLE) {
             BotPhysicsEngine.idleOnGround(entry, entry.bot);
         }
         broadcastMovement(entry);

@@ -165,7 +165,7 @@ class BotNavigationManagerTest {
     }
 
     @Test
-    void shouldClampJumpWaypointToNearestLaunchWindowPoint() {
+    void shouldApproachCenterOfJumpLaunchWindowWhenOutsideIt() {
         MapleMap map = new MapleMap(910000010, 0, 0, 910000010, 1.0f);
         server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
         footholds.insert(new Foothold(new Point(500, 107), new Point(530, 107), 1));
@@ -182,8 +182,8 @@ class BotNavigationManagerTest {
                 516, 523, -8, 0, 0, 0, 0, 850
         );
 
-        assertEquals(new Point(516, 107), BotNavigationManager.selectJumpWaypoint(entry, new Point(449, 113), jump));
-        assertEquals(new Point(523, 107), BotNavigationManager.selectJumpWaypoint(entry, new Point(540, 113), jump));
+        assertEquals(new Point(520, 107), BotNavigationManager.selectJumpWaypoint(entry, new Point(449, 113), jump));
+        assertEquals(new Point(520, 107), BotNavigationManager.selectJumpWaypoint(entry, new Point(540, 113), jump));
         assertEquals(new Point(520, 107), BotNavigationManager.selectJumpWaypoint(entry, new Point(520, 113), jump));
     }
 

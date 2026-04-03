@@ -9,6 +9,7 @@ import server.maps.Rope;
 
 import java.awt.*;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -27,12 +28,14 @@ import static org.mockito.Mockito.when;
 class BotPhysicsEngineTest {
     private static MapleMap henesys;
     private static MapleMap ellinia;
+    private static MapleMap kerning;
 
     @BeforeAll
     static void loadMaps() {
         System.setProperty("wz-path", Path.of("wz").toAbsolutePath().toString());
         henesys = BotNavigationMapLoader.loadMapGeometry(100000000);
         ellinia = BotNavigationMapLoader.loadMapGeometry(101000000);
+        kerning = BotNavigationMapLoader.loadMapGeometry(103000000);
     }
 
     @Test
@@ -266,6 +269,15 @@ class BotPhysicsEngineTest {
         assertNotNull(landing);
         assertEquals(new Point(4, 102), landing.point());
         assertEquals(2, landing.foothold().getId());
+    }
+
+    @Test
+    void shouldAdvanceTowardJumpLaunchWindowAcrossConnectedKerningFootholds() {
+        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(kerning);
+        Point start = new Point(1299, -285);
+        Point stepped = new Point(1302, -286);
+        assertEquals(graph.findRegionId(kerning, start), graph.findRegionId(kerning, stepped),
+                "Kerning foothold handoff near x=1299 should stay in one merged walk region");
     }
 
     @Test

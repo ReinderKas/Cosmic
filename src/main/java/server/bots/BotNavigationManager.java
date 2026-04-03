@@ -112,6 +112,10 @@ final class BotNavigationManager {
         if (entry.climbing && isRopeEntryEdge(graph, edge)) {
             return null;
         }
+        if (!entry.inAir && edge.type == BotNavigationGraph.EdgeType.JUMP
+                && !canReachJumpLaunchWindowFromCurrentPosition(graph, entry.bot.getMap(), entry.bot.getPosition(), edge)) {
+            return null;
+        }
         if (startRegionId == edge.toRegionId && !entry.inAir && !entry.climbing) {
             return null;
         }
@@ -386,12 +390,8 @@ final class BotNavigationManager {
 
     static Point selectJumpWaypoint(BotEntry entry, Point botPos, BotNavigationGraph.Edge edge) {
         BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(entry.bot.getMap());
-        BotNavigationGraph.Region fromRegion = graph.getRegion(edge.fromRegionId);
-        if (fromRegion == null) {
-            return new Point(edge.startPoint);
-        }
-
-        return fromRegion.pointAt(edge.clampLaunchX(botPos.x));
+        Point reachable = findReachableJumpLaunchPoint(graph, entry.bot.getMap(), botPos, edge);
+        return reachable != null ? reachable : new Point(edge.startPoint);
     }
 
     static Point selectClimbWaypoint(BotEntry entry, Point botPos, BotNavigationGraph.Edge edge) {
@@ -465,7 +465,11 @@ final class BotNavigationManager {
                         continue;
                     }
 
-                    int tentativeCost = current.cost + intraRegionTravelCost(graph, current.state.regionId, current.state.point, edge.startPoint) + edge.cost;
+                    Point approachPoint = effectiveEdgeStartPoint(graph, map, current.state, edge);
+                    if (approachPoint == null) {
+                        continue;
+                    }
+                    int tentativeCost = current.cost + intraRegionTravelCost(graph, current.state.regionId, current.state.point, approachPoint) + edge.cost;
                     SearchState nextState = new SearchState(edge.toRegionId, edge.endPoint);
                     if (tentativeCost >= gScore.getOrDefault(nextState, Integer.MAX_VALUE)) {
                         continue;
@@ -602,6 +606,115 @@ final class BotNavigationManager {
 
         int landingRegionId = graph.regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1);
         return landingRegionId == edge.toRegionId;
+    }
+
+    private static Point effectiveEdgeStartPoint(BotNavigationGraph graph,
+                                                 MapleMap map,
+                                                 SearchState currentState,
+                                                 BotNavigationGraph.Edge edge) {
+        return edge.startPoint;
+    }
+
+    private static boolean canReachJumpLaunchWindowFromCurrentPosition(BotNavigationGraph graph,
+                                                                       MapleMap map,
+                                                                       Point botPos,
+                                                                       BotNavigationGraph.Edge edge) {
+        return findReachableJumpLaunchPoint(graph, map, botPos, edge) != null;
+    }
+
+    private static Point findReachableJumpLaunchPoint(BotNavigationGraph graph,
+                                                      MapleMap map,
+                                                      Point botPos,
+                                                      BotNavigationGraph.Edge edge) {
+        if (botPos == null || edge.type != BotNavigationGraph.EdgeType.JUMP) {
+            return null;
+        }
+
+        BotNavigationGraph.Region fromRegion = graph.getRegion(edge.fromRegionId);
+        if (fromRegion == null || fromRegion.isRopeRegion) {
+            return null;
+        }
+
+        int preferredX = edge.containsLaunchX(botPos.x)
+                ? botPos.x
+                : (edge.launchMinX + edge.launchMaxX) / 2;
+        for (int offset = 0; offset <= edge.launchMaxX - edge.launchMinX; offset++) {
+            int leftX = preferredX - offset;
+            if (leftX >= edge.launchMinX) {
+                Point candidate = fromRegion.pointAt(leftX);
+                if (isReachableJumpLaunchPoint(graph, map, edge, botPos, candidate)) {
+                    return candidate;
+                }
+            }
+
+            if (offset == 0) {
+                continue;
+            }
+
+            int rightX = preferredX + offset;
+            if (rightX <= edge.launchMaxX) {
+                Point candidate = fromRegion.pointAt(rightX);
+                if (isReachableJumpLaunchPoint(graph, map, edge, botPos, candidate)) {
+                    return candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static boolean isReachableJumpLaunchPoint(BotNavigationGraph graph,
+                                                      MapleMap map,
+                                                      BotNavigationGraph.Edge edge,
+                                                      Point fromPos,
+                                                      Point candidate) {
+        if (candidate == null || !isReachableWithinRegion(graph, map, edge.fromRegionId, fromPos, candidate)) {
+            return false;
+        }
+
+        BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateJumpLanding(map, candidate, edge.launchStepX);
+        if (landing == null) {
+            return false;
+        }
+
+        int landingRegionId = graph.regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1);
+        return landingRegionId == edge.toRegionId;
+    }
+
+    private static boolean isReachableWithinRegion(BotNavigationGraph graph,
+                                                   MapleMap map,
+                                                   int regionId,
+                                                   Point fromPos,
+                                                   Point toPos) {
+        BotNavigationGraph.Region region = graph.getRegion(regionId);
+        if (region == null || fromPos == null || toPos == null) {
+            return false;
+        }
+        if (region.isRopeRegion) {
+            return fromPos.x == toPos.x;
+        }
+
+        int dir = Integer.compare(toPos.x, fromPos.x);
+        Point previous = region.pointAt(fromPos.x);
+        if (graph.findRegionId(map, previous) != regionId) {
+            return false;
+        }
+        if (dir == 0) {
+            return Math.abs(toPos.y - previous.y) <= BotMovementManager.cfg.JUMP_Y_THRESH;
+        }
+
+        for (int x = fromPos.x + dir; x != toPos.x + dir; x += dir) {
+            Point current = region.pointAt(x);
+            if (graph.findRegionId(map, current) != regionId) {
+                return false;
+            }
+            int dy = current.y - previous.y;
+            if (dy > BotPhysicsEngine.cfg.MAX_SNAP_DROP || dy < -BotPhysicsEngine.cfg.MAX_SLOPE_UP) {
+                return false;
+            }
+            previous = current;
+        }
+        return true;
     }
 
     static boolean isWithinJumpLaunchWindow(BotNavigationGraph graph,

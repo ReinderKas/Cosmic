@@ -50,6 +50,17 @@ final class BotPhysicsEngine {
     record GroundMotion(int stepX, boolean lostGround) {
     }
 
+    record GroundTravelState(double physX, double hspeed, double carryMs) {
+    }
+
+    record GroundStepResult(Point point,
+                            Foothold foothold,
+                            GroundTravelState state,
+                            int stepX,
+                            int velocityX,
+                            boolean lostGround) {
+    }
+
     record MovementSnapshot(int velX, int velY, int stance) {
     }
 
@@ -169,6 +180,121 @@ final class BotPhysicsEngine {
         int exactDistance = Math.abs(exactGround.y - position.y);
         int offsetDistance = Math.abs(offsetGround.y - position.y);
         return offsetDistance < exactDistance ? offsetGround : exactGround;
+    }
+
+    static boolean canWalkAcrossFootholds(Foothold first, Foothold second) {
+        if (first == null || second == null || first.isWall() || second.isWall()) {
+            return false;
+        }
+
+        EndpointConnection connection = sharedEndpointConnection(first, second);
+        if (connection == null) {
+            connection = closestEndpointConnection(first, second);
+            if (connection == null
+                    || (Math.abs(connection.to().x - connection.from().x)
+                    + Math.abs(connection.to().y - connection.from().y)) > 2) {
+                return false;
+            }
+        }
+
+        int dx = Math.abs(connection.to().x - connection.from().x);
+        int dy = connection.to().y - connection.from().y;
+        if (dx > 12 || dy > cfg.MAX_SNAP_DROP || dy < -cfg.MAX_SLOPE_UP) {
+            return false;
+        }
+
+        return hasCompatiblePlatformShape(first, second, connection.from());
+    }
+
+    private record EndpointConnection(Point from, Point to) {
+    }
+
+    private static EndpointConnection closestEndpointConnection(Foothold first, Foothold second) {
+        Point[] firstEndpoints = new Point[]{
+                new Point(first.getX1(), first.getY1()),
+                new Point(first.getX2(), first.getY2())
+        };
+        Point[] secondEndpoints = new Point[]{
+                new Point(second.getX1(), second.getY1()),
+                new Point(second.getX2(), second.getY2())
+        };
+
+        EndpointConnection best = null;
+        int bestDistance = Integer.MAX_VALUE;
+        for (Point from : firstEndpoints) {
+            for (Point to : secondEndpoints) {
+                int distance = Math.abs(to.x - from.x) + Math.abs(to.y - from.y);
+                if (distance < bestDistance) {
+                    best = new EndpointConnection(from, to);
+                    bestDistance = distance;
+                }
+            }
+        }
+        return best;
+    }
+
+    private static EndpointConnection sharedEndpointConnection(Foothold first, Foothold second) {
+        Point[] firstEndpoints = new Point[]{
+                new Point(first.getX1(), first.getY1()),
+                new Point(first.getX2(), first.getY2())
+        };
+        Point[] secondEndpoints = new Point[]{
+                new Point(second.getX1(), second.getY1()),
+                new Point(second.getX2(), second.getY2())
+        };
+
+        for (Point from : firstEndpoints) {
+            for (Point to : secondEndpoints) {
+                if (from.equals(to)) {
+                    return new EndpointConnection(from, to);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean hasCompatiblePlatformShape(Foothold first, Foothold second, Point sharedPoint) {
+        Point firstOther = otherEndpoint(first, sharedPoint);
+        Point secondOther = otherEndpoint(second, sharedPoint);
+        if (firstOther == null || secondOther == null) {
+            return false;
+        }
+
+        double firstDx = sharedPoint.x - firstOther.x;
+        double firstDy = sharedPoint.y - firstOther.y;
+        double secondDx = secondOther.x - sharedPoint.x;
+        double secondDy = secondOther.y - sharedPoint.y;
+        double firstLength = Math.hypot(firstDx, firstDy);
+        double secondLength = Math.hypot(secondDx, secondDy);
+        if (firstLength == 0.0 || secondLength == 0.0) {
+            return false;
+        }
+
+        double continuationCosine = ((firstDx * secondDx) + (firstDy * secondDy)) / (firstLength * secondLength);
+        return continuationCosine >= 0.5;
+    }
+
+    private static Point otherEndpoint(Foothold foothold, Point sharedPoint) {
+        Point first = new Point(foothold.getX1(), foothold.getY1());
+        Point second = new Point(foothold.getX2(), foothold.getY2());
+        if (first.equals(sharedPoint)) {
+            return second;
+        }
+        if (second.equals(sharedPoint)) {
+            return first;
+        }
+        return null;
+    }
+
+    private static boolean isSameWalkRegion(MapleMap map, Foothold first, Foothold second) {
+        if (map == null || first == null || second == null) {
+            return false;
+        }
+
+        BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(map);
+        int firstRegionId = graph.regionIdByFootholdId.getOrDefault(first.getId(), -1);
+        int secondRegionId = graph.regionIdByFootholdId.getOrDefault(second.getId(), -1);
+        return firstRegionId >= 0 && firstRegionId == secondRegionId;
     }
 
     static void stopGroundMotion(BotEntry entry) {
@@ -356,29 +482,18 @@ final class BotPhysicsEngine {
     static GroundMotion applyGroundMotion(BotEntry entry, Character bot, Foothold foothold, int desiredDir) {
         MapleMap map = bot.getMap();
         Point currentPos = bot.getPosition();
-        double deltaPhysX = applyGroundDisplacement(entry, map, foothold, desiredDir);
-        int velocityX = velocityFromDeltaX(deltaPhysX);
-        int newX = (int) Math.round(entry.physX);
-        int stepX = newX - currentPos.x;
-        Point snappedPoint = findGroundPoint(map, new Point(newX, currentPos.y));
-        boolean lostGround = snappedPoint == null || snappedPoint.y > currentPos.y + cfg.MAX_SNAP_DROP;
+        GroundStepResult step = simulateGroundMotion(map, currentPos, foothold, desiredDir,
+                new GroundTravelState(entry.physX, entry.hspeed, entry.groundPhysicsCarryMs));
 
         // Snap-up to a *different* foothold means the bot walked off the edge and a separate
         // platform happens to be within MAX_SLOPE_UP above. That is not an uphill slope of the
         // current foothold — the bot should fall, not jump up to the unconnected platform.
-        if (!lostGround && snappedPoint.y < currentPos.y) {
-            Foothold snappedFoothold = map.getFootholds().findBelow(new Point(newX, snappedPoint.y + 1));
-            if (!foothold.equals(snappedFoothold)) {
-                lostGround = true;
-            }
-        }
-
-        if (lostGround) {
+        if (step.lostGround()) {
             abortGroundMotion(entry, bot);
             return new GroundMotion(0, true);
         }
 
-        Point position = snappedPoint;
+        Point position = step.point();
         bot.setPosition(position);
         entry.inAir = false;
         entry.climbing = false;
@@ -390,10 +505,57 @@ final class BotPhysicsEngine {
         entry.airSteerVelX = 0.0;
         entry.physX = position.x;
         entry.physY = position.y;
+        entry.hspeed = step.state().hspeed();
+        entry.groundPhysicsCarryMs = step.state().carryMs();
         entry.downJumpPending = false;
-        setMovementVelocity(entry, velocityX, 0);
+        setMovementVelocity(entry, step.velocityX(), 0);
         syncCharacterState(entry);
-        return new GroundMotion(stepX, false);
+        return new GroundMotion(step.stepX(), false);
+    }
+
+    static GroundTravelState initialGroundTravelState(Point position) {
+        return new GroundTravelState(position.x, 0.0, 0.0);
+    }
+
+    static GroundStepResult simulateGroundMotion(MapleMap map,
+                                                 Point currentPos,
+                                                 Foothold foothold,
+                                                 int desiredDir,
+                                                 GroundTravelState state) {
+        if (map == null || currentPos == null || foothold == null || state == null) {
+            return new GroundStepResult(currentPos, foothold, state, 0, 0, true);
+        }
+
+        GroundTravelState displaced = applyGroundDisplacement(map, foothold, desiredDir, state);
+        int newX = (int) Math.round(displaced.physX());
+        int stepX = newX - currentPos.x;
+        Point standingPoint = findGroundPoint(map, currentPos);
+        int baselineY = standingPoint != null
+                && Math.abs(standingPoint.y - currentPos.y) <= cfg.MAX_SLOPE_UP
+                ? standingPoint.y
+                : currentPos.y;
+        int probeY = Math.max(currentPos.y, baselineY + 1);
+        Point snappedPoint = findGroundPoint(map, new Point(newX, probeY));
+        boolean lostGround = snappedPoint == null || snappedPoint.y > baselineY + cfg.MAX_SNAP_DROP;
+        Foothold snappedFoothold = snappedPoint == null || map.getFootholds() == null
+                ? null
+                : map.getFootholds().findBelow(new Point(newX, snappedPoint.y + 1));
+
+        if (!lostGround && snappedPoint.y < baselineY
+                && snappedFoothold != null
+                && !foothold.equals(snappedFoothold)
+                && !isSameWalkRegion(map, foothold, snappedFoothold)) {
+            lostGround = true;
+        }
+
+        if (lostGround) {
+            return new GroundStepResult(currentPos, foothold,
+                    new GroundTravelState(currentPos.x, 0.0, 0.0),
+                    0, 0, true);
+        }
+
+        return new GroundStepResult(snappedPoint, snappedFoothold != null ? snappedFoothold : foothold, displaced,
+                stepX, velocityFromDeltaX(displaced.physX() - currentPos.x), false);
     }
 
     static void abortGroundMotion(BotEntry entry, Character bot) {
@@ -691,38 +853,44 @@ final class BotPhysicsEngine {
         return Math.round(airVelPerTick * (1000f / cfg.TICK_MS));
     }
 
-    private static double applyGroundDisplacement(BotEntry entry, MapleMap map, Foothold foothold, int desiredDir) {
-        int steps = groundPhysicsSteps(entry, map);
-        if (steps == 0) {
+    private static GroundTravelState applyGroundDisplacement(MapleMap map,
+                                                             Foothold foothold,
+                                                             int desiredDir,
+                                                             GroundTravelState state) {
+        GroundStepCounter counter = groundPhysicsSteps(state.carryMs(), map);
+        if (counter.steps() == 0) {
+            return state;
+        }
+
+        double physX = state.physX();
+        double hspeed = state.hspeed();
+        for (int i = 0; i < counter.steps(); i++) {
+            hspeed = applyGroundPhysicsStep(hspeed, foothold, desiredDir);
+            physX += hspeed;
+        }
+        return new GroundTravelState(physX, hspeed, counter.carryMs());
+    }
+
+    private record GroundStepCounter(int steps, double carryMs) {
+    }
+
+    private static GroundStepCounter groundPhysicsSteps(double carryMs, MapleMap map) {
+        double nextCarryMs = carryMs + cfg.TICK_MS * mapGroundSpeedScale(map);
+        int steps = (int) (nextCarryMs / CLIENT_GROUND_STEP_MS);
+        nextCarryMs -= steps * CLIENT_GROUND_STEP_MS;
+        return new GroundStepCounter(steps, nextCarryMs);
+    }
+
+    private static double applyGroundPhysicsStep(double hspeed, Foothold foothold, int desiredDir) {
+        double hforce = desiredDir * maxHForcePerClientStep();
+        if (hforce == 0.0 && Math.abs(hspeed) < 0.1) {
             return 0.0;
         }
 
-        double startX = entry.physX;
-        for (int i = 0; i < steps; i++) {
-            applyGroundPhysicsStep(entry, foothold, desiredDir);
-            entry.physX += entry.hspeed;
-        }
-        return entry.physX - startX;
-    }
-
-    private static int groundPhysicsSteps(BotEntry entry, MapleMap map) {
-        entry.groundPhysicsCarryMs += cfg.TICK_MS * mapGroundSpeedScale(map);
-        int steps = (int) (entry.groundPhysicsCarryMs / CLIENT_GROUND_STEP_MS);
-        entry.groundPhysicsCarryMs -= steps * CLIENT_GROUND_STEP_MS;
-        return steps;
-    }
-
-    private static void applyGroundPhysicsStep(BotEntry entry, Foothold foothold, int desiredDir) {
-        double hforce = desiredDir * maxHForcePerClientStep();
-        if (hforce == 0.0 && Math.abs(entry.hspeed) < 0.1) {
-            entry.hspeed = 0.0;
-            return;
-        }
-
-        double inertia = entry.hspeed / cfg.GROUNDSLIP;
+        double inertia = hspeed / cfg.GROUNDSLIP;
         double slope = clampedSlope(foothold);
         double drag = (cfg.FRICTION + cfg.SLOPEFACTOR * (1.0 + slope * -inertia)) * inertia;
-        entry.hspeed += hforce - drag;
+        return hspeed + hforce - drag;
     }
 
     private static double clampedSlope(Foothold foothold) {

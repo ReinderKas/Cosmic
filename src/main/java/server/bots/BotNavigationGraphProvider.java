@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
-    private static final int GRAPH_VERSION = 14;
+    private static final int GRAPH_VERSION = 16;
     private static final int WALK_CONNECTION_GAP_PX = 12;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
     private static final int ROPE_ANCHOR_INTERVAL_PX = 30;
@@ -196,31 +196,10 @@ final class BotNavigationGraphProvider {
     }
 
     private static void unionWalkableFootholds(UnionFind unionFind, Foothold first, Foothold second) {
-        if (!canMergeIntoRegion(first, second)) {
+        if (!BotPhysicsEngine.canWalkAcrossFootholds(first, second)) {
             return;
         }
         unionFind.union(first.getId(), second.getId());
-    }
-
-    private static boolean canMergeIntoRegion(Foothold first, Foothold second) {
-        if (first == null || second == null || first.isWall() || second.isWall()) {
-            return false;
-        }
-
-        EndpointConnection connection = sharedEndpointConnection(first, second);
-        if (connection == null) {
-            // Some maps have linked footholds whose stored endpoints are off by a couple pixels.
-            // Accept a 2px Manhattan close-match so runtime walking can still bridge it.
-            connection = closestEndpointConnection(first, second);
-            if (connection == null ||
-                    (Math.abs(connection.to.x - connection.from.x)
-                            + Math.abs(connection.to.y - connection.from.y)) > 2) {
-                return false;
-            }
-        }
-
-        return isWalkConnection(connection)
-                && hasCompatiblePlatformShape(first, second, connection.from);
     }
 
     private static void addWalkEdges(Foothold foothold,
