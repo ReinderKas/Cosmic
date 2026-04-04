@@ -28,6 +28,7 @@ import server.StatEffect;
 import server.TimerManager;
 import server.life.Monster;
 import server.bots.pq.BotPqHooks;
+import server.maps.Foothold;
 import server.maps.MapItem;
 import server.maps.MapleMap;
 import server.quest.Quest;
@@ -91,8 +92,8 @@ public class BotManager {
 
     enum FormationType { STAGGER, RANDOM, STACK, SPREAD, LEFT, RIGHT }
 
-    record FormationState(FormationType type, int px) {
-        static FormationState defaultStagger() { return new FormationState(FormationType.STAGGER, cfg.FOLLOW_STAGGER); }
+    record FormationState(FormationType type, int px, boolean snapY) {
+        static FormationState defaultStagger() { return new FormationState(FormationType.STAGGER, cfg.FOLLOW_STAGGER, true); }
         int offsetFor(int idx, int total) {
             return switch (type) {
                 case STAGGER -> (idx % 2 == 0 ? 1 : -1) * (idx / 2 + 1) * px;
@@ -112,7 +113,7 @@ public class BotManager {
     private static final Pattern RECRUIT_PATTERN = Pattern.compile(
             "\\b(recruit|adopt|hire|claim)\\s+(\\S+)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern FORMATION_PATTERN = Pattern.compile(
-            "\\bformation\\b(?:\\s+(stagger|split|random|stack|spread|tight|loose|left|right)(?:\\s+(\\d+|tight|loose))?)?",
+            "\\bformation\\b(?:\\s+(stagger|split|random|stack|spread|tight|loose|left|right|snap)(?:\\s+(\\d+|tight|loose|on|off))?)?",
             Pattern.CASE_INSENSITIVE);
     // Reserve `give ...` for item requests handled by BotChatManager.
     private static final Pattern TRANSFER_PATTERN = Pattern.compile(
@@ -608,15 +609,28 @@ public class BotManager {
             String typeStr = fm.group(1);
             List<BotEntry> fEntries = bots.get(owner.getId());
             if (typeStr == null) {
-                String help = "formations: stagger/split/random/spread/left/right <px>, stack, tight, loose";
+                String help = "formations: stagger/split/random/spread/left/right <px>, stack, tight, loose | snap on/off";
                 if (fEntries != null && !fEntries.isEmpty()) BotChatManager.queueBotSay(fEntries.get(0), help);
                 else owner.yellowMessage(help);
                 return;
             }
+            FormationState current = ownerFormations.getOrDefault(owner.getId(), FormationState.defaultStagger());
+            // snap on/off — only changes Y-snap flag, preserves type/px
+            if (typeStr.equalsIgnoreCase("snap")) {
+                String qualifier = fm.group(2);
+                boolean snapY = qualifier == null || qualifier.equalsIgnoreCase("on");
+                FormationState fs = new FormationState(current.type(), current.px(), snapY);
+                ownerFormations.put(owner.getId(), fs);
+                if (fEntries != null && !fEntries.isEmpty())
+                    BotChatManager.queueBotSay(fEntries.get(0), "snap: " + (snapY ? "on" : "off"));
+                return;
+            }
             String pxToken = fm.group(2);
-            int defaultPx = pxToken == null          ? cfg.FOLLOW_STAGGER
-                          : pxToken.equalsIgnoreCase("tight") ? 30
-                          : pxToken.equalsIgnoreCase("loose") ? 120
+            int defaultPx = pxToken == null                      ? cfg.FOLLOW_STAGGER
+                          : pxToken.equalsIgnoreCase("tight")    ? 30
+                          : pxToken.equalsIgnoreCase("loose")    ? 120
+                          : pxToken.equalsIgnoreCase("on")
+                            || pxToken.equalsIgnoreCase("off")   ? cfg.FOLLOW_STAGGER
                           : Integer.parseInt(pxToken);
             FormationType type;
             int px = defaultPx;
@@ -631,7 +645,7 @@ public class BotManager {
                 case "split","stagger"-> { type = FormationType.STAGGER; px = defaultPx; }
                 default               -> { type = FormationType.STAGGER; px = defaultPx; }
             }
-            FormationState fs = new FormationState(type, px);
+            FormationState fs = new FormationState(type, px, current.snapY());
             ownerFormations.put(owner.getId(), fs);
             if (fEntries != null) {
                 for (int i = 0; i < fEntries.size(); i++) fEntries.get(i).followOffsetX = fs.offsetFor(i, fEntries.size());
@@ -727,6 +741,30 @@ public class BotManager {
     }
 
     // -------------------------------------------------------------------------
+    /**
+     * Resolve Y for the follow target at ownerX so the bot aims at a reachable ground
+     * point rather than the owner's exact position (which may be on a different foothold).
+     * Priority:
+     *   1. Ground at ownerX within the bot's own walk region (stay on current platform)
+     *   2. Ground snapped to the nearest foothold at ownerPos (any platform)
+     *   3. Raw ownerPos (original behaviour)
+     */
+    private static Point resolveFollowTargetPos(Character bot, Point botPos, Point ownerPos, boolean snapY) {
+        if (!snapY) return ownerPos;
+        MapleMap map = bot.getMap();
+        int yCap = BotMovementManager.cfg.FOLLOW_Y_CAP;
+        Foothold botFh = BotPhysicsEngine.findGroundFoothold(map, botPos);
+        if (botFh != null) {
+            Point snapped = BotPhysicsEngine.findWalkRegionGroundPoint(map, botFh, ownerPos.x, botPos.y);
+            if (snapped != null && Math.abs(snapped.y - botPos.y) <= yCap)
+                return new Point(ownerPos.x, snapped.y);
+        }
+        Point ground = BotPhysicsEngine.findGroundPoint(map, ownerPos);
+        if (ground != null && Math.abs(ground.y - botPos.y) <= yCap)
+            return new Point(ownerPos.x, ground.y);
+        return ownerPos;
+    }
+
     // Main tick
     // -------------------------------------------------------------------------
 
@@ -772,7 +810,16 @@ public class BotManager {
         }
 
         Point botPos    = bot.getPosition();
-        Point targetPos = entry.moveTarget != null ? entry.moveTarget : owner.getPosition();
+        boolean snapFollowY = ownerFormations.getOrDefault(ownerCharId, FormationState.defaultStagger()).snapY();
+        // Apply formation X offset before Y-snap so the snap resolves at the bot's actual target X.
+        // Offset is skipped when a nav edge is active (waypoint navigation takes precedence).
+        Point ownerPos = owner.getPosition();
+        Point followBase = entry.navEdge == null
+                ? new Point(ownerPos.x + entry.followOffsetX, ownerPos.y)
+                : ownerPos;
+        Point targetPos = entry.moveTarget != null ? entry.moveTarget
+                : entry.following ? resolveFollowTargetPos(bot, botPos, followBase, snapFollowY)
+                : ownerPos;
 
         // These run in all modes (idle, follow, grind)
         BotCombatManager.tickMobDamage(entry, bot);
@@ -821,7 +868,6 @@ public class BotManager {
         // Map change and teleport checks only apply when following owner
         if (entry.following) {
             if (bot.getMapId() != owner.getMapId()) {
-                Point ownerPos = owner.getPosition();
                 Point spawn = BotPhysicsEngine.findGroundPoint(owner.getMap(), new Point(ownerPos.x, ownerPos.y - 1));
                 if (spawn == null) {
                     spawn = ownerPos;
@@ -932,9 +978,10 @@ public class BotManager {
         }
         targetPos = navDirective.targetPos;
 
-        // Spread bots out on the same platform — only when no cross-region nav edge is active,
-        // so precise jump/climb/portal waypoints aren't disrupted.
-        if ((entry.following || entry.grinding) && entry.navEdge == null) {
+        // Spread grinding bots out on the same platform — only when no cross-region nav edge is
+        // active so precise jump/climb/portal waypoints aren't disrupted.
+        // (Follow offset is already applied above before Y-snap.)
+        if (entry.grinding && entry.navEdge == null) {
             targetPos = new Point(targetPos.x + entry.followOffsetX, targetPos.y);
         }
 

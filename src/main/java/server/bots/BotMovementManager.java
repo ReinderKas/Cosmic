@@ -81,6 +81,7 @@ class BotMovementManager {
         public int JUMP_Y_THRESH = 30;
         public int JUMP_COOLDOWN_MS = 1000;
         public int TELEPORT_DIST = 4000;
+        public int FOLLOW_Y_CAP = 200; // max vertical distance for Y-snapped follow target
     }
 
     static Config cfg = bindConfig(new Config());
