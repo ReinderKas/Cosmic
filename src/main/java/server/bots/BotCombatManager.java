@@ -513,7 +513,7 @@ class BotCombatManager {
         int direction = route == AttackRoute.CLOSE
                 ? closeRangePacketFields.direction()
                 : basicAttackDirectionId(action, fallbackAction);
-        SkillAttackTiming skillTiming = resolveSkillAttackTiming(skill, route, bot, fallbackAttackData);
+        SkillAttackTiming skillTiming = resolveSkillAttackTiming(skill, action, bot, fallbackAttackData);
         return new AttackPlan(entry.aoeSkillId, skillLevel, attackCount, hitBox, targets,
                 route, route == AttackRoute.CLOSE ? closeRangePacketFields.display() : 0,
                 direction, direction, route == AttackRoute.CLOSE ? closeRangePacketFields.stance() : 0,
@@ -551,7 +551,7 @@ class BotCombatManager {
         int direction = route == AttackRoute.CLOSE
                 ? closeRangePacketFields.direction()
                 : basicAttackDirectionId(action, fallbackAction);
-        SkillAttackTiming skillTiming = resolveSkillAttackTiming(skill, route, bot, fallbackAttackData);
+        SkillAttackTiming skillTiming = resolveSkillAttackTiming(skill, action, bot, fallbackAttackData);
         return new AttackPlan(entry.attackSkillId, skillLevel, attackCount, hitBox, List.of(primaryTarget),
                 route, route == AttackRoute.CLOSE ? closeRangePacketFields.display() : 0,
                 direction, direction, route == AttackRoute.CLOSE ? closeRangePacketFields.stance() : 0,
@@ -1049,31 +1049,44 @@ class BotCombatManager {
         return Math.max(0, skill.getAnimationTime());
     }
 
-    static SkillAttackTiming resolveSkillAttackTiming(Skill skill, AttackRoute route, Character bot,
+    static SkillAttackTiming resolveSkillAttackTiming(Skill skill, String action, Character bot,
                                                       BasicAttackData fallbackAttackData) {
         int fallbackHitDelayMs = fallbackAttackData != null ? fallbackAttackData.hitDelayMs : defaultHitDelayMs(600);
         int fallbackCooldownMs = fallbackAttackData != null ? fallbackAttackData.cooldownMs : toCooldownMs(600);
-        int rawSkillDelayMs = resolveSkillAttackDelayMillis(skill);
-        if (rawSkillDelayMs <= 0) {
-            return new SkillAttackTiming(fallbackHitDelayMs, fallbackCooldownMs);
-        }
-
-        return resolveSkillAttackTiming(rawSkillDelayMs,
-                route == AttackRoute.CLOSE || route == AttackRoute.RANGED,
+        return resolveSkillAttackTiming(action, resolveSkillAttackDelayMillis(skill),
                 resolveBaseWeaponAttackSpeed(bot), resolveWeaponAttackSpeed(bot),
                 fallbackHitDelayMs, fallbackCooldownMs);
     }
 
-    static SkillAttackTiming resolveSkillAttackTiming(int rawSkillDelayMs, boolean attackSpeedAdjusted,
+    static SkillAttackTiming resolveSkillAttackTiming(String action, int rawSkillDelayMs,
+                                                      int baseWeaponAttackSpeed, int effectiveWeaponAttackSpeed,
+                                                      int fallbackHitDelayMs, int fallbackCooldownMs) {
+        BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
+        int rawActionCooldownMs = provider.getBodyActionDurationMs(action);
+        if (rawActionCooldownMs > 0) {
+            int rawActionHitDelayMs = provider.getBodyActionAttackDelayMs(action, 0);
+            int adjustedActionCooldownMs = adjustAttackDelayMillis(rawActionCooldownMs,
+                    baseWeaponAttackSpeed, effectiveWeaponAttackSpeed);
+            int adjustedActionHitDelayMs = rawActionHitDelayMs >= 0
+                    ? adjustAttackDelayMillis(rawActionHitDelayMs, baseWeaponAttackSpeed, effectiveWeaponAttackSpeed)
+                    : defaultHitDelayMs(adjustedActionCooldownMs);
+            return new SkillAttackTiming(adjustedActionHitDelayMs,
+                    Math.max(toCooldownMs(adjustedActionCooldownMs), fallbackCooldownMs));
+        }
+
+        return resolveSkillAttackTiming(rawSkillDelayMs, baseWeaponAttackSpeed, effectiveWeaponAttackSpeed,
+                fallbackHitDelayMs, fallbackCooldownMs);
+    }
+
+    static SkillAttackTiming resolveSkillAttackTiming(int rawSkillDelayMs,
                                                       int baseWeaponAttackSpeed, int effectiveWeaponAttackSpeed,
                                                       int fallbackHitDelayMs, int fallbackCooldownMs) {
         if (rawSkillDelayMs <= 0) {
             return new SkillAttackTiming(fallbackHitDelayMs, fallbackCooldownMs);
         }
 
-        int adjustedSkillDelayMs = attackSpeedAdjusted
-                ? adjustAttackDelayMillis(rawSkillDelayMs, baseWeaponAttackSpeed, effectiveWeaponAttackSpeed)
-                : rawSkillDelayMs;
+        int adjustedSkillDelayMs =
+                adjustAttackDelayMillis(rawSkillDelayMs, baseWeaponAttackSpeed, effectiveWeaponAttackSpeed);
         return new SkillAttackTiming(defaultHitDelayMs(adjustedSkillDelayMs),
                 Math.max(toCooldownMs(adjustedSkillDelayMs), fallbackCooldownMs));
     }

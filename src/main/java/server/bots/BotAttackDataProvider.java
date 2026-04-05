@@ -114,6 +114,9 @@ final class BotAttackDataProvider {
     private record BodyStanceTiming(List<Integer> frameDelays, int totalDelayMillis) {
     }
 
+    private record BodyActionTiming(List<Integer> attackFrameDelays, int totalDelayMillis) {
+    }
+
     private static final class AttackBoundsData {
         private final Rectangle bounds;
         private final int attackDelayMillis;
@@ -133,6 +136,7 @@ final class BotAttackDataProvider {
 
     private final Map<Integer, NormalAttackProfile> normalAttackProfiles = new HashMap<>();
     private volatile Map<String, BodyStanceTiming> bodyStanceTimings = null;
+    private volatile Map<String, BodyActionTiming> bodyActionTimings = null;
     private volatile Map<String, Integer> bodyActionIds = null;
     private volatile Path cachedCharacterRoot = null;
 
@@ -323,6 +327,19 @@ final class BotAttackDataProvider {
         return delay;
     }
 
+    int getBodyActionDurationMs(String actionName) {
+        BodyActionTiming timing = getBodyActionTiming(actionName);
+        return timing != null ? timing.totalDelayMillis() : 0;
+    }
+
+    int getBodyActionAttackDelayMs(String actionName, int attackIndex) {
+        BodyActionTiming timing = getBodyActionTiming(actionName);
+        if (timing == null || attackIndex < 0 || attackIndex >= timing.attackFrameDelays().size()) {
+            return -1;
+        }
+        return timing.attackFrameDelays().get(attackIndex);
+    }
+
     int getBodyActionId(String actionName) {
         if (actionName == null || actionName.isBlank()) {
             return -1;
@@ -351,6 +368,22 @@ final class BotAttackDataProvider {
         return bodyStanceTimings.get(stanceName);
     }
 
+    private BodyActionTiming getBodyActionTiming(String actionName) {
+        if (actionName == null || actionName.isBlank()) {
+            return null;
+        }
+
+        ensureCurrentCharacterRoot();
+        if (bodyActionTimings == null) {
+            synchronized (this) {
+                if (bodyActionTimings == null) {
+                    bodyActionTimings = loadBodyActionTimings();
+                }
+            }
+        }
+        return bodyActionTimings.get(actionName);
+    }
+
     private void ensureCurrentCharacterRoot() {
         Path currentCharacterRoot = WZFiles.CHARACTER.getFile();
         Path previousCharacterRoot = cachedCharacterRoot;
@@ -364,6 +397,7 @@ final class BotAttackDataProvider {
             }
             normalAttackProfiles.clear();
             bodyStanceTimings = null;
+            bodyActionTimings = null;
             bodyActionIds = null;
             cachedCharacterRoot = currentCharacterRoot;
         }
@@ -407,6 +441,51 @@ final class BotAttackDataProvider {
         }
 
         log.info("Bot attack timing: loaded {} body stances from {}", timings.size(), bodyFile.getFileName());
+        return Map.copyOf(timings);
+    }
+
+    private Map<String, BodyActionTiming> loadBodyActionTimings() {
+        Path bodyFile = WZFiles.CHARACTER.getFile().resolve("00002000.img.xml");
+        if (!Files.isRegularFile(bodyFile)) {
+            log.warn("Bot skill timing: body animation file not found at {}", bodyFile);
+            return Map.of();
+        }
+
+        Document doc = parseXmlDocument(bodyFile);
+        if (doc == null) {
+            return Map.of();
+        }
+
+        Map<String, BodyActionTiming> timings = new HashMap<>();
+        for (Element actionEl : getNamedChildren(doc.getDocumentElement())) {
+            String actionName = actionEl.getAttribute("name");
+            if (actionName.isBlank()) {
+                continue;
+            }
+
+            List<Integer> attackFrameDelays = new ArrayList<>();
+            int totalDelay = 0;
+            boolean sawActionFrame = false;
+            for (Element frameEl : getNamedChildren(actionEl)) {
+                if (findNamedChild(frameEl, "action") == null) {
+                    continue;
+                }
+
+                sawActionFrame = true;
+                int signedDelay = getIntValue(findNamedChild(frameEl, "delay"), 0);
+                int frameDelay = signedDelay == 0 ? 100 : Math.abs(signedDelay);
+                if (signedDelay >= 0) {
+                    attackFrameDelays.add(totalDelay);
+                }
+                totalDelay += frameDelay;
+            }
+
+            if (sawActionFrame && totalDelay > 0) {
+                timings.put(actionName, new BodyActionTiming(List.copyOf(attackFrameDelays), totalDelay));
+            }
+        }
+
+        log.info("Bot skill timing: loaded {} body action timings from {}", timings.size(), bodyFile.getFileName());
         return Map.copyOf(timings);
     }
 
