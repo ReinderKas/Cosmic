@@ -503,13 +503,16 @@ class BotCombatManager {
         AttackRoute route = determineSkillRoute(bot, entry.aoeSkillId);
         boolean facingLeft = primaryTarget.getPosition().x < bot.getPosition().x;
         BasicAttackData fallbackAttackData = buildBasicAttackData(bot, primaryTarget);
+        WeaponType weaponType = getEquippedWeaponType(bot);
+        BasicAttackSpec attackSpec = resolveWeaponAttackSpec(bot, weaponType);
+        String action = sampleSkillAttackAction(bot, route, weaponType);
+        String fallbackAction = route == AttackRoute.MAGIC ? "magic1" : attackSpec.primaryAction();
         CloseRangePacketFields closeRangePacketFields = route == AttackRoute.CLOSE
-                ? mimicCloseRangePacketFields(sampleCloseRangeAttackAction(bot, getEquippedWeaponType(bot)),
-                basicAttackSpec(getEquippedWeaponType(bot)).primaryAction(), 6, facingLeft)
+                ? mimicCloseRangePacketFields(action, fallbackAction, facingLeft)
                 : null;
         int direction = route == AttackRoute.CLOSE
                 ? closeRangePacketFields.direction()
-                : (facingLeft ? 17 : 6);
+                : basicAttackDirectionId(action, fallbackAction);
         SkillAttackTiming skillTiming = resolveSkillAttackTiming(skill, route, bot, fallbackAttackData);
         return new AttackPlan(entry.aoeSkillId, skillLevel, attackCount, hitBox, targets,
                 route, route == AttackRoute.CLOSE ? closeRangePacketFields.display() : 0,
@@ -538,13 +541,16 @@ class BotCombatManager {
         AttackRoute route = determineSkillRoute(bot, entry.attackSkillId);
         boolean facingLeft = primaryTarget.getPosition().x < bot.getPosition().x;
         BasicAttackData fallbackAttackData = buildBasicAttackData(bot, primaryTarget);
+        WeaponType weaponType = getEquippedWeaponType(bot);
+        BasicAttackSpec attackSpec = resolveWeaponAttackSpec(bot, weaponType);
+        String action = sampleSkillAttackAction(bot, route, weaponType);
+        String fallbackAction = route == AttackRoute.MAGIC ? "magic1" : attackSpec.primaryAction();
         CloseRangePacketFields closeRangePacketFields = route == AttackRoute.CLOSE
-                ? mimicCloseRangePacketFields(sampleCloseRangeAttackAction(bot, getEquippedWeaponType(bot)),
-                basicAttackSpec(getEquippedWeaponType(bot)).primaryAction(), 6, facingLeft)
+                ? mimicCloseRangePacketFields(action, fallbackAction, facingLeft)
                 : null;
         int direction = route == AttackRoute.CLOSE
                 ? closeRangePacketFields.direction()
-                : (facingLeft ? 17 : 6);
+                : basicAttackDirectionId(action, fallbackAction);
         SkillAttackTiming skillTiming = resolveSkillAttackTiming(skill, route, bot, fallbackAttackData);
         return new AttackPlan(entry.attackSkillId, skillLevel, attackCount, hitBox, List.of(primaryTarget),
                 route, route == AttackRoute.CLOSE ? closeRangePacketFields.display() : 0,
@@ -733,6 +739,20 @@ class BotCombatManager {
      * Maps weapon types to the same attack display groups and action pools used by
      * OpenStory's {@code CharLook::getattackstance} regular-attack selection.
      */
+    static BasicAttackSpec basicAttackSpec(int attackGroup, WeaponType fallbackWeaponType) {
+        return switch (attackGroup) {
+            case 1 -> new BasicAttackSpec(1, List.of("stabO1", "stabO2", "swingO1", "swingO2", "swingO3"));
+            case 2 -> new BasicAttackSpec(2, List.of("stabT1", "swingP1"));
+            case 3 -> new BasicAttackSpec(3, List.of("shoot1"));
+            case 4 -> new BasicAttackSpec(4, List.of("shoot2"));
+            case 5 -> new BasicAttackSpec(5, List.of("stabO1", "stabO2", "swingT1", "swingT2", "swingT3"));
+            case 6 -> new BasicAttackSpec(6, List.of("swingO1", "swingO2"));
+            case 7 -> new BasicAttackSpec(7, List.of("swingO1", "swingO2"));
+            case 9 -> new BasicAttackSpec(9, List.of("shot"));
+            default -> basicAttackSpec(fallbackWeaponType);
+        };
+    }
+
     static BasicAttackSpec basicAttackSpec(WeaponType weaponType) {
         if (weaponType == null) {
             return new BasicAttackSpec(1, List.of("stabO1", "stabO2", "swingO1", "swingO2", "swingO3"));
@@ -772,64 +792,94 @@ class BotCombatManager {
         };
     }
 
-    static int basicAttackDirectionId(String actionName, String fallbackAction, int legacyFallbackDirection) {
-        if (isProneBasicAttackAction(actionName)) {
-            return legacyFallbackDirection;
-        }
-
+    static int basicAttackDirectionId(String actionName, String fallbackAction) {
         BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
         int actionId = provider.getBodyActionId(actionName);
         if (actionId >= 0) {
             return actionId;
         }
 
-        if (fallbackAction != null && !fallbackAction.equals(actionName) && !isProneBasicAttackAction(fallbackAction)) {
+        if (fallbackAction != null && !fallbackAction.equals(actionName)) {
             int fallbackActionId = provider.getBodyActionId(fallbackAction);
             if (fallbackActionId >= 0) {
                 return fallbackActionId;
             }
         }
 
-        return legacyFallbackDirection;
+        return 0;
     }
 
     // Captured close-range recv packets on this client use display=0, encode the
     // body action id in the direction byte, and use stance as a facing flag:
     // 0x00 facing right, 0x80 facing left.
-    static CloseRangePacketFields mimicCloseRangePacketFields(String actionName, String fallbackAction,
-                                                              int legacyFallbackDirection, boolean facingLeft) {
+    static CloseRangePacketFields mimicCloseRangePacketFields(String actionName, String fallbackAction, boolean facingLeft) {
         return new CloseRangePacketFields(0,
-                basicAttackDirectionId(actionName, fallbackAction, legacyFallbackDirection),
+                basicAttackDirectionId(actionName, fallbackAction),
                 facingLeft ? 0x80 : 0x00);
     }
 
-    private static boolean isProneBasicAttackAction(String actionName) {
-        return actionName != null && actionName.startsWith("prone");
+    static List<String> resolveAttackActions(BasicAttackSpec attackSpec, List<String> sourceActions) {
+        if (attackSpec == null || attackSpec.actions().isEmpty()) {
+            return List.of("swingO1");
+        }
+
+        if (sourceActions == null || sourceActions.isEmpty()) {
+            return attackSpec.actions();
+        }
+
+        List<String> resolvedActions = new ArrayList<>();
+        for (String attackAction : attackSpec.actions()) {
+            if (sourceActions.contains(attackAction)) {
+                resolvedActions.add(attackAction);
+            }
+        }
+
+        return resolvedActions.isEmpty() ? attackSpec.actions() : List.copyOf(resolvedActions);
     }
 
-    private static String sampleCloseRangeAttackAction(Character bot, WeaponType weaponType) {
-        BasicAttackSpec attackSpec = basicAttackSpec(weaponType);
-        String fallbackAction = attackSpec.primaryAction();
-        String action = fallbackAction;
+    private static String sampleAttackAction(List<String> candidateActions, String fallbackAction) {
+        if (candidateActions == null || candidateActions.isEmpty()) {
+            return fallbackAction;
+        }
 
+        int variantOffset = ThreadLocalRandom.current().nextInt(candidateActions.size());
+        return candidateActions.get(variantOffset);
+    }
+
+    private static BasicAttackSpec resolveWeaponAttackSpec(Character bot, WeaponType weaponType) {
+        Item weapon = bot != null ? bot.getInventory(InventoryType.EQUIPPED).getItem((short) -11) : null;
+        if (weapon != null) {
+            BotAttackDataProvider.NormalAttackProfile attackProfile =
+                    BotAttackDataProvider.getInstance().getNormalAttackProfile(weapon.getItemId());
+            if (attackProfile != null && attackProfile.getAttack() > 0) {
+                return basicAttackSpec(attackProfile.getAttack(), weaponType);
+            }
+        }
+        return basicAttackSpec(weaponType);
+    }
+
+    private static String sampleWeaponAttackAction(Character bot, WeaponType weaponType) {
         Item weapon = bot != null ? bot.getInventory(InventoryType.EQUIPPED).getItem((short) -11) : null;
         if (weapon != null) {
             BotAttackDataProvider.NormalAttackProfile attackProfile =
                     BotAttackDataProvider.getInstance().getNormalAttackProfile(weapon.getItemId());
             if (attackProfile != null) {
-                int variantCount = Math.max(1, BasicAttackData.countMoveVariants(attackProfile.getSourceActions()));
-                int variantOffset = ThreadLocalRandom.current().nextInt(variantCount);
-                action = attackProfile.getActionForVariant(variantOffset, fallbackAction);
-            } else if (!attackSpec.actions().isEmpty()) {
-                int variantOffset = ThreadLocalRandom.current().nextInt(attackSpec.actions().size());
-                action = attackSpec.actionForVariant(variantOffset);
+                BasicAttackSpec attackSpec = basicAttackSpec(attackProfile.getAttack(), weaponType);
+                return sampleAttackAction(resolveAttackActions(attackSpec, attackProfile.getSourceActions()),
+                        attackSpec.primaryAction());
             }
-        } else if (!attackSpec.actions().isEmpty()) {
-            int variantOffset = ThreadLocalRandom.current().nextInt(attackSpec.actions().size());
-            action = attackSpec.actionForVariant(variantOffset);
         }
 
-        return action;
+        BasicAttackSpec attackSpec = basicAttackSpec(weaponType);
+        return sampleAttackAction(attackSpec.actions(), attackSpec.primaryAction());
+    }
+
+    private static String sampleSkillAttackAction(Character bot, AttackRoute route, WeaponType weaponType) {
+        if (route == AttackRoute.MAGIC) {
+            List<String> magicActions = List.of("magic1", "magic2", "magic3", "magic5");
+            return sampleAttackAction(magicActions, "magic1");
+        }
+        return sampleWeaponAttackAction(bot, weaponType);
     }
 
     private static void applyAttackRoute(AttackRoute route, AbstractDealDamageHandler.AttackInfo attack, Character bot) {
@@ -896,21 +946,21 @@ class BotCombatManager {
                                    int stance, int speed, int hitDelayMs, int cooldownMs) {
         private static BasicAttackData fromProfile(BotAttackDataProvider.NormalAttackProfile profile, WeaponType weaponType, Rectangle hitBox, boolean facingLeft, Character bot) {
             int baseDisplay = profile.getAttack();
-            BasicAttackSpec fallbackSpec = basicAttackSpec(weaponType);
+            BasicAttackSpec attackSpec = basicAttackSpec(baseDisplay, weaponType);
             if (baseDisplay <= 0) {
                 return fallback(facingLeft, hitBox, profile.getAttackSpeed(), weaponType, bot);
             }
 
-            int variantCount = Math.max(1, countMoveVariants(profile.getSourceActions()));
-            int variantOffset = ThreadLocalRandom.current().nextInt(variantCount);
-            String fallbackAction = fallbackSpec.primaryAction();
-            String action = profile.getActionForVariant(variantOffset, fallbackAction);
+            String fallbackAction = attackSpec.primaryAction();
+            List<String> candidateActions = resolveAttackActions(attackSpec, profile.getSourceActions());
+            String action = sampleAttackAction(candidateActions, fallbackAction);
+            int variantOffset = Math.max(0, attackSpec.actions().indexOf(action));
             boolean closeRangeRoute = determineWeaponRoute(weaponType) == AttackRoute.CLOSE;
-            CloseRangePacketFields closeRangePacketFields = mimicCloseRangePacketFields(action, fallbackAction, 6, facingLeft);
+            CloseRangePacketFields closeRangePacketFields = mimicCloseRangePacketFields(action, fallbackAction, facingLeft);
             int display = closeRangeRoute ? closeRangePacketFields.display() : baseDisplay + variantOffset;
             int direction = closeRangeRoute
                     ? closeRangePacketFields.direction()
-                    : basicAttackDirectionId(action, fallbackAction, facingLeft ? display + 11 : display);
+                    : basicAttackDirectionId(action, fallbackAction);
             int effectiveAttackSpeed = resolveEffectiveAttackSpeed(profile.getAttackSpeed(), bot);
             BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
 
@@ -936,15 +986,15 @@ class BotCombatManager {
         private static BasicAttackData fallback(boolean facingLeft, Rectangle hitBox, int baseAttackSpeed,
                                                 WeaponType weaponType, Character bot) {
             BasicAttackSpec attackSpec = basicAttackSpec(weaponType);
-            int variantOffset = ThreadLocalRandom.current().nextInt(attackSpec.actions().size());
-            String action = attackSpec.actionForVariant(variantOffset);
+            String action = sampleAttackAction(attackSpec.actions(), attackSpec.primaryAction());
+            int variantOffset = Math.max(0, attackSpec.actions().indexOf(action));
             boolean closeRangeRoute = determineWeaponRoute(weaponType) == AttackRoute.CLOSE;
             CloseRangePacketFields closeRangePacketFields =
-                    mimicCloseRangePacketFields(action, attackSpec.primaryAction(), 6, facingLeft);
+                    mimicCloseRangePacketFields(action, attackSpec.primaryAction(), facingLeft);
             int display = closeRangeRoute ? closeRangePacketFields.display() : attackSpec.display() + variantOffset;
             int direction = closeRangeRoute
                     ? closeRangePacketFields.direction()
-                    : basicAttackDirectionId(action, attackSpec.primaryAction(), facingLeft ? display + 11 : display);
+                    : basicAttackDirectionId(action, attackSpec.primaryAction());
             int effectiveAttackSpeed = resolveEffectiveAttackSpeed(baseAttackSpeed, bot);
             int rawAnimationDelayMs = BotAttackDataProvider.getInstance().getBodyStanceDurationMs(action);
             if (rawAnimationDelayMs <= 0) {

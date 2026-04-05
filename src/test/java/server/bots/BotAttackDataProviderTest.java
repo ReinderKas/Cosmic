@@ -8,6 +8,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -103,17 +104,29 @@ class BotAttackDataProviderTest {
         assertEquals(7, provider.getBodyActionId("swingO3"));
         assertEquals(16, provider.getBodyActionId("stabO1"));
         assertEquals(17, provider.getBodyActionId("stabO2"));
-        assertEquals(6, BotCombatManager.basicAttackDirectionId("swingO2", "swingO1", 999));
+        assertEquals(32, provider.getBodyActionId("proneStab"));
+        assertEquals(6, BotCombatManager.basicAttackDirectionId("swingO2", "swingO1"));
         BotCombatManager.CloseRangePacketFields closeRangeFields =
-                BotCombatManager.mimicCloseRangePacketFields("stabO1", "swingO1", 999, false);
+                BotCombatManager.mimicCloseRangePacketFields("stabO1", "swingO1", false);
         assertEquals(0, closeRangeFields.display());
         assertEquals(16, closeRangeFields.direction());
         assertEquals(0, closeRangeFields.stance());
-        assertEquals(0x80, BotCombatManager.mimicCloseRangePacketFields("stabO1", "swingO1", 999, true).stance());
+        assertEquals(0x80, BotCombatManager.mimicCloseRangePacketFields("stabO1", "swingO1", true).stance());
 
         BotAttackDataProvider.NormalAttackProfile profile = provider.getNormalAttackProfile(1302077);
         assertNotNull(profile);
         assertTrue(profile.getSourceActions().contains("swingO1"));
         assertEquals(2, profile.getAfterimageFirstFrame("swingO1"));
+    }
+
+    @Test
+    void shouldFilterWeaponActionsToLegalAttackGroupAnimations() {
+        BotCombatManager.BasicAttackSpec attackSpec =
+                BotCombatManager.basicAttackSpec(1, client.inventory.WeaponType.GENERAL1H_SWING);
+
+        List<String> actions = BotCombatManager.resolveAttackActions(attackSpec,
+                List.of("swingOF", "stabO1", "proneStab", "swingO3", "stabOF"));
+
+        assertEquals(List.of("stabO1", "swingO3"), actions);
     }
 }

@@ -25,6 +25,39 @@ import javax.xml.parsers.ParserConfigurationException;
 final class BotAttackDataProvider {
     private static final Logger log = LoggerFactory.getLogger(BotAttackDataProvider.class);
     private static final BotAttackDataProvider instance = new BotAttackDataProvider();
+    private static final Map<String, Integer> BODY_ACTION_ID_OVERRIDES = Map.ofEntries(
+            Map.entry("walk1", 0),
+            Map.entry("walk2", 1),
+            Map.entry("stand1", 2),
+            Map.entry("stand2", 3),
+            Map.entry("alert", 4),
+            Map.entry("swingO1", 5),
+            Map.entry("swingO2", 6),
+            Map.entry("swingO3", 7),
+            Map.entry("swingOF", 8),
+            Map.entry("swingT1", 9),
+            Map.entry("swingT2", 10),
+            Map.entry("swingT3", 11),
+            Map.entry("swingTF", 12),
+            Map.entry("swingP1", 13),
+            Map.entry("swingP2", 14),
+            Map.entry("swingPF", 15),
+            Map.entry("stabO1", 16),
+            Map.entry("stabO2", 17),
+            Map.entry("stabOF", 18),
+            Map.entry("stabT1", 19),
+            Map.entry("stabT2", 20),
+            Map.entry("stabTF", 21),
+            Map.entry("shoot1", 22),
+            Map.entry("shoot2", 23),
+            Map.entry("proneStab", 32),
+            Map.entry("magic1", 49),
+            Map.entry("magic2", 50),
+            Map.entry("magic3", 51),
+            Map.entry("magic5", 52),
+            Map.entry("handgun", 77),
+            Map.entry("shot", 93)
+    );
 
     static BotAttackDataProvider getInstance() {
         return instance;
@@ -252,28 +285,30 @@ final class BotAttackDataProvider {
     }
 
     private Map<String, Integer> loadBodyActionIds() {
+        Map<String, Integer> actionIds = new HashMap<>(BODY_ACTION_ID_OVERRIDES);
+
         Path bodyFile = WZFiles.CHARACTER.getFile().resolve("00002000.img.xml");
         if (!Files.isRegularFile(bodyFile)) {
             log.warn("Bot attack direction ids: body animation file not found at {}", bodyFile);
-            return Map.of();
+            return actionIds.isEmpty() ? Map.of() : Map.copyOf(actionIds);
         }
 
         Document doc = parseXmlDocument(bodyFile);
         if (doc == null) {
-            return Map.of();
+            return actionIds.isEmpty() ? Map.of() : Map.copyOf(actionIds);
         }
 
-        Map<String, Integer> actionIds = new HashMap<>();
         int actionId = 0;
         for (Element child : getNamedChildren(doc.getDocumentElement())) {
             String actionName = child.getAttribute("name");
             if (actionName.isBlank() || "info".equals(actionName)) {
                 continue;
             }
-            actionIds.put(actionName, actionId++);
+            actionIds.putIfAbsent(actionName, actionId++);
         }
 
-        log.info("Bot attack direction ids: loaded {} body action ids from {}", actionIds.size(), bodyFile.getFileName());
+        log.info("Bot attack direction ids: loaded {} action ids using built-in overrides + {}",
+                actionIds.size(), bodyFile.getFileName());
         return Map.copyOf(actionIds);
     }
 
