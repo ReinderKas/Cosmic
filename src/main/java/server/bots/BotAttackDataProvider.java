@@ -25,39 +25,7 @@ import javax.xml.parsers.ParserConfigurationException;
 final class BotAttackDataProvider {
     private static final Logger log = LoggerFactory.getLogger(BotAttackDataProvider.class);
     private static final BotAttackDataProvider instance = new BotAttackDataProvider();
-    private static final Map<String, Integer> BODY_ACTION_ID_OVERRIDES = Map.ofEntries(
-            Map.entry("walk1", 0),
-            Map.entry("walk2", 1),
-            Map.entry("stand1", 2),
-            Map.entry("stand2", 3),
-            Map.entry("alert", 4),
-            Map.entry("swingO1", 5),
-            Map.entry("swingO2", 6),
-            Map.entry("swingO3", 7),
-            Map.entry("swingOF", 8),
-            Map.entry("swingT1", 9),
-            Map.entry("swingT2", 10),
-            Map.entry("swingT3", 11),
-            Map.entry("swingTF", 12),
-            Map.entry("swingP1", 13),
-            Map.entry("swingP2", 14),
-            Map.entry("swingPF", 15),
-            Map.entry("stabO1", 16),
-            Map.entry("stabO2", 17),
-            Map.entry("stabOF", 18),
-            Map.entry("stabT1", 19),
-            Map.entry("stabT2", 20),
-            Map.entry("stabTF", 21),
-            Map.entry("shoot1", 22),
-            Map.entry("shoot2", 23),
-            Map.entry("proneStab", 32),
-            Map.entry("magic1", 49),
-            Map.entry("magic2", 50),
-            Map.entry("magic3", 51),
-            Map.entry("magic5", 52),
-            Map.entry("handgun", 77),
-            Map.entry("shot", 93)
-    );
+    private static final Map<String, Integer> BODY_ACTION_ID_OVERRIDES = createBodyActionIdOverrides();
 
     static BotAttackDataProvider getInstance() {
         return instance;
@@ -169,6 +137,164 @@ final class BotAttackDataProvider {
     private volatile Path cachedCharacterRoot = null;
 
     private BotAttackDataProvider() {
+    }
+
+    private static Map<String, Integer> createBodyActionIdOverrides() {
+        Map<String, Integer> overrides = new HashMap<>();
+        overrides.put("walk1", 0);
+        overrides.put("walk2", 1);
+        overrides.put("stand1", 2);
+        overrides.put("stand2", 3);
+        overrides.put("alert", 4);
+        overrides.put("swingO1", 5);
+        overrides.put("swingO2", 6);
+        overrides.put("swingO3", 7);
+        overrides.put("swingOF", 8);
+        overrides.put("swingT1", 9);
+        overrides.put("swingT2", 10);
+        overrides.put("swingT3", 11);
+        overrides.put("swingTF", 12);
+        overrides.put("swingP1", 13);
+        overrides.put("swingP2", 14);
+        overrides.put("swingPF", 15);
+        overrides.put("stabO1", 16);
+        overrides.put("stabO2", 17);
+        overrides.put("stabOF", 18);
+        overrides.put("stabT1", 19);
+        overrides.put("stabT2", 20);
+        overrides.put("stabTF", 21);
+        overrides.put("shoot1", 22);
+        overrides.put("shoot2", 23);
+        overrides.put("shootF", 27);
+        overrides.put("heal", 31);
+        overrides.put("proneStab", 32);
+        overrides.put("prone", 33);
+        overrides.put("fly", 34);
+        overrides.put("jump", 35);
+        overrides.put("ladder", 36);
+        overrides.put("rope", 37);
+        overrides.put("dead", 38);
+        overrides.put("sit", 39);
+        overrides.put("tired", 40);
+        overrides.put("alert2", 41);
+        overrides.put("alert3", 42);
+        overrides.put("alert4", 43);
+        overrides.put("alert5", 44);
+        overrides.put("alert6", 45);
+        overrides.put("ladder2", 46);
+        overrides.put("rope2", 47);
+        overrides.put("shoot6", 48);
+        overrides.put("magic1", 49);
+        overrides.put("magic2", 50);
+        overrides.put("magic3", 51);
+        overrides.put("magic5", 52);
+        overrides.put("burster1", 53);
+        overrides.put("burster2", 54);
+        overrides.put("savage", 55);
+        overrides.put("avenger", 56);
+        overrides.put("assaulter", 57);
+        overrides.put("prone2", 58);
+        overrides.put("assassination", 59);
+        overrides.put("assassinationS", 60);
+        overrides.put("rush", 61);
+        overrides.put("rush2", 62);
+        overrides.put("brandish1", 63);
+        overrides.put("brandish2", 64);
+        overrides.put("sanctuary", 65);
+        overrides.put("meteor", 66);
+        overrides.put("paralyze", 67);
+        overrides.put("blizzard", 68);
+        overrides.put("genesis", 69);
+        overrides.put("ninjastorm", 70);
+        overrides.put("blast", 71);
+        overrides.put("holyshield", 72);
+        overrides.put("showdown", 73);
+        overrides.put("resurrection", 74);
+        overrides.put("chainlightning", 75);
+        overrides.put("smokeshell", 76);
+        overrides.put("handgun", 77);
+        overrides.put("somersault", 78);
+        overrides.put("straight", 79);
+        overrides.put("eburster", 80);
+        overrides.put("backspin", 81);
+        overrides.put("eorb", 82);
+        overrides.put("screw", 83);
+        overrides.put("doubleupper", 84);
+        overrides.put("dragonstrike", 85);
+        overrides.put("doublefire", 86);
+        overrides.put("triplefire", 87);
+        overrides.put("fake", 88);
+        overrides.put("airstrike", 89);
+        overrides.put("edrain", 90);
+        overrides.put("octopus", 91);
+        overrides.put("backstep", 92);
+        overrides.put("shot", 93);
+        overrides.put("recovery", 94);
+        overrides.put("fireburner", 95);
+        overrides.put("coolingeffect", 96);
+        overrides.put("fist", 97);
+        overrides.put("timeleap", 98);
+        overrides.put("rapidfire", 99);
+        overrides.put("homing", 100);
+        overrides.put("ghostwalk", 101);
+        overrides.put("ghoststand", 102);
+        overrides.put("ghostjump", 103);
+        overrides.put("ghostproneStab", 104);
+        overrides.put("ghostfly", 105);
+        overrides.put("ghostladder", 106);
+        overrides.put("ghostrope", 107);
+        overrides.put("ghostsit", 108);
+        overrides.put("cannon", 109);
+        overrides.put("torpedo", 110);
+        overrides.put("darksight", 111);
+        overrides.put("bamboo", 112);
+        overrides.put("pyramid", 113);
+        overrides.put("wave", 114);
+        overrides.put("blade", 115);
+        overrides.put("souldriver", 116);
+        overrides.put("firestrike", 117);
+        overrides.put("flamegear", 118);
+        overrides.put("stormbreak", 119);
+        overrides.put("vampire", 120);
+        overrides.put("float", 121);
+        overrides.put("swingT2PoleArm", 122);
+        overrides.put("swingP1PoleArm", 123);
+        overrides.put("swingP2PoleArm", 124);
+        overrides.put("doubleSwing", 125);
+        overrides.put("tripleSwing", 126);
+        overrides.put("fullSwingDouble", 127);
+        overrides.put("fullSwingTriple", 128);
+        overrides.put("overSwingDouble", 129);
+        overrides.put("overSwingTriple", 130);
+        overrides.put("rollingSpin", 131);
+        overrides.put("comboSmash", 132);
+        overrides.put("comboFenrir", 133);
+        overrides.put("comboTempest", 134);
+        overrides.put("finalCharge", 135);
+        overrides.put("combatStep", 136);
+        overrides.put("finalBlow", 137);
+        overrides.put("finalToss", 138);
+        overrides.put("magicMissile", 139);
+        overrides.put("dragonSpark", 140);
+        overrides.put("dragonBreathe", 141);
+        overrides.put("breathePrepare", 142);
+        overrides.put("dragonIceBreathe", 143);
+        overrides.put("iceBreathePrepare", 144);
+        overrides.put("infinityExplosion", 145);
+        overrides.put("superMagicMissile", 146);
+        overrides.put("illusion", 147);
+        overrides.put("magicFlare", 148);
+        overrides.put("elementalReset", 149);
+        overrides.put("elementalRegistance", 150);
+        overrides.put("dragonAura", 151);
+        overrides.put("magicBooster", 152);
+        overrides.put("dragonShield", 153);
+        overrides.put("dragonFury", 154);
+        overrides.put("dragonFly", 155);
+        overrides.put("dragonSkin", 156);
+        overrides.put("shockwave", 157);
+        overrides.put("demolition", 158);
+        return Map.copyOf(overrides);
     }
 
     /**

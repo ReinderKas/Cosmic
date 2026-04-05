@@ -3,6 +3,7 @@ package server.bots;
 import client.BuffStat;
 import client.Character;
 import client.Job;
+import client.Skill;
 import client.inventory.Inventory;
 import client.inventory.InventoryType;
 import client.inventory.WeaponType;
@@ -43,7 +44,7 @@ class BotCombatManagerTest {
     void shouldUseOpenStoryFallbackAttackGroupsByWeaponType() {
         BotCombatManager.BasicAttackSpec gunSpec = BotCombatManager.basicAttackSpec(WeaponType.GUN);
         assertEquals(9, gunSpec.display());
-        assertEquals("shot", gunSpec.primaryAction());
+        assertEquals("handgun", gunSpec.primaryAction());
 
         BotCombatManager.BasicAttackSpec bowSpec = BotCombatManager.basicAttackSpec(WeaponType.BOW);
         assertEquals(3, bowSpec.display());
@@ -53,6 +54,16 @@ class BotCombatManagerTest {
         assertEquals(5, twoHandedSpec.display());
         assertTrue(twoHandedSpec.actions().contains("swingT1"));
         assertTrue(twoHandedSpec.actions().contains("stabO1"));
+    }
+
+    @Test
+    void shouldUseExplicitSkillActionBeforeWeaponFallback() {
+        Skill skill = new Skill(3121004);
+        skill.setAction0("doublefire");
+
+        String action = BotCombatManager.resolveSkillAttackAction(null, skill, 1, WeaponType.BOW);
+
+        assertEquals("doublefire", action);
     }
 
     @Test

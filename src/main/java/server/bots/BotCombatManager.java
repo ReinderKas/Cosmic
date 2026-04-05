@@ -505,8 +505,8 @@ class BotCombatManager {
         BasicAttackData fallbackAttackData = buildBasicAttackData(bot, primaryTarget);
         WeaponType weaponType = getEquippedWeaponType(bot);
         BasicAttackSpec attackSpec = resolveWeaponAttackSpec(bot, weaponType);
-        String action = sampleSkillAttackAction(bot, route, weaponType);
-        String fallbackAction = route == AttackRoute.MAGIC ? "magic1" : attackSpec.primaryAction();
+        String action = resolveSkillAttackAction(bot, skill, skillLevel, weaponType);
+        String fallbackAction = attackSpec.primaryAction();
         CloseRangePacketFields closeRangePacketFields = route == AttackRoute.CLOSE
                 ? mimicCloseRangePacketFields(action, fallbackAction, facingLeft)
                 : null;
@@ -543,8 +543,8 @@ class BotCombatManager {
         BasicAttackData fallbackAttackData = buildBasicAttackData(bot, primaryTarget);
         WeaponType weaponType = getEquippedWeaponType(bot);
         BasicAttackSpec attackSpec = resolveWeaponAttackSpec(bot, weaponType);
-        String action = sampleSkillAttackAction(bot, route, weaponType);
-        String fallbackAction = route == AttackRoute.MAGIC ? "magic1" : attackSpec.primaryAction();
+        String action = resolveSkillAttackAction(bot, skill, skillLevel, weaponType);
+        String fallbackAction = attackSpec.primaryAction();
         CloseRangePacketFields closeRangePacketFields = route == AttackRoute.CLOSE
                 ? mimicCloseRangePacketFields(action, fallbackAction, facingLeft)
                 : null;
@@ -748,7 +748,7 @@ class BotCombatManager {
             case 5 -> new BasicAttackSpec(5, List.of("stabO1", "stabO2", "swingT1", "swingT2", "swingT3"));
             case 6 -> new BasicAttackSpec(6, List.of("swingO1", "swingO2"));
             case 7 -> new BasicAttackSpec(7, List.of("swingO1", "swingO2"));
-            case 9 -> new BasicAttackSpec(9, List.of("shot"));
+            case 9 -> new BasicAttackSpec(9, List.of("handgun"));
             default -> basicAttackSpec(fallbackWeaponType);
         };
     }
@@ -766,7 +766,7 @@ class BotCombatManager {
                     new BasicAttackSpec(5, List.of("stabO1", "stabO2", "swingT1", "swingT2", "swingT3"));
             case WAND, STAFF -> new BasicAttackSpec(6, List.of("swingO1", "swingO2"));
             case CLAW -> new BasicAttackSpec(7, List.of("swingO1", "swingO2"));
-            case GUN -> new BasicAttackSpec(9, List.of("shot"));
+            case GUN -> new BasicAttackSpec(9, List.of("handgun"));
             default -> new BasicAttackSpec(1, List.of("stabO1", "stabO2", "swingO1", "swingO2", "swingO3"));
         };
     }
@@ -774,6 +774,7 @@ class BotCombatManager {
     static int attackStanceId(String actionName) {
         return switch (actionName) {
             case "shot" -> 10;
+            case "handgun" -> 10;
             case "shoot1" -> 11;
             case "shoot2" -> 12;
             case "stabO1" -> 15;
@@ -874,10 +875,13 @@ class BotCombatManager {
         return sampleAttackAction(attackSpec.actions(), attackSpec.primaryAction());
     }
 
-    private static String sampleSkillAttackAction(Character bot, AttackRoute route, WeaponType weaponType) {
-        if (route == AttackRoute.MAGIC) {
-            List<String> magicActions = List.of("magic1", "magic2", "magic3", "magic5");
-            return sampleAttackAction(magicActions, "magic1");
+    static String resolveSkillAttackAction(Character bot, Skill skill, int skillLevel, WeaponType weaponType) {
+        if (skill != null) {
+            boolean twoHanded = isTwoHandedWeapon(bot);
+            String skillAction = skill.resolveAnimationAction(skillLevel, twoHanded);
+            if (skillAction != null) {
+                return skillAction;
+            }
         }
         return sampleWeaponAttackAction(bot, weaponType);
     }
@@ -926,6 +930,15 @@ class BotCombatManager {
         }
 
         return server.ItemInformationProvider.getInstance().getWeaponType(weapon.getItemId());
+    }
+
+    private static boolean isTwoHandedWeapon(Character bot) {
+        Item weapon = bot != null ? bot.getInventory(InventoryType.EQUIPPED).getItem((short) -11) : null;
+        if (weapon == null) {
+            return false;
+        }
+
+        return server.ItemInformationProvider.getInstance().isTwoHanded(weapon.getItemId());
     }
 
     private static boolean isRangedSkill(int skillId) {

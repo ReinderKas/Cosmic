@@ -105,6 +105,10 @@ class BotAttackDataProviderTest {
         assertEquals(16, provider.getBodyActionId("stabO1"));
         assertEquals(17, provider.getBodyActionId("stabO2"));
         assertEquals(32, provider.getBodyActionId("proneStab"));
+        assertEquals(56, provider.getBodyActionId("avenger"));
+        assertEquals(69, provider.getBodyActionId("genesis"));
+        assertEquals(77, provider.getBodyActionId("handgun"));
+        assertEquals(86, provider.getBodyActionId("doublefire"));
         assertEquals(6, BotCombatManager.basicAttackDirectionId("swingO2", "swingO1"));
         BotCombatManager.CloseRangePacketFields closeRangeFields =
                 BotCombatManager.mimicCloseRangePacketFields("stabO1", "swingO1", false);
