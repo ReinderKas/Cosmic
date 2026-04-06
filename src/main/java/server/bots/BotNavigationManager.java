@@ -61,6 +61,14 @@ final class BotNavigationManager {
 
             BotNavigationGraph.Edge edge = reuseCommittedEdge(graph, entry, startRegionId, targetRegionId);
             boolean edgeReused = (edge != null);
+            if (edgeReused) {
+                BotNavigationGraph.Edge refreshedEdge = refreshPendingClimbExitEdge(
+                        graph, entry, bot, botPos, startRegionId, targetRegionId, pathTargetPos, edge, runAiTick);
+                if (refreshedEdge != edge) {
+                    edge = refreshedEdge;
+                    edgeReused = edge != null;
+                }
+            }
             if (edge == null && runAiTick && startRegionId >= 0 && targetRegionId >= 0 && startRegionId != targetRegionId) {
                 edge = findNextEdge(graph, bot, startRegionId, targetRegionId, pathTargetPos);
                 if (edge != null) {
@@ -103,6 +111,42 @@ final class BotNavigationManager {
 
     private static void clearNavigation(BotEntry entry) {
         BotMovementManager.clearNavigationState(entry);
+    }
+
+    private static BotNavigationGraph.Edge refreshPendingClimbExitEdge(BotNavigationGraph graph,
+                                                                       BotEntry entry,
+                                                                       Character bot,
+                                                                       Point botPos,
+                                                                       int startRegionId,
+                                                                       int targetRegionId,
+                                                                       Point targetPos,
+                                                                       BotNavigationGraph.Edge edge,
+                                                                       boolean runAiTick) {
+        if (!runAiTick
+                || edge == null
+                || !entry.climbing
+                || edge.type != BotNavigationGraph.EdgeType.CLIMB
+                || edge.launchStepX == 0
+                || startRegionId < 0
+                || targetRegionId < 0
+                || startRegionId == targetRegionId) {
+            return edge;
+        }
+
+        if (canExecuteClimbExitFromCurrentPosition(graph, bot.getMap(), botPos, edge)) {
+            return edge;
+        }
+
+        BotNavigationGraph.Edge bestEdge = findNextEdge(graph, bot, startRegionId, targetRegionId, targetPos);
+        if (sameEdge(edge, bestEdge) || bestEdge == null) {
+            return edge;
+        }
+
+        entry.navEdge = bestEdge;
+        entry.navTargetRegionId = targetRegionId;
+        entry.navTargetPos = null;
+        entry.navPreciseTarget = false;
+        return bestEdge;
     }
 
     static BotNavigationGraph.Edge reuseCommittedEdge(BotNavigationGraph graph,
@@ -584,6 +628,23 @@ final class BotNavigationManager {
 
     private static boolean isEdgeUsable(BotNavigationGraph graph, Character bot, BotNavigationGraph.Edge edge) {
         return isEdgeUsable(graph, bot.getMap(), edge);
+    }
+
+    private static boolean sameEdge(BotNavigationGraph.Edge left, BotNavigationGraph.Edge right) {
+        return left == right || (left != null
+                && right != null
+                && left.fromRegionId == right.fromRegionId
+                && left.toRegionId == right.toRegionId
+                && left.type == right.type
+                && left.launchMinX == right.launchMinX
+                && left.launchMaxX == right.launchMaxX
+                && left.launchStepX == right.launchStepX
+                && left.portalId == right.portalId
+                && left.ropeX == right.ropeX
+                && left.ropeTopY == right.ropeTopY
+                && left.ropeBottomY == right.ropeBottomY
+                && left.startPoint.equals(right.startPoint)
+                && left.endPoint.equals(right.endPoint));
     }
 
     private static boolean isEdgeUsable(BotNavigationGraph graph, MapleMap map, BotNavigationGraph.Edge edge) {

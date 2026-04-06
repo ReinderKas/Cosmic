@@ -1,0 +1,134 @@
+package server.bots;
+
+import org.junit.jupiter.api.Test;
+import server.maps.Foothold;
+import server.maps.MapleMap;
+import server.maps.Rope;
+
+import java.awt.*;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class BotMovementSimulationLabTest {
+    @Test
+    void shouldReachMoveTargetOnFlatGround() {
+        MapleMap map = createFlatMap(910000101, 0, 600, 100);
+        BotMovementSimulationLab lab = BotMovementSimulationLab.fromMap(map);
+        BotEntry entry = lab.spawnBot("SLASH", 1, map, new Point(100, 100));
+
+        lab.setMoveTarget("SLASH", new Point(320, 100), true);
+        lab.step(80);
+
+        Point finalPos = lab.position("SLASH");
+        assertTrue(Math.abs(finalPos.x - 320) <= 8, "bot should arrive at precise move target");
+        assertNull(entry.moveTarget, "move target should clear after arrival");
+    }
+
+    @Test
+    void shouldFollowOwnerUsingFormationOffsetOnFlatGround() {
+        MapleMap map = createFlatMap(910000102, 0, 800, 100);
+        BotMovementSimulationLab lab = BotMovementSimulationLab.fromMap(map);
+        lab.spawnActor("OWNER", 10, map, new Point(400, 100));
+        BotEntry entry = lab.spawnBot("CRASH", 11, map, new Point(120, 100));
+
+        lab.setFollow("CRASH", "OWNER");
+        lab.setFormation("OWNER", BotManager.FormationType.LEFT, 120, 200);
+        lab.step(100);
+
+        Point finalPos = lab.position("CRASH");
+        int expectedX = 280;
+        assertTrue(Math.abs(finalPos.x - expectedX) <= BotMovementManager.cfg.STOP_DIST,
+                "bot should settle near owner + formation offset");
+        assertTrue(entry.following);
+        assertNotNull(lab.describeCurrentState("CRASH"));
+    }
+
+    @Test
+    void shouldReproduceIntermediateBumpLandingScenarioFromMovementManagerTest() {
+        MapleMap map = new MapleMap(910000103, 0, 0, 910000103, 1.0f);
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        footholds.insert(new Foothold(new Point(0, 110), new Point(20, 110), 1));
+        footholds.insert(new Foothold(new Point(4, 102), new Point(6, 102), 2));
+        map.setFootholds(footholds);
+        BotMovementSimulationLab lab = BotMovementSimulationLab.fromMap(map);
+        BotEntry entry = lab.spawnBot("BUMP", 12, map, new Point(0, 100));
+        entry.inAir = true;
+        entry.physX = 0;
+        entry.physY = 100;
+        entry.velY = 0f;
+        entry.airVelX = 8;
+
+        lab.stepRaw("BUMP", new Point(20, 110), false);
+
+        assertEquals(new Point(4, 102), lab.position("BUMP"));
+        assertTrue(!entry.inAir, "bot should land on the intermediate bump");
+    }
+
+    @Test
+    void shouldReproduceDropPastWallMomentumScenarioFromMovementManagerTest() {
+        MapleMap map = new MapleMap(910000104, 0, 0, 910000104, 1.0f);
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        footholds.insert(new Foothold(new Point(0, 0), new Point(20, 0), 1));
+        footholds.insert(new Foothold(new Point(0, 0), new Point(0, 80), 2));
+        map.setFootholds(footholds);
+        BotMovementSimulationLab lab = BotMovementSimulationLab.fromMap(map);
+        BotEntry entry = lab.spawnBot("DROP", 13, map, new Point(0, 0));
+        entry.inAir = true;
+        entry.physX = 0;
+        entry.physY = 0;
+        entry.velY = 0f;
+        entry.airVelX = -8;
+
+        lab.stepRaw("DROP", new Point(-50, 80), false);
+
+        assertTrue(lab.position("DROP").x < 0, "bot should keep horizontal motion past the wall endpoint");
+        assertEquals(-8, entry.airVelX);
+    }
+
+    @Test
+    void shouldResolveSlashRopeOscillationDumpByRefreshingPendingExitEdge() {
+        MapleMap map = BotNavigationMapLoader.loadMapGeometry(103000000);
+        BotNavigationGraphProvider.rebuildGraph(map);
+        BotMovementSimulationLab lab = BotMovementSimulationLab.fromMap(map);
+        lab.spawnActor("OWNER", 20, map, new Point(-69, 156));
+        BotEntry entry = lab.spawnBot("SLASH", 21, map, new Point(366, -117));
+        lab.setFollow("SLASH", "OWNER");
+        lab.setFollowOffset("SLASH", -60);
+        lab.setAiAccumulator("SLASH", 50);
+        Rope rope = map.getRopes().stream()
+                .filter(candidate -> candidate.x() == 366 && candidate.topY() == -358 && candidate.bottomY() == -111)
+                .findFirst()
+                .orElseThrow();
+        lab.attachBotToRope("SLASH", rope, -117);
+        lab.setNavState("SLASH", new BotNavigationGraph.Edge(
+                160, 116, BotNavigationGraph.EdgeType.CLIMB,
+                new Point(366, -118), new Point(427, -101),
+                8, 0, 366, -358, -111, 400
+        ), 148, true);
+
+        lab.step(10);
+
+        List<String> trace = lab.formatRecentTrace("SLASH", 10);
+
+        assertTrue(trace.stream().anyMatch(line -> line.contains("edge=CLIMB r160->r117")),
+                "AI replan should replace the stale rightward rope exit with the live best edge");
+        assertTrue(trace.stream().anyMatch(line -> line.contains("nav=exec") && line.contains("edge=CLIMB r160->r117")),
+                "bot should execute the refreshed climb exit instead of oscillating on the rope");
+        assertTrue(trace.stream().noneMatch(line -> line.contains("bot=(366,-117)") && line.contains("edge=CLIMB r160->r116") && line.contains("nav=reuse") && line.contains("+1000ms")),
+                "stale rope exit should not keep the bot oscillating for a full second");
+    }
+
+    private static MapleMap createFlatMap(int mapId, int x1, int x2, int y) {
+        MapleMap map = new MapleMap(mapId, 0, 0, mapId, 1.0f);
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(
+                new Point(x1 - 200, y - 200),
+                new Point(x2 + 200, y + 200));
+        footholds.insert(new Foothold(new Point(x1, y), new Point(x2, y), 1));
+        map.setFootholds(footholds);
+        return map;
+    }
+}

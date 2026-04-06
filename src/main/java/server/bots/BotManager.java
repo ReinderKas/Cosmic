@@ -817,6 +817,22 @@ public class BotManager {
         return ownerFormations.getOrDefault(owner.getId(), FormationState.defaultStagger());
     }
 
+    void setFormationState(Character owner, FormationType type, int px, int snapRange, List<BotEntry> entries) {
+        if (owner == null) {
+            return;
+        }
+
+        FormationState formation = new FormationState(type, px, snapRange);
+        ownerFormations.put(owner.getId(), formation);
+        if (entries == null) {
+            return;
+        }
+
+        for (int i = 0; i < entries.size(); i++) {
+            entries.get(i).followOffsetX = formation.offsetFor(i, entries.size());
+        }
+    }
+
     TargetSnapshot captureTargetSnapshot(BotEntry entry) {
         Character bot = entry.bot;
         Character owner = entry.owner;
@@ -1045,27 +1061,7 @@ public class BotManager {
             targetPos = selectGrindNavigationTarget(entry, botPos, tp);
         }
 
-        BotNavigationManager.NavigationDirective navDirective = BotNavigationManager.resolveTarget(entry, targetPos, runAiTick);
-        if (navDirective.consumedTick) {
-            return;
-        }
-        targetPos = navDirective.targetPos;
-
-        // Spread grinding bots out on the same platform — only when no cross-region nav edge is
-        // active so precise jump/climb/portal waypoints aren't disrupted.
-        // (Follow offset is already applied above before Y-snap.)
-        if (entry.grinding && entry.navEdge == null) {
-            targetPos = new Point(targetPos.x + entry.followOffsetX, targetPos.y);
-        }
-
-        // "Move here" needs tight positioning — force precise stop dist for ground movement.
-        if (entry.moveTargetPrecise && entry.navEdge == null) {
-            entry.navPreciseTarget = true;
-        }
-
-        tickMovementPhase(entry, targetPos, runAiTick);
-        tickStuckDetection(entry);
-        clearReachedMoveTarget(entry);
+        stepMovementCore(entry, targetPos, runAiTick, entry.grinding);
     }
 
     private Character resolveTickOwner(BotEntry entry, int ownerCharId) {
@@ -1168,6 +1164,81 @@ public class BotManager {
         BotMovementManager.resetEntryStateAfterTeleport(entry);
         BotMovementManager.broadcastMovement(entry);
         return true;
+    }
+
+    boolean stepMovementOnly(BotEntry entry, long tickAtMs) {
+        if (entry == null || entry.bot == null) {
+            return false;
+        }
+
+        boolean runAiTick = consumeAiTick(entry);
+        entry.lastTickWasAi = runAiTick;
+        entry.lastTickAtMs = tickAtMs;
+
+        TargetSnapshot targetSnapshot = captureTargetSnapshot(entry);
+        Point ownerPos = targetSnapshot.rawOwnerPos();
+        entry.lastOwnerPos = new Point(ownerPos);
+        stepMovementOnly(entry, targetSnapshot.primaryTargetPos(), ownerPos, runAiTick, false);
+        return runAiTick;
+    }
+
+    void stepMovementOnly(BotEntry entry,
+                          Point targetPos,
+                          Point ownerPos,
+                          boolean runAiTick,
+                          boolean applyGrindSpread) {
+        if (entry == null || entry.bot == null || targetPos == null) {
+            return;
+        }
+
+        Character bot = entry.bot;
+        Character owner = entry.owner;
+
+        if (tickIdleEntry(entry, bot)) {
+            return;
+        }
+
+        if (owner != null && syncFollowMap(entry, bot, owner, ownerPos)) {
+            return;
+        }
+        if (recoverTeleportDistance(entry, bot, targetPos)) {
+            return;
+        }
+
+        if (entry.lastMapId != bot.getMapId()) {
+            entry.fhIndex  = BotMovementManager.buildFhIndex(bot.getMap());
+            entry.lastMapId = bot.getMapId();
+            Point cur = bot.getPosition();
+            Point ground = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(cur.x, cur.y - 1));
+            BotPhysicsEngine.teleportTo(entry, bot, ground != null ? ground : cur);
+            BotMovementManager.resetEntryStateAfterTeleport(entry);
+            BotMovementManager.broadcastMovement(entry);
+            return;
+        }
+
+        stepMovementCore(entry, targetPos, runAiTick, applyGrindSpread);
+    }
+
+    private void stepMovementCore(BotEntry entry,
+                                  Point targetPos,
+                                  boolean runAiTick,
+                                  boolean applyGrindSpread) {
+        BotNavigationManager.NavigationDirective navDirective = BotNavigationManager.resolveTarget(entry, targetPos, runAiTick);
+        if (navDirective.consumedTick) {
+            return;
+        }
+
+        Point steeringTarget = navDirective.targetPos;
+        if (applyGrindSpread && entry.navEdge == null) {
+            steeringTarget = new Point(steeringTarget.x + entry.followOffsetX, steeringTarget.y);
+        }
+        if (entry.moveTargetPrecise && entry.navEdge == null) {
+            entry.navPreciseTarget = true;
+        }
+
+        tickMovementPhase(entry, steeringTarget, runAiTick);
+        tickStuckDetection(entry);
+        clearReachedMoveTarget(entry);
     }
 
     private void tickMovementPhase(BotEntry entry, Point targetPos, boolean runAiTick) {
