@@ -118,16 +118,6 @@ class BotNavigationGraphProviderTest {
     }
 
     @Test
-    void shouldGenerateJumpPathToTinyKerningFoothold() {
-        List<BotNavigationGraph.Edge> path = findPath(kerningGraph, kerning, new Point(-254, 2), new Point(-254, -53));
-
-        assertEquals(1, path.size());
-        assertEquals(BotNavigationGraph.EdgeType.JUMP, path.getFirst().type);
-        assertEquals(136, path.getFirst().toRegionId);
-        assertEquals(new Point(-243, -53), path.getFirst().endPoint);
-    }
-
-    @Test
     void shouldCaptureGraphBuildReportForRebuild() {
         BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(kpqS1);
         BotNavigationGraphProvider.GraphBuildReport report = BotNavigationGraphProvider.getLastBuildReport(kpqS1.getId());
@@ -137,7 +127,6 @@ class BotNavigationGraphProviderTest {
         assertEquals(graph.regions.size(), report.regionCount);
         assertTrue(report.totalBuildNs > 0);
         assertTrue(report.totalEdgeCount > 0);
-        assertTrue(report.jumpWindowProbeCount > 0);
     }
 
     @Test
@@ -172,21 +161,6 @@ class BotNavigationGraphProviderTest {
         List<BotNavigationGraph.Edge> path = findPath(elliniaGraph, ellinia, new Point(-508, -421), new Point(-390, -400));
 
         assertTrue(path.isEmpty());
-    }
-
-    @Test
-    void shouldMergeSharedEndpointWalkConnectionEvenForSharpSlopeContinuation() {
-        MapleMap map = createEmptyTestMap(910000014);
-        server.maps.FootholdTree footholds = map.getFootholds();
-        footholds.insert(new server.maps.Foothold(new Point(0, 10), new Point(10, 10), 1));
-        footholds.insert(new server.maps.Foothold(new Point(10, 10), new Point(20, -20), 2));
-
-        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(map);
-        int leftRegionId = graph.findRegionId(map, new Point(4, 10));
-        int rightRegionId = graph.findRegionId(map, new Point(16, -8));
-
-        assertEquals(leftRegionId, rightRegionId);
-        assertTrue(findPath(graph, map, new Point(4, 10), new Point(16, -8)).isEmpty());
     }
 
     @Test

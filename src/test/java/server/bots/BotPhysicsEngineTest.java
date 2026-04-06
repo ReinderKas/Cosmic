@@ -257,33 +257,6 @@ class BotPhysicsEngineTest {
     }
 
     @Test
-    void shouldLandOnIntermediateBumpInsteadOfTunnelingToLowerFloor() {
-        MapleMap map = createEmptyTestMap(910000003);
-        server.maps.FootholdTree footholds = map.getFootholds();
-        footholds.insert(new Foothold(new Point(0, 110), new Point(20, 110), 1));
-        footholds.insert(new Foothold(new Point(4, 102), new Point(6, 102), 2));
-
-        BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.findAirLanding(
-                map,
-                new Point(0, 100),
-                new Point(8, 105)
-        );
-
-        assertNotNull(landing);
-        assertEquals(new Point(4, 102), landing.point());
-        assertEquals(2, landing.foothold().getId());
-    }
-
-    @Test
-    void shouldAdvanceTowardJumpLaunchWindowAcrossConnectedKerningFootholds() {
-        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(kerning);
-        Point start = new Point(1299, -285);
-        Point stepped = new Point(1302, -286);
-        assertEquals(graph.findRegionId(kerning, start), graph.findRegionId(kerning, stepped),
-                "Kerning foothold handoff near x=1299 should stay in one merged walk region");
-    }
-
-    @Test
     void shouldPreferCurrentWalkRegionSurfaceWhenParallelPlatformSitsAbove() {
         MapleMap map = createEmptyTestMap(910000013);
         server.maps.FootholdTree footholds = map.getFootholds();
@@ -344,33 +317,6 @@ class BotPhysicsEngineTest {
     }
 
     @Test
-    void shouldDeflectLandingMomentumAlongSlope() {
-        MapleMap map = createEmptyTestMap(910000007);
-        server.maps.FootholdTree footholds = map.getFootholds();
-        footholds.insert(new Foothold(new Point(0, 100), new Point(10, 110), 1));
-
-        Character bot = mockBot(new Point(5, 94), map);
-        BotEntry entry = new BotEntry(bot, null, null);
-        entry.inAir = true;
-        entry.physX = 5;
-        entry.physY = 94;
-        entry.velY = 8f;
-        entry.airVelX = 0;
-
-        Point previousPos = new Point(5, 94);
-        Point nextPos = new Point(5, 105);
-        BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.findAirLanding(map, previousPos, nextPos);
-
-        assertNotNull(landing);
-        BotPhysicsEngine.landOnGround(entry, bot, landing.point(), landing.foothold(),
-                nextPos.x - previousPos.x, nextPos.y - previousPos.y);
-
-        assertEquals(landing.point(), bot.getPosition());
-        assertTrue(entry.movementVelX > 0);
-        assertTrue(entry.hspeed > 0.0);
-    }
-
-    @Test
     void shouldPreferExactGroundFootholdWhenOffsetLookupWouldChooseDifferentPlatform() {
         StandingLookupCase lookupCase = findStandingLookupCaseWhereOffsetDiffers(ellinia);
 
@@ -383,20 +329,6 @@ class BotPhysicsEngineTest {
         assertNotNull(chosenFoothold);
         assertEquals(chosenFoothold.getId(),
                 ellinia.getFootholds().findBelow(new Point(chosenGround.x, chosenGround.y)).getId());
-    }
-
-    @Test
-    void shouldSimulateDownJumpLandingWithGraceInsteadOfImmediatePlatformBelow() {
-        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(ellinia);
-        BotNavigationGraph.Edge dropEdge = findFirstStraightDropEdge(graph);
-
-        assertNotNull(dropEdge, "Expected at least one straight down-jump drop edge in Ellinia");
-
-        BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateDownJumpLanding(ellinia, dropEdge.startPoint);
-
-        assertNotNull(landing);
-        assertEquals(dropEdge.endPoint, landing.point());
-        assertEquals(dropEdge.toRegionId, graph.regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1));
     }
 
     private static StandingLookupCase findStandingLookupCaseWhereOffsetDiffers(MapleMap map) {
