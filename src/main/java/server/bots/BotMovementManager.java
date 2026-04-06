@@ -505,7 +505,7 @@ class BotMovementManager {
                 BotPhysicsEngine.queueDownJump(entry, bot);
         }
         clearNavigationState(entry);
-        entry.unstuckCooldownMs = delayAfterCurrentTick(2000);
+        entry.unstuckCooldownMs = delayAfterCurrentTick(5000);
         broadcastMovement(entry);
     }
 
