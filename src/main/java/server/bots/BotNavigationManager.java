@@ -422,11 +422,16 @@ final class BotNavigationManager {
             return new Point(edge.endPoint);
         }
         if (entry.climbing && edge.launchStepX != 0) {
-            // Jump-off and rope-to-rope exits: hold at launch anchor so tryExecuteClimbExit fires.
-            BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(entry.bot.getMap());
-            if (canExecuteClimbExitFromCurrentPosition(graph, entry.bot.getMap(), botPos, edge)) {
-                return new Point(botPos);
+            // Jump-off and rope-to-rope exits: only hold position when the exit can execute
+            // immediately. If cooldown is still active, keep steering toward the authored launch
+            // anchor; otherwise the bot can idle on the rope forever with targetPos == botPos.
+            if (entry.jumpCooldownMs == 0) {
+                BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(entry.bot.getMap());
+                if (canExecuteClimbExitFromCurrentPosition(graph, entry.bot.getMap(), botPos, edge)) {
+                    return new Point(botPos);
+                }
             }
+            return new Point(edge.startPoint);
         }
         if (entry.climbing) {
             // launchStepX==0: target endPoint — physics lands the bot via resolveClimbBoundary
