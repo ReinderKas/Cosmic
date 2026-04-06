@@ -193,7 +193,7 @@ class BotMovementManager {
     static void jumpOffRope(BotEntry entry, Character bot, int dx) {
         int airVelX = resolveAirVelocityX(bot.getMap(), dx);
         BotPhysicsEngine.beginJumpOffRope(entry, bot, airVelX);
-        entry.ropeGrabCooldownMs = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS + 200);
+//        entry.ropeGrabCooldownMs = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS + 200);
         entry.jumpCooldownMs = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS);
         broadcastMovement(entry);
     }
