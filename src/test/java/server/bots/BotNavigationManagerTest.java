@@ -9,7 +9,9 @@ import org.junit.jupiter.api.Test;
 
 import java.awt.*;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -208,6 +210,46 @@ class BotNavigationManagerTest {
         assertEquals(new Point(520, 107), BotNavigationManager.selectJumpWaypoint(entry, new Point(449, 113), jump));
         assertEquals(new Point(520, 107), BotNavigationManager.selectJumpWaypoint(entry, new Point(540, 113), jump));
         assertEquals(new Point(520, 107), BotNavigationManager.selectJumpWaypoint(entry, new Point(520, 113), jump));
+    }
+
+    @Test
+    void shouldChooseTargetRegionEntryBasedOnInRegionPathTarget() {
+        MapleMap map = new MapleMap(910000026, 0, 0, 910000026, 1.0f);
+        BotNavigationGraph.Region startRegion = new BotNavigationGraph.Region(
+                1, List.of(new BotNavigationGraph.Segment(new Foothold(new Point(0, 100), new Point(100, 100), 1))));
+        BotNavigationGraph.Region targetRegion = new BotNavigationGraph.Region(
+                2, List.of(new BotNavigationGraph.Segment(new Foothold(new Point(0, 200), new Point(200, 200), 2))));
+        Map<Integer, BotNavigationGraph.Region> regionsById = new HashMap<>();
+        regionsById.put(1, startRegion);
+        regionsById.put(2, targetRegion);
+        BotNavigationGraph.Edge leftEntry = new BotNavigationGraph.Edge(
+                1, 2, BotNavigationGraph.EdgeType.CLIMB,
+                new Point(50, 100), new Point(0, 200),
+                0, 0, 0, 0, 0, 100
+        );
+        BotNavigationGraph.Edge rightEntry = new BotNavigationGraph.Edge(
+                1, 2, BotNavigationGraph.EdgeType.CLIMB,
+                new Point(50, 100), new Point(200, 200),
+                0, 0, 0, 0, 0, 100
+        );
+        BotNavigationGraph graph = new BotNavigationGraph(
+                map.getId(),
+                1,
+                List.of(startRegion, targetRegion),
+                regionsById,
+                Map.of(1, 1, 2, 2),
+                Map.of(1, List.of(leftEntry, rightEntry))
+        );
+
+        List<BotNavigationGraph.Edge> leftPath = BotNavigationManager.findPath(
+                graph, map, new Point(50, 100), 1, 2, new Point(40, 200));
+        List<BotNavigationGraph.Edge> rightPath = BotNavigationManager.findPath(
+                graph, map, new Point(50, 100), 1, 2, new Point(160, 200));
+
+        assertEquals(List.of(leftEntry), leftPath,
+                "pathfinding should prefer the entry closest to the left-side in-region target");
+        assertEquals(List.of(rightEntry), rightPath,
+                "pathfinding should prefer the entry closest to the clamped interior target, not a fixed nearest edge");
     }
 
     @Test
