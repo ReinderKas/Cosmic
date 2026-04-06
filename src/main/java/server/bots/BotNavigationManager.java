@@ -425,6 +425,9 @@ final class BotNavigationManager {
             // Jump-off and rope-to-rope exits: only hold position when the exit can execute
             // immediately. If cooldown is still active, keep steering toward the authored launch
             // anchor; otherwise the bot can idle on the rope forever with targetPos == botPos.
+            // Graphgen and physics both treat edge.startPoint as the required on-rope launch Y;
+            // steering toward edge.endPoint here would be a runtime-only model mismatch because
+            // a climbing bot cannot physically approach the off-rope landing point.
             if (entry.jumpCooldownMs == 0) {
                 BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(entry.bot.getMap());
                 if (canExecuteClimbExitFromCurrentPosition(graph, entry.bot.getMap(), botPos, edge)) {

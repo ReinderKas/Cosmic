@@ -211,7 +211,7 @@ class BotNavigationManagerTest {
     }
 
     @Test
-    void shouldHoldCurrentPositionForExecutableClimbExit() {
+    void shouldHoldCurrentPositionOnceClimbExitLaunchAnchorIsReached() {
         Character bot = mock(Character.class);
         when(bot.getMap()).thenReturn(elliniaDungeon);
         BotEntry entry = new BotEntry(bot, null, null);
@@ -224,9 +224,28 @@ class BotNavigationManagerTest {
                 8, 0, -1251, -137, 2, 650
         );
 
-        assertEquals(new Point(-1251, -104),
-                BotNavigationManager.selectClimbWaypoint(entry, new Point(-1251, -104), climbExit));
+        assertEquals(new Point(-1251, -107),
+                BotNavigationManager.selectClimbWaypoint(entry, new Point(-1251, -107), climbExit));
         assertEquals(new Point(-1251, -107),
                 BotNavigationManager.selectClimbWaypoint(entry, new Point(-1251, -109), climbExit));
+    }
+
+    @Test
+    void shouldKeepSteeringToClimbLaunchAnchorWhileExitCooldownBlocksExecution() {
+        Character bot = mock(Character.class);
+        when(bot.getMap()).thenReturn(elliniaDungeon);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.climbing = true;
+        entry.climbRope = new Rope(-1251, -137, 2, true);
+        entry.jumpCooldownMs = 300;
+
+        BotNavigationGraph.Edge climbExit = new BotNavigationGraph.Edge(
+                189, 157, BotNavigationGraph.EdgeType.CLIMB,
+                new Point(-1251, -107), new Point(-1132, 156),
+                8, 0, -1251, -137, 2, 650
+        );
+
+        assertEquals(new Point(-1251, -107),
+                BotNavigationManager.selectClimbWaypoint(entry, new Point(-1251, -104), climbExit));
     }
 }
