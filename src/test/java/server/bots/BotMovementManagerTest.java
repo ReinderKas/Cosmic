@@ -124,10 +124,11 @@ class BotMovementManagerTest {
     }
 
     @Test
-    void shouldUseTightStopDistForNonWalkPreciseNavEntryPoints() {
+    void shouldUseEdgeSpecificPreciseStopDist() {
         // Regression: pathlog-CRASH-2026-04-02 — bot 2px from CLIMB entry (969 vs 967),
         // stopDist=4 caused it to idle short of the entry, blocking canExecuteClimbEntry forever.
-        // Non-WALK precise edges require stopDist=1 so the bot reaches the exact entry position.
+        // CLIMB still needs stopDist=1 to reach the exact anchor, but JUMP uses a launch window
+        // and must keep walking until it is inside that window, so stopDist=0 is intentional.
         BotNavigationGraph.Edge climbEdge = new BotNavigationGraph.Edge(
                 3, 27, BotNavigationGraph.EdgeType.CLIMB,
                 new Point(967, 1545), new Point(879, 1545),
@@ -146,8 +147,8 @@ class BotMovementManagerTest {
 
         assertEquals(1, BotMovementManager.preciseNavStopDist(climbEdge),
                 "CLIMB entry must use stopDist=1 to reach exact anchor");
-        assertEquals(1, BotMovementManager.preciseNavStopDist(jumpEdge),
-                "JUMP entry must use stopDist=1 to reach exact anchor");
+        assertEquals(0, BotMovementManager.preciseNavStopDist(jumpEdge),
+                "JUMP entry must use stopDist=0 so the bot walks into the launch window");
         assertEquals(4, BotMovementManager.preciseNavStopDist(walkEdge),
                 "WALK traversal keeps stopDist=4 to absorb terrain micro-bumps");
         assertEquals(4, BotMovementManager.preciseNavStopDist(null),

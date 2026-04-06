@@ -132,6 +132,14 @@ class BotMovementManager {
 
     static void resetEntryState(BotEntry entry) {
         BotPhysicsEngine.resetMotion(entry, entry.bot.getPosition());
+        clearTransientState(entry);
+    }
+
+    static void resetEntryStateAfterTeleport(BotEntry entry) {
+        clearTransientState(entry);
+    }
+
+    private static void clearTransientState(BotEntry entry) {
         entry.grindTarget = null;
         entry.attackCooldownMs = 0;
         clearNavigationState(entry);
@@ -183,8 +191,7 @@ class BotMovementManager {
     }
 
     static void jumpOffRope(BotEntry entry, Character bot, int dx) {
-        int walkStep = BotPhysicsEngine.walkStep(bot.getMap());
-        int airVelX = dx > 0 ? walkStep : dx < 0 ? -walkStep : 0;
+        int airVelX = resolveAirVelocityX(bot.getMap(), dx);
         BotPhysicsEngine.beginJumpOffRope(entry, bot, airVelX);
         entry.ropeGrabCooldownMs = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS + 200);
         entry.jumpCooldownMs = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS);
@@ -193,8 +200,7 @@ class BotMovementManager {
 
     static void jumpToRope(BotEntry entry, Character bot, int dx) {
         Rope sourceRope = entry.climbRope;
-        int walkStep = BotPhysicsEngine.walkStep(bot.getMap());
-        int airVelX = dx > 0 ? walkStep : dx < 0 ? -walkStep : 0;
+        int airVelX = resolveAirVelocityX(bot.getMap(), dx);
         BotPhysicsEngine.beginRopeTransferJump(entry, bot, sourceRope, airVelX);
         entry.jumpCooldownMs = delayAfterCurrentTick(cfg.JUMP_COOLDOWN_MS);
         broadcastMovement(entry);
@@ -274,7 +280,7 @@ class BotMovementManager {
         }
 
         for (Rope rope : bot.getMap().getRopes()) {
-            if (isSameRope(entry.blockedRopeGrab, rope)) {
+            if (sameRope(entry.blockedRopeGrab, rope)) {
                 continue;
             }
             if (Math.abs(rope.x() - botPos.x) > BotPhysicsEngine.cfg.ROPE_GRAB_X) {
@@ -292,7 +298,7 @@ class BotMovementManager {
         return false;
     }
 
-    private static boolean isSameRope(Rope left, Rope right) {
+    static boolean sameRope(Rope left, Rope right) {
         return left != null && right != null
                 && left.x() == right.x()
                 && left.topY() == right.topY()
@@ -476,12 +482,7 @@ class BotMovementManager {
     }
 
     static void initiateJump(BotEntry entry, Character bot, int dx) {
-        int airVelX = 0;
-        if (dx != 0) {
-            int walkStep = BotPhysicsEngine.walkStep(bot.getMap());
-            airVelX = dx >= 0 ? walkStep : -walkStep;
-        }
-        BotPhysicsEngine.beginGroundJump(entry, bot, airVelX);
+        BotPhysicsEngine.beginGroundJump(entry, bot, resolveAirVelocityX(bot.getMap(), dx));
         broadcastMovement(entry);
     }
 
@@ -510,10 +511,16 @@ class BotMovementManager {
     }
 
     static void initiateRopeJump(BotEntry entry, Character bot, int dx) {
-        int walkStep = BotPhysicsEngine.walkStep(bot.getMap());
-        int airVelX = dx > 0 ? walkStep : dx < 0 ? -walkStep : 0;
-        BotPhysicsEngine.beginClimbUpJump(entry, bot, airVelX);
+        BotPhysicsEngine.beginClimbUpJump(entry, bot, resolveAirVelocityX(bot.getMap(), dx));
         broadcastMovement(entry);
+    }
+
+    private static int resolveAirVelocityX(MapleMap map, int dx) {
+        if (dx == 0) {
+            return 0;
+        }
+        int walkStep = BotPhysicsEngine.walkStep(map);
+        return dx > 0 ? walkStep : -walkStep;
     }
 
     static void broadcastMovement(BotEntry entry) {

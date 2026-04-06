@@ -143,10 +143,6 @@ final class BotNavigationGraph implements Serializable {
             return bestSegment.pointAt(x);
         }
 
-        Point ropePointAtY(int y) {
-            return new Point(minX, Math.max(minY, Math.min(y, maxY)));
-        }
-
         private Segment findBestSegment(int x) {
             Segment best = segments.get(0);
             int bestDistance = distanceToSegment(best, x);
@@ -227,22 +223,8 @@ final class BotNavigationGraph implements Serializable {
                     startPoint.x, startPoint.x, launchStepX, portalId, ropeX, ropeTopY, ropeBottomY, cost);
         }
 
-        boolean hasLaunchWindow() {
-            return type == EdgeType.JUMP && launchMinX != launchMaxX;
-        }
-
         boolean containsLaunchX(int x) {
             return x >= launchMinX && x <= launchMaxX;
-        }
-
-        int clampLaunchX(int x) {
-            if (x < launchMinX) {
-                return launchMinX;
-            }
-            if (x > launchMaxX) {
-                return launchMaxX;
-            }
-            return x;
         }
     }
 
