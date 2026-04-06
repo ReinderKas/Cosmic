@@ -22,6 +22,7 @@ import constants.skills.SuperGM;
 import constants.skills.ThunderBreaker;
 import net.server.channel.handlers.AbstractDealDamageHandler;
 import server.StatEffect;
+import server.bots.combat.BotAttackDataProvider;
 import server.bots.combat.BotCharacterHitboxProvider;
 import server.bots.combat.BotCombatFormulaProvider;
 import server.bots.combat.BotDefenseDataProvider;
@@ -364,8 +365,13 @@ class BotCombatManager {
         fx.applyTo(bot);
 
         entry.nextSupportHealAt = now + cfg.SUPPORT_HEAL_CD_MS;
-        entry.attackCooldownMs = Math.max(entry.attackCooldownMs,
-                BotMovementManager.delayAfterCurrentTick(Math.max(0, skill.getAnimationTime())));
+        BotAttackExecutionProvider.BasicAttackData fallbackAttackData =
+                BotAttackExecutionProvider.buildBasicAttackData(bot, bot.getPosition());
+        String action = BotAttackExecutionProvider.resolveSkillAttackAction(bot, skill, lvl,
+                BotAttackExecutionProvider.getEquippedWeaponType(bot));
+        BotAttackExecutionProvider.SkillAttackTiming skillTiming =
+                BotAttackExecutionProvider.resolveSkillAttackTiming(skill, action, bot, fallbackAttackData);
+        entry.attackCooldownMs = Math.max(entry.attackCooldownMs, skillTiming.cooldownMs());
         if (fx.getCooldown() > 0) {
             bot.addCooldown(entry.healSkillId, now, fx.getCooldown() * 1000L);
         }
@@ -507,7 +513,7 @@ class BotCombatManager {
         }
         boolean facingLeft = primaryTarget.getPosition().x < bot.getPosition().x;
         BotAttackExecutionProvider.BasicAttackData fallbackAttackData = buildBasicAttackData(bot, primaryTarget);
-        BotAttackExecutionProvider.BasicAttackSpec attackSpec = BotAttackExecutionProvider.basicAttackSpec(weaponType);
+        BotAttackDataProvider.AttackAnimationSpec attackSpec = BotAttackDataProvider.getInstance().getBasicAttackSpec(weaponType);
         String action = BotAttackExecutionProvider.resolveSkillAttackAction(bot, skill, skillLevel, weaponType);
         String fallbackAction = attackSpec.primaryAction();
         BotAttackExecutionProvider.CloseRangePacketFields closeRangePacketFields = route == AttackRoute.CLOSE
@@ -549,7 +555,7 @@ class BotCombatManager {
         }
         boolean facingLeft = primaryTarget.getPosition().x < bot.getPosition().x;
         BotAttackExecutionProvider.BasicAttackData fallbackAttackData = buildBasicAttackData(bot, primaryTarget);
-        BotAttackExecutionProvider.BasicAttackSpec attackSpec = BotAttackExecutionProvider.basicAttackSpec(weaponType);
+        BotAttackDataProvider.AttackAnimationSpec attackSpec = BotAttackDataProvider.getInstance().getBasicAttackSpec(weaponType);
         String action = BotAttackExecutionProvider.resolveSkillAttackAction(bot, skill, skillLevel, weaponType);
         String fallbackAction = attackSpec.primaryAction();
         BotAttackExecutionProvider.CloseRangePacketFields closeRangePacketFields = route == AttackRoute.CLOSE
@@ -767,8 +773,13 @@ class BotCombatManager {
         if (dur > 0) {
             entry.nextBuffAt.put(skill.getId(), now + (long) (dur * 0.9));
         }
-        entry.attackCooldownMs = Math.max(entry.attackCooldownMs,
-                BotMovementManager.delayAfterCurrentTick(Math.max(0, skill.getAnimationTime())));
+        BotAttackExecutionProvider.BasicAttackData fallbackAttackData =
+                BotAttackExecutionProvider.buildBasicAttackData(bot, bot.getPosition());
+        String action = BotAttackExecutionProvider.resolveSkillAttackAction(bot, skill, bot.getSkillLevel(skill),
+                BotAttackExecutionProvider.getEquippedWeaponType(bot));
+        BotAttackExecutionProvider.SkillAttackTiming skillTiming =
+                BotAttackExecutionProvider.resolveSkillAttackTiming(skill, action, bot, fallbackAttackData);
+        entry.attackCooldownMs = Math.max(entry.attackCooldownMs, skillTiming.cooldownMs());
         if (fx.getCooldown() > 0) {
             bot.addCooldown(skill.getId(), now, fx.getCooldown() * 1000L);
         }

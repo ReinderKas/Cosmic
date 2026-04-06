@@ -12,6 +12,7 @@ import net.packet.Packet;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import server.StatEffect;
+import server.bots.combat.BotAttackDataProvider;
 import server.life.Monster;
 import server.maps.MapleMap;
 
@@ -35,28 +36,30 @@ import static org.mockito.Mockito.when;
 class BotCombatManagerTest {
     @Test
     void shouldMatchOpenStoryBasicAttackStanceIds() {
-        assertEquals(23, BotAttackExecutionProvider.attackStanceId("swingO1"));
-        assertEquals(11, BotAttackExecutionProvider.attackStanceId("shoot1"));
-        assertEquals(10, BotAttackExecutionProvider.attackStanceId("shot"));
-        assertEquals(0, BotAttackExecutionProvider.attackStanceId("stand1"));
+        BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
+        assertEquals(23, provider.getAttackStanceId("swingO1"));
+        assertEquals(11, provider.getAttackStanceId("shoot1"));
+        assertEquals(10, provider.getAttackStanceId("shot"));
+        assertEquals(0, provider.getAttackStanceId("stand1"));
     }
 
     @Test
     void shouldUseOpenStoryFallbackAttackGroupsByWeaponType() {
-        BotAttackExecutionProvider.BasicAttackSpec gunSpec = BotAttackExecutionProvider.basicAttackSpec(WeaponType.GUN);
+        BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
+        BotAttackDataProvider.AttackAnimationSpec gunSpec = provider.getBasicAttackSpec(WeaponType.GUN);
         assertEquals(9, gunSpec.display());
         assertEquals("handgun", gunSpec.primaryAction());
 
-        BotAttackExecutionProvider.BasicAttackSpec bowSpec = BotAttackExecutionProvider.basicAttackSpec(WeaponType.BOW);
+        BotAttackDataProvider.AttackAnimationSpec bowSpec = provider.getBasicAttackSpec(WeaponType.BOW);
         assertEquals(3, bowSpec.display());
         assertEquals("shoot1", bowSpec.primaryAction());
 
-        BotAttackExecutionProvider.BasicAttackSpec twoHandedSpec = BotAttackExecutionProvider.basicAttackSpec(WeaponType.SWORD2H);
+        BotAttackDataProvider.AttackAnimationSpec twoHandedSpec = provider.getBasicAttackSpec(WeaponType.SWORD2H);
         assertEquals(5, twoHandedSpec.display());
         assertTrue(twoHandedSpec.actions().contains("swingT1"));
         assertTrue(twoHandedSpec.actions().contains("stabO1"));
 
-        BotAttackExecutionProvider.BasicAttackSpec degenerateBowSpec = BotAttackExecutionProvider.basicAttackSpec(WeaponType.BOW, true);
+        BotAttackDataProvider.AttackAnimationSpec degenerateBowSpec = provider.getBasicAttackSpec(WeaponType.BOW, true);
         assertEquals(3, degenerateBowSpec.display());
         assertTrue(degenerateBowSpec.actions().contains("swingT1"));
         assertTrue(degenerateBowSpec.actions().contains("swingT3"));
@@ -202,7 +205,7 @@ class BotCombatManagerTest {
     @Test
     void shouldUseDegenerateCloseAttackPoolForBowAtPointBlankRange() {
         assertTrue(BotAttackExecutionProvider.shouldDegenerateRangedAttack(WeaponType.BOW, new Point(100, 200), new Point(145, 200)));
-        BotAttackExecutionProvider.BasicAttackSpec bowSpec = BotAttackExecutionProvider.basicAttackSpec(WeaponType.BOW, true);
+        BotAttackDataProvider.AttackAnimationSpec bowSpec = BotAttackDataProvider.getInstance().getBasicAttackSpec(WeaponType.BOW, true);
 
         assertEquals(3, bowSpec.display());
         assertTrue(bowSpec.actions().contains("swingT1"));
@@ -212,7 +215,7 @@ class BotCombatManagerTest {
     @Test
     void shouldKeepBowOutOfDegenerateModeWhenTargetIsNotCrowding() {
         assertFalse(BotAttackExecutionProvider.shouldDegenerateRangedAttack(WeaponType.BOW, new Point(100, 200), new Point(300, 200)));
-        BotAttackExecutionProvider.BasicAttackSpec bowSpec = BotAttackExecutionProvider.basicAttackSpec(WeaponType.BOW, false);
+        BotAttackDataProvider.AttackAnimationSpec bowSpec = BotAttackDataProvider.getInstance().getBasicAttackSpec(WeaponType.BOW, false);
 
         assertEquals("shoot1", bowSpec.primaryAction());
     }

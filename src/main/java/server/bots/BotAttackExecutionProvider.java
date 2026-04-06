@@ -18,24 +18,6 @@ import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 final class BotAttackExecutionProvider {
-    record BasicAttackSpec(int display, List<String> actions) {
-        String primaryAction() {
-            return actions.isEmpty() ? "swingO1" : actions.get(0);
-        }
-
-        String actionForVariant(int variantOffset) {
-            if (actions.isEmpty()) {
-                return "swingO1";
-            }
-            int normalizedIndex = Math.max(0, Math.min(variantOffset, actions.size() - 1));
-            return actions.get(normalizedIndex);
-        }
-
-        int stanceIdForVariant(int variantOffset) {
-            return attackStanceId(actionForVariant(variantOffset));
-        }
-    }
-
     record CloseRangePacketFields(int display, int direction, int stance) {
     }
 
@@ -70,9 +52,11 @@ final class BotAttackExecutionProvider {
                                                                    WeaponType weaponType, boolean facingLeft,
                                                                    Character bot, Point targetPosition) {
         int baseDisplay = profile.getAttack();
+        BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
         boolean useDegenerateCloseRange = shouldDegenerateRangedAttack(weaponType,
                 bot != null ? bot.getPosition() : null, targetPosition);
-        BasicAttackSpec attackSpec = basicAttackSpec(baseDisplay, weaponType, useDegenerateCloseRange);
+        BotAttackDataProvider.AttackAnimationSpec attackSpec =
+                provider.getBasicAttackSpec(baseDisplay, weaponType, useDegenerateCloseRange);
         if (baseDisplay <= 0) {
             return fallbackBasicAttackData(facingLeft, profile.getAttackSpeed(), weaponType, bot, targetPosition);
         }
@@ -91,7 +75,6 @@ final class BotAttackExecutionProvider {
                 ? closeRangePacketFields.direction()
                 : basicAttackDirectionId(action, fallbackAction);
         int effectiveAttackSpeed = resolveEffectiveAttackSpeed(profile.getAttackSpeed(), bot);
-        BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
 
         int rawAnimationDelayMs = provider.getBodyStanceDurationMs(action);
         if (rawAnimationDelayMs <= 0) {
@@ -101,7 +84,7 @@ final class BotAttackExecutionProvider {
 
         int cooldownMs = toCooldownMs(adjustAttackDelayMillis(rawAnimationDelayMs, profile.getAttackSpeed(), effectiveAttackSpeed));
         int hitDelayMs = adjustAttackDelayMillis(rawHitDelayMs, profile.getAttackSpeed(), effectiveAttackSpeed);
-        int stance = closeRangeRoute ? closeRangePacketFields.stance() : attackStanceId(action);
+        int stance = closeRangeRoute ? closeRangePacketFields.stance() : provider.getAttackStanceId(action);
         Rectangle hitBox = closeRangeRoute
                 ? closeRangeBasicHitBox(bot.getPosition(), facingLeft)
                 : profile.hasBoundingBox() ? profile.calculateBoundingBox(bot.getPosition(), facingLeft) : null;
@@ -112,9 +95,10 @@ final class BotAttackExecutionProvider {
 
     private static BasicAttackData fallbackBasicAttackData(boolean facingLeft, int baseAttackSpeed,
                                                            WeaponType weaponType, Character bot, Point targetPosition) {
+        BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
         boolean useDegenerateCloseRange = shouldDegenerateRangedAttack(weaponType,
                 bot != null ? bot.getPosition() : null, targetPosition);
-        BasicAttackSpec attackSpec = basicAttackSpec(weaponType, useDegenerateCloseRange);
+        BotAttackDataProvider.AttackAnimationSpec attackSpec = provider.getBasicAttackSpec(weaponType, useDegenerateCloseRange);
         String action = sampleAttackAction(attackSpec.actions(), attackSpec.primaryAction());
         int variantOffset = Math.max(0, attackSpec.actions().indexOf(action));
         BotCombatManager.AttackRoute route = useDegenerateCloseRange
@@ -128,7 +112,7 @@ final class BotAttackExecutionProvider {
                 ? closeRangePacketFields.direction()
                 : basicAttackDirectionId(action, attackSpec.primaryAction());
         int effectiveAttackSpeed = resolveEffectiveAttackSpeed(baseAttackSpeed, bot);
-        int rawAnimationDelayMs = BotAttackDataProvider.getInstance().getBodyStanceDurationMs(action);
+        int rawAnimationDelayMs = provider.getBodyStanceDurationMs(action);
         if (rawAnimationDelayMs <= 0) {
             rawAnimationDelayMs = 600;
         }
@@ -138,89 +122,9 @@ final class BotAttackExecutionProvider {
                 : null;
 
         return new BasicAttackData(hitBox, display, direction, direction,
-                closeRangeRoute ? closeRangePacketFields.stance() : attackSpec.stanceIdForVariant(variantOffset),
+                closeRangeRoute ? closeRangePacketFields.stance() : provider.getAttackStanceId(attackSpec.actionForVariant(variantOffset)),
                 effectiveAttackSpeed, defaultHitDelayMs(adjustedAnimationDelayMs), toCooldownMs(adjustedAnimationDelayMs),
                 route);
-    }
-
-    static BasicAttackSpec basicAttackSpec(int attackGroup, WeaponType fallbackWeaponType) {
-        return basicAttackSpec(attackGroup, fallbackWeaponType, false);
-    }
-
-    static BasicAttackSpec basicAttackSpec(int attackGroup, WeaponType fallbackWeaponType, boolean degenerate) {
-        if (degenerate) {
-            return switch (attackGroup) {
-                case 3 -> new BasicAttackSpec(3, List.of("swingT1", "swingT3"));
-                case 4 -> new BasicAttackSpec(4, List.of("swingT1", "stabT1"));
-                case 7 -> new BasicAttackSpec(7, List.of("swingT1", "stabT1"));
-                case 9 -> new BasicAttackSpec(9, List.of("swingP1", "stabT2"));
-                default -> basicAttackSpec(fallbackWeaponType, false);
-            };
-        }
-
-        return switch (attackGroup) {
-            case 1 -> new BasicAttackSpec(1, List.of("stabO1", "stabO2", "swingO1", "swingO2", "swingO3"));
-            case 2 -> new BasicAttackSpec(2, List.of("stabT1", "swingP1"));
-            case 3 -> new BasicAttackSpec(3, List.of("shoot1"));
-            case 4 -> new BasicAttackSpec(4, List.of("shoot2"));
-            case 5 -> new BasicAttackSpec(5, List.of("stabO1", "stabO2", "swingT1", "swingT2", "swingT3"));
-            case 6 -> new BasicAttackSpec(6, List.of("swingO1", "swingO2"));
-            case 7 -> new BasicAttackSpec(7, List.of("swingO1", "swingO2"));
-            case 9 -> new BasicAttackSpec(9, List.of("handgun"));
-            default -> basicAttackSpec(fallbackWeaponType);
-        };
-    }
-
-    static BasicAttackSpec basicAttackSpec(WeaponType weaponType) {
-        return basicAttackSpec(weaponType, false);
-    }
-
-    static BasicAttackSpec basicAttackSpec(WeaponType weaponType, boolean degenerate) {
-        if (weaponType == null) {
-            return new BasicAttackSpec(1, List.of("stabO1", "stabO2", "swingO1", "swingO2", "swingO3"));
-        }
-        if (degenerate) {
-            return switch (weaponType) {
-                case BOW -> new BasicAttackSpec(3, List.of("swingT1", "swingT3"));
-                case CROSSBOW -> new BasicAttackSpec(4, List.of("swingT1", "stabT1"));
-                case CLAW -> new BasicAttackSpec(7, List.of("swingT1", "stabT1"));
-                case GUN -> new BasicAttackSpec(9, List.of("swingP1", "stabT2"));
-                default -> basicAttackSpec(weaponType, false);
-            };
-        }
-        return switch (weaponType) {
-            case BOW -> new BasicAttackSpec(3, List.of("shoot1"));
-            case CROSSBOW -> new BasicAttackSpec(4, List.of("shoot2"));
-            case SPEAR_SWING, SPEAR_STAB, POLE_ARM_SWING, POLE_ARM_STAB ->
-                    new BasicAttackSpec(2, List.of("stabT1", "swingP1"));
-            case GENERAL2H_SWING, GENERAL2H_STAB, SWORD2H ->
-                    new BasicAttackSpec(5, List.of("stabO1", "stabO2", "swingT1", "swingT2", "swingT3"));
-            case WAND, STAFF -> new BasicAttackSpec(6, List.of("swingO1", "swingO2"));
-            case CLAW -> new BasicAttackSpec(7, List.of("swingO1", "swingO2"));
-            case GUN -> new BasicAttackSpec(9, List.of("handgun"));
-            default -> new BasicAttackSpec(1, List.of("stabO1", "stabO2", "swingO1", "swingO2", "swingO3"));
-        };
-    }
-
-    static int attackStanceId(String actionName) {
-        return switch (actionName) {
-            case "shot", "handgun" -> 10;
-            case "shoot1" -> 11;
-            case "shoot2" -> 12;
-            case "stabO1" -> 15;
-            case "stabO2" -> 16;
-            case "stabT1" -> 18;
-            case "stabT2" -> 19;
-            case "swingO1" -> 23;
-            case "swingO2" -> 24;
-            case "swingO3" -> 25;
-            case "swingP1" -> 27;
-            case "swingP2" -> 28;
-            case "swingT1" -> 30;
-            case "swingT2" -> 31;
-            case "swingT3" -> 32;
-            default -> 0;
-        };
     }
 
     static int basicAttackDirectionId(String actionName, String fallbackAction) {
@@ -246,7 +150,7 @@ final class BotAttackExecutionProvider {
                 facingLeft ? 0x80 : 0x00);
     }
 
-    static List<String> resolveAttackActions(BasicAttackSpec attackSpec, List<String> sourceActions) {
+    static List<String> resolveAttackActions(BotAttackDataProvider.AttackAnimationSpec attackSpec, List<String> sourceActions) {
         if (attackSpec == null || attackSpec.actions().isEmpty()) {
             return List.of("swingO1");
         }
@@ -350,12 +254,14 @@ final class BotAttackExecutionProvider {
                                                       BasicAttackData fallbackAttackData) {
         int fallbackHitDelayMs = fallbackAttackData != null ? fallbackAttackData.hitDelayMs() : defaultHitDelayMs(600);
         int fallbackCooldownMs = fallbackAttackData != null ? fallbackAttackData.cooldownMs() : toCooldownMs(600);
-        return resolveSkillAttackTiming(action, resolveSkillAttackDelayMillis(skill),
+        return resolveSkillAttackTiming(action, resolveWeaponAttackProfile(bot), resolveSkillAttackDelayMillis(skill),
                 resolveBaseWeaponAttackSpeed(bot), resolveWeaponAttackSpeed(bot),
                 fallbackHitDelayMs, fallbackCooldownMs);
     }
 
-    static SkillAttackTiming resolveSkillAttackTiming(String action, int rawSkillDelayMs,
+    static SkillAttackTiming resolveSkillAttackTiming(String action,
+                                                      BotAttackDataProvider.NormalAttackProfile weaponAttackProfile,
+                                                      int rawSkillDelayMs,
                                                       int baseWeaponAttackSpeed, int effectiveWeaponAttackSpeed,
                                                       int fallbackHitDelayMs, int fallbackCooldownMs) {
         BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
@@ -369,6 +275,19 @@ final class BotAttackExecutionProvider {
                     : defaultHitDelayMs(adjustedActionCooldownMs);
             return new SkillAttackTiming(adjustedActionHitDelayMs,
                     Math.max(toCooldownMs(adjustedActionCooldownMs), fallbackCooldownMs));
+        }
+
+        int rawStanceCooldownMs = provider.getBodyStanceDurationMs(action);
+        if (rawStanceCooldownMs > 0) {
+            int firstFrame = weaponAttackProfile != null ? weaponAttackProfile.getAfterimageFirstFrame(action) : 0;
+            int rawStanceHitDelayMs = provider.getBodyStanceDelayBeforeFrameMs(action, firstFrame);
+            int adjustedStanceCooldownMs = adjustAttackDelayMillis(rawStanceCooldownMs,
+                    baseWeaponAttackSpeed, effectiveWeaponAttackSpeed);
+            int adjustedStanceHitDelayMs = rawStanceHitDelayMs > 0
+                    ? adjustAttackDelayMillis(rawStanceHitDelayMs, baseWeaponAttackSpeed, effectiveWeaponAttackSpeed)
+                    : fallbackHitDelayMs;
+            return new SkillAttackTiming(adjustedStanceHitDelayMs,
+                    Math.max(toCooldownMs(adjustedStanceCooldownMs), fallbackCooldownMs));
         }
 
         return resolveSkillAttackTiming(rawSkillDelayMs, baseWeaponAttackSpeed, effectiveWeaponAttackSpeed,
@@ -397,31 +316,33 @@ final class BotAttackExecutionProvider {
         return candidateActions.get(variantOffset);
     }
 
-    private static BasicAttackSpec resolveWeaponAttackSpec(Character bot, WeaponType weaponType) {
+    private static BotAttackDataProvider.AttackAnimationSpec resolveWeaponAttackSpec(Character bot, WeaponType weaponType) {
+        BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
         Item weapon = bot != null ? bot.getInventory(InventoryType.EQUIPPED).getItem((short) -11) : null;
         if (weapon != null) {
             BotAttackDataProvider.NormalAttackProfile attackProfile =
-                    BotAttackDataProvider.getInstance().getNormalAttackProfile(weapon.getItemId());
+                    provider.getNormalAttackProfile(weapon.getItemId());
             if (attackProfile != null && attackProfile.getAttack() > 0) {
-                return basicAttackSpec(attackProfile.getAttack(), weaponType);
+                return provider.getBasicAttackSpec(attackProfile.getAttack(), weaponType);
             }
         }
-        return basicAttackSpec(weaponType);
+        return provider.getBasicAttackSpec(weaponType);
     }
 
     private static String sampleWeaponAttackAction(Character bot, WeaponType weaponType) {
+        BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
         Item weapon = bot != null ? bot.getInventory(InventoryType.EQUIPPED).getItem((short) -11) : null;
         if (weapon != null) {
             BotAttackDataProvider.NormalAttackProfile attackProfile =
-                    BotAttackDataProvider.getInstance().getNormalAttackProfile(weapon.getItemId());
+                    provider.getNormalAttackProfile(weapon.getItemId());
             if (attackProfile != null) {
-                BasicAttackSpec attackSpec = basicAttackSpec(attackProfile.getAttack(), weaponType);
+                BotAttackDataProvider.AttackAnimationSpec attackSpec = provider.getBasicAttackSpec(attackProfile.getAttack(), weaponType);
                 return sampleAttackAction(resolveAttackActions(attackSpec, attackProfile.getSourceActions()),
                         attackSpec.primaryAction());
             }
         }
 
-        BasicAttackSpec attackSpec = basicAttackSpec(weaponType);
+        BotAttackDataProvider.AttackAnimationSpec attackSpec = provider.getBasicAttackSpec(weaponType);
         return sampleAttackAction(attackSpec.actions(), attackSpec.primaryAction());
     }
 
@@ -506,18 +427,25 @@ final class BotAttackExecutionProvider {
     }
 
     private static int resolveBaseWeaponAttackSpeed(Character bot) {
-        Item weapon = bot.getInventory(InventoryType.EQUIPPED).getItem((short) -11);
-        if (weapon == null) {
-            return 4;
-        }
-
-        BotAttackDataProvider.NormalAttackProfile attackProfile =
-                BotAttackDataProvider.getInstance().getNormalAttackProfile(weapon.getItemId());
+        BotAttackDataProvider.NormalAttackProfile attackProfile = resolveWeaponAttackProfile(bot);
         if (attackProfile == null) {
             return 4;
         }
 
         return attackProfile.getAttackSpeed();
+    }
+
+    private static BotAttackDataProvider.NormalAttackProfile resolveWeaponAttackProfile(Character bot) {
+        if (bot == null) {
+            return null;
+        }
+
+        Item weapon = bot.getInventory(InventoryType.EQUIPPED).getItem((short) -11);
+        if (weapon == null) {
+            return null;
+        }
+
+        return BotAttackDataProvider.getInstance().getNormalAttackProfile(weapon.getItemId());
     }
 
     private static int normalizeAttackSpeed(int attackSpeed) {

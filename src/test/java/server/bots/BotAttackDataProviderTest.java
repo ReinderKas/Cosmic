@@ -48,12 +48,32 @@ class BotAttackDataProviderTest {
         int rawActionHitDelayMs = provider.getBodyActionAttackDelayMs("doublefire", 0);
         int rawActionDurationMs = provider.getBodyActionDurationMs("doublefire");
         BotAttackExecutionProvider.SkillAttackTiming timing =
-                BotAttackExecutionProvider.resolveSkillAttackTiming("doublefire", 999, 4, 4, 300, 590);
+                BotAttackExecutionProvider.resolveSkillAttackTiming("doublefire", null, 999, 4, 4, 300, 590);
 
         assertTrue(rawActionDurationMs > 0);
         assertTrue(rawActionHitDelayMs >= 0);
         assertEquals(adjustedDelay(rawActionHitDelayMs), timing.hitDelayMs());
         assertEquals(Math.max(BotMovementManager.delayAfterCurrentTick(adjustedDelay(rawActionDurationMs)), 590),
+                timing.cooldownMs());
+    }
+
+    @Test
+    void shouldUseBodyStanceTimingForExplicitStanceStyleSkillActions() {
+        BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
+        BotAttackDataProvider.NormalAttackProfile profile = provider.getNormalAttackProfile(1302077);
+        assertNotNull(profile);
+
+        int rawStanceHitDelayMs = provider.getBodyStanceDelayBeforeFrameMs("swingO1",
+                profile.getAfterimageFirstFrame("swingO1"));
+        int rawStanceDurationMs = provider.getBodyStanceDurationMs("swingO1");
+
+        BotAttackExecutionProvider.SkillAttackTiming timing =
+                BotAttackExecutionProvider.resolveSkillAttackTiming("swingO1", profile, 999, 4, 4, 0, 0);
+
+        assertTrue(rawStanceDurationMs > 0);
+        assertTrue(rawStanceHitDelayMs > 0);
+        assertEquals(adjustedDelay(rawStanceHitDelayMs), timing.hitDelayMs());
+        assertEquals(BotMovementManager.delayAfterCurrentTick(adjustedDelay(rawStanceDurationMs)),
                 timing.cooldownMs());
     }
 
@@ -66,8 +86,8 @@ class BotAttackDataProviderTest {
 
     @Test
     void shouldFilterWeaponActionsToLegalAttackGroupAnimations() {
-        BotAttackExecutionProvider.BasicAttackSpec attackSpec =
-                BotAttackExecutionProvider.basicAttackSpec(1, client.inventory.WeaponType.GENERAL1H_SWING);
+        BotAttackDataProvider.AttackAnimationSpec attackSpec =
+                BotAttackDataProvider.getInstance().getBasicAttackSpec(1, client.inventory.WeaponType.GENERAL1H_SWING);
 
         List<String> actions = BotAttackExecutionProvider.resolveAttackActions(attackSpec,
                 List.of("swingOF", "stabO1", "proneStab", "swingO3", "stabOF"));

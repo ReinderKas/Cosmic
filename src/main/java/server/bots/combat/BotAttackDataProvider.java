@@ -1,5 +1,6 @@
 package server.bots.combat;
 
+import client.inventory.WeaponType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
@@ -26,6 +27,7 @@ public final class BotAttackDataProvider {
     private static final Logger log = LoggerFactory.getLogger(BotAttackDataProvider.class);
     private static final BotAttackDataProvider instance = new BotAttackDataProvider();
     private static final Map<String, Integer> BODY_ACTION_ID_OVERRIDES = createBodyActionIdOverrides();
+    private static final Map<String, Integer> ATTACK_STANCE_IDS = createAttackStanceIds();
 
     public static BotAttackDataProvider getInstance() {
         return instance;
@@ -108,6 +110,20 @@ public final class BotAttackDataProvider {
 
             return new Rectangle(origin.x + leftOffset, origin.y + rightFacingBounds.y,
                     rightOffset - leftOffset, rightFacingBounds.height);
+        }
+    }
+
+    public record AttackAnimationSpec(int display, List<String> actions) {
+        public String primaryAction() {
+            return actions.isEmpty() ? "swingO1" : actions.get(0);
+        }
+
+        public String actionForVariant(int variantOffset) {
+            if (actions.isEmpty()) {
+                return "swingO1";
+            }
+            int normalizedIndex = Math.max(0, Math.min(variantOffset, actions.size() - 1));
+            return actions.get(normalizedIndex);
         }
     }
 
@@ -299,6 +315,90 @@ public final class BotAttackDataProvider {
         overrides.put("shockwave", 157);
         overrides.put("demolition", 158);
         return Map.copyOf(overrides);
+    }
+
+    private static Map<String, Integer> createAttackStanceIds() {
+        Map<String, Integer> stanceIds = new HashMap<>();
+        stanceIds.put("shot", 10);
+        stanceIds.put("handgun", 10);
+        stanceIds.put("shoot1", 11);
+        stanceIds.put("shoot2", 12);
+        stanceIds.put("stabO1", 15);
+        stanceIds.put("stabO2", 16);
+        stanceIds.put("stabT1", 18);
+        stanceIds.put("stabT2", 19);
+        stanceIds.put("swingO1", 23);
+        stanceIds.put("swingO2", 24);
+        stanceIds.put("swingO3", 25);
+        stanceIds.put("swingP1", 27);
+        stanceIds.put("swingP2", 28);
+        stanceIds.put("swingT1", 30);
+        stanceIds.put("swingT2", 31);
+        stanceIds.put("swingT3", 32);
+        return Map.copyOf(stanceIds);
+    }
+
+    public AttackAnimationSpec getBasicAttackSpec(int attackGroup, WeaponType fallbackWeaponType) {
+        return getBasicAttackSpec(attackGroup, fallbackWeaponType, false);
+    }
+
+    public AttackAnimationSpec getBasicAttackSpec(int attackGroup, WeaponType fallbackWeaponType, boolean degenerate) {
+        if (degenerate) {
+            return switch (attackGroup) {
+                case 3 -> new AttackAnimationSpec(3, List.of("swingT1", "swingT3"));
+                case 4 -> new AttackAnimationSpec(4, List.of("swingT1", "stabT1"));
+                case 7 -> new AttackAnimationSpec(7, List.of("swingT1", "stabT1"));
+                case 9 -> new AttackAnimationSpec(9, List.of("swingP1", "stabT2"));
+                default -> getBasicAttackSpec(fallbackWeaponType, false);
+            };
+        }
+
+        return switch (attackGroup) {
+            case 1 -> new AttackAnimationSpec(1, List.of("stabO1", "stabO2", "swingO1", "swingO2", "swingO3"));
+            case 2 -> new AttackAnimationSpec(2, List.of("stabT1", "swingP1"));
+            case 3 -> new AttackAnimationSpec(3, List.of("shoot1"));
+            case 4 -> new AttackAnimationSpec(4, List.of("shoot2"));
+            case 5 -> new AttackAnimationSpec(5, List.of("stabO1", "stabO2", "swingT1", "swingT2", "swingT3"));
+            case 6 -> new AttackAnimationSpec(6, List.of("swingO1", "swingO2"));
+            case 7 -> new AttackAnimationSpec(7, List.of("swingO1", "swingO2"));
+            case 9 -> new AttackAnimationSpec(9, List.of("handgun"));
+            default -> getBasicAttackSpec(fallbackWeaponType);
+        };
+    }
+
+    public AttackAnimationSpec getBasicAttackSpec(WeaponType weaponType) {
+        return getBasicAttackSpec(weaponType, false);
+    }
+
+    public AttackAnimationSpec getBasicAttackSpec(WeaponType weaponType, boolean degenerate) {
+        if (weaponType == null) {
+            return new AttackAnimationSpec(1, List.of("stabO1", "stabO2", "swingO1", "swingO2", "swingO3"));
+        }
+        if (degenerate) {
+            return switch (weaponType) {
+                case BOW -> new AttackAnimationSpec(3, List.of("swingT1", "swingT3"));
+                case CROSSBOW -> new AttackAnimationSpec(4, List.of("swingT1", "stabT1"));
+                case CLAW -> new AttackAnimationSpec(7, List.of("swingT1", "stabT1"));
+                case GUN -> new AttackAnimationSpec(9, List.of("swingP1", "stabT2"));
+                default -> getBasicAttackSpec(weaponType, false);
+            };
+        }
+        return switch (weaponType) {
+            case BOW -> new AttackAnimationSpec(3, List.of("shoot1"));
+            case CROSSBOW -> new AttackAnimationSpec(4, List.of("shoot2"));
+            case SPEAR_SWING, SPEAR_STAB, POLE_ARM_SWING, POLE_ARM_STAB ->
+                    new AttackAnimationSpec(2, List.of("stabT1", "swingP1"));
+            case GENERAL2H_SWING, GENERAL2H_STAB, SWORD2H ->
+                    new AttackAnimationSpec(5, List.of("stabO1", "stabO2", "swingT1", "swingT2", "swingT3"));
+            case WAND, STAFF -> new AttackAnimationSpec(6, List.of("swingO1", "swingO2"));
+            case CLAW -> new AttackAnimationSpec(7, List.of("swingO1", "swingO2"));
+            case GUN -> new AttackAnimationSpec(9, List.of("handgun"));
+            default -> new AttackAnimationSpec(1, List.of("stabO1", "stabO2", "swingO1", "swingO2", "swingO3"));
+        };
+    }
+
+    public int getAttackStanceId(String actionName) {
+        return ATTACK_STANCE_IDS.getOrDefault(actionName, 0);
     }
 
     /**
