@@ -166,11 +166,7 @@ final class BotPathLogger {
         if (entry.following || !targetSnapshot.followBasePos().equals(targetSnapshot.rawOwnerPos())) {
             sb.append("Follow base:")
                     .append(" ").append(pointRegionStr(targetSnapshot.followBasePos(), followBaseRegionId))
-                    .append("  [owner + formation offset");
-            if (entry.navEdge != null) {
-                sb.append(", navEdge active => raw owner X");
-            }
-            sb.append("]\n");
+                    .append("  [owner + formation offset]\n");
         }
         if (entry.following) {
             sb.append("Follow tgt: ").append(pointRegionStr(targetSnapshot.followTargetPos(), followTargetRegionId))

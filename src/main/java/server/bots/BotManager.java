@@ -774,7 +774,11 @@ public class BotManager {
      * within range, or snap is disabled, fall back to the owner's foothold with X clamped
      * so the bot never targets a position that isn't on a real standing surface.
      */
-    private static Point resolveFollowTargetPos(Point followBase, Point ownerPos, int snapRange, MapleMap map) {
+    private static Point resolveFollowTargetPos(Point followBase,
+                                                Character owner,
+                                                Point ownerPos,
+                                                int snapRange,
+                                                MapleMap map) {
         if (snapRange > 0 && map != null) {
             // Two probes: one at ownerY (finds platform at or below), one above by snapRange.
             // Compare distances to ownerPos.y (not followBase.y, which is always ownerPos.y here,
@@ -790,23 +794,36 @@ public class BotManager {
             }
         }
         // No platform found within snap range at the offset X — or snap is disabled.
-        // Fall back to the owner's foothold with X clamped so we never target an (x,y) that
-        // isn't on a real foothold, which would cause findRegionId to return the wrong region.
-        return clampedOnOwnerFoothold(followBase.x, ownerPos, map);
+        // Fall back to the owner's current walk region, not just the single foothold segment,
+        // so formation still works across merged flat/sloped platforms when snap is disabled.
+        return clampedOnOwnerRegion(followBase.x, owner, ownerPos, map);
     }
 
     /**
-     * Clamps targetX to the owner's foothold X range and returns a point at ownerPos.y.
-     * Used as the fallback follow target when the offset position has no valid platform.
+     * Clamps targetX to the owner's current walk region and returns a real standing point.
+     * Falls back to the owner's foothold segment if the region cannot be resolved.
      */
-    private static Point clampedOnOwnerFoothold(int targetX, Point ownerPos, MapleMap map) {
+    private static Point clampedOnOwnerRegion(int targetX, Character owner, Point ownerPos, MapleMap map) {
+        if (map != null) {
+            BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(map);
+            int ownerRegionId = owner != null
+                    ? BotNavigationManager.resolveCharacterRegionId(graph, map, owner)
+                    : graph.findRegionId(map, ownerPos);
+            BotNavigationGraph.Region ownerRegion = graph.getRegion(ownerRegionId);
+            if (ownerRegion != null && !ownerRegion.isRopeRegion) {
+                int clampedX = Math.max(ownerRegion.minX, Math.min(ownerRegion.maxX, targetX));
+                return ownerRegion.pointAt(clampedX);
+            }
+        }
+
         Foothold ownerFh = BotPhysicsEngine.findGroundFoothold(map, ownerPos);
         if (ownerFh != null) {
             int x1 = Math.min(ownerFh.getX1(), ownerFh.getX2());
             int x2 = Math.max(ownerFh.getX1(), ownerFh.getX2());
             targetX = Math.max(x1, Math.min(x2, targetX));
         }
-        return new Point(targetX, ownerPos.y);
+        Point fallback = map == null ? null : BotPhysicsEngine.findGroundPoint(map, new Point(targetX, ownerPos.y));
+        return fallback != null ? fallback : new Point(targetX, ownerPos.y);
     }
 
     FormationState formationStateFor(BotEntry entry) {
@@ -823,10 +840,8 @@ public class BotManager {
         Point fallbackPos = bot.getPosition();
         Point rawOwnerPos = owner != null ? owner.getPosition() : fallbackPos;
         FormationState formation = formationStateFor(entry);
-        Point followBasePos = entry.navEdge == null
-                ? new Point(rawOwnerPos.x + entry.followOffsetX, rawOwnerPos.y)
-                : new Point(rawOwnerPos);
-        Point followTargetPos = resolveFollowTargetPos(followBasePos, rawOwnerPos, formation.snapRange(), bot.getMap());
+        Point followBasePos = new Point(rawOwnerPos.x + entry.followOffsetX, rawOwnerPos.y);
+        Point followTargetPos = resolveFollowTargetPos(followBasePos, owner, rawOwnerPos, formation.snapRange(), bot.getMap());
         Point moveTargetPos = entry.moveTarget == null ? null : new Point(entry.moveTarget);
         Monster activeGrindTarget = entry.grindTarget != null
                 && entry.grindTarget.isAlive()

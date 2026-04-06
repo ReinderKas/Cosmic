@@ -132,17 +132,15 @@ final class BotNavigationManager {
         if (startRegionId == edge.toRegionId && !entry.inAir && !entry.climbing) {
             return null;
         }
-        // Abandon edges that would take the bot away from its target region when it is already
-        // in that region. This prevents formation-offset oscillation where the follow target
-        // flips from an offset region to the owner's region after a cross-region edge is
-        // committed, causing the bot to leave the owner's platform unnecessarily.
-        // should not have that edge in the first place, too hacky
-//        if (!entry.inAir && !entry.climbing
-//                && startRegionId >= 0 && startRegionId == targetRegionId
-//                && edge.toRegionId != startRegionId
-//                && edge.type != BotNavigationGraph.EdgeType.WALK) {
-//            return null;
-//        }
+        // Once the resolved target is back in the bot's current region, any committed edge that
+        // would leave that region is stale. Keeping it causes follow/formation loops where the
+        // bot repeatedly runs toward an old jump/drop/portal after the live follow target has
+        // snapped back onto the current platform.
+        if (!entry.inAir && !entry.climbing
+                && startRegionId >= 0 && startRegionId == targetRegionId
+                && edge.toRegionId != startRegionId) {
+            return null;
+        }
         if (startRegionId == edge.fromRegionId) {
             return edge;
         }
