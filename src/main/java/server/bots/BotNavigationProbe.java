@@ -161,11 +161,12 @@ public final class BotNavigationProbe {
                 report.walkableFootholdCount,
                 report.ropeCount));
         lines.add(String.format(
-                "Phases: collect=%.2f regions=%.2f ropeRegions=%.2f features=%.2f walk=%.2f drop=%.2f jump=%.2f ropeIn=%.2f ropeOut=%.2f portal=%.2f ms",
+                "Phases: collect=%.2f regions=%.2f ropeRegions=%.2f features=%.2f anchors=%.2f walk=%.2f drop=%.2f jump=%.2f ropeIn=%.2f ropeOut=%.2f portal=%.2f ms",
                 nanosToMs(report.collectFootholdsNs),
                 nanosToMs(report.buildRegionsNs),
                 nanosToMs(report.addRopeRegionsNs),
                 nanosToMs(report.buildFeatureXsNs),
+                nanosToMs(report.buildAnchorPointsNs),
                 nanosToMs(report.buildWalkEdgesNs),
                 nanosToMs(report.buildDropEdgesNs),
                 nanosToMs(report.buildJumpEdgesNs),
@@ -173,14 +174,30 @@ public final class BotNavigationProbe {
                 nanosToMs(report.buildRopeExitEdgesNs),
                 nanosToMs(report.buildPortalEdgesNs)));
         lines.add(String.format(
-                "Edges: walk=%d jump=%d drop=%d climb=%d portal=%d | jumpWindow probes=%d boundarySearches=%d",
+                "Edges: walk=%d jump=%d drop=%d climb=%d portal=%d | jumpSamples=%d cacheHits=%d cacheMisses=%d refineProbes=%d",
                 report.walkEdgeCount,
                 report.jumpEdgeCount,
                 report.dropEdgeCount,
                 report.climbEdgeCount,
                 report.portalEdgeCount,
-                report.jumpWindowProbeCount,
-                report.jumpWindowBoundarySearchCount));
+                report.jumpSampleCount,
+                report.jumpCacheHitCount,
+                report.jumpCacheMissCount,
+                report.jumpBoundaryRefineProbeCount));
+        if (!report.slowestJumpRegions.isEmpty()) {
+            StringBuilder slowRegions = new StringBuilder("Slow jump regions:");
+            for (BotNavigationGraphProvider.JumpRegionProfile profile : report.slowestJumpRegions) {
+                slowRegions.append(String.format(" r%d[w=%d samples=%d edges=%d hits=%d misses=%d time=%.2fms]",
+                        profile.regionId(),
+                        profile.width(),
+                        profile.sampleCount(),
+                        profile.edgeCount(),
+                        profile.cacheHits(),
+                        profile.cacheMisses(),
+                        nanosToMs(profile.elapsedNs())));
+            }
+            lines.add(slowRegions.toString());
+        }
         if (graph != null) {
             lines.add(String.format("Cache: version=%d map=%d regions=%d", graph.version, graph.mapId, graph.regions.size()));
         }

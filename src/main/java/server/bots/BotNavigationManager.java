@@ -818,6 +818,13 @@ final class BotNavigationManager {
             return false;
         }
 
+        // Rope-exit jump edges are authored from a specific climb height. Allow launching from
+        // that height or higher on the rope, but never from below it where the jump arc drops
+        // under the intended platform and runtime/graph behavior diverge.
+        if (edge.launchStepX != 0 && botPos.y > edge.startPoint.y) {
+            return false;
+        }
+
         BotNavigationGraph.Region toRegion = graph.getRegion(edge.toRegionId);
         if (toRegion != null && toRegion.isRopeRegion) {
             Rope rope = findRopeForRegion(map, toRegion);
