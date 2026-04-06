@@ -41,10 +41,10 @@ public class SpawnBotCommand extends Command {
 
         BotOwnershipService.ResolvedCharacter bot = ownershipService.resolveCharacterByName(botName);
         if (bot == null) {
-            if (!player.isGM()) {
-                player.yellowMessage("Only existing characters can be spawned as bots. Same-account characters auto-register; otherwise log in on the target and use @registerbot " + player.getName() + ".");
-                return;
-            }
+//            if (!player.isGM()) {
+//                player.yellowMessage("Only existing characters can be spawned as bots. Same-account characters auto-register; otherwise log in on the target and use @registerbot " + player.getName() + ".");
+//                return;
+//            }
             if (!createRequested) {
                 player.yellowMessage("Bot '" + botName + "' does not exist. Run: @spawnbot " + botName + " confirm  to create it.");
                 return;
