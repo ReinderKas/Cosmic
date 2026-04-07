@@ -207,8 +207,8 @@ final class BotAttackExecutionProvider {
 
     static void applyAttackRoute(BotCombatManager.AttackRoute route, AbstractDealDamageHandler.AttackInfo attack, Character bot) {
         switch (route) {
-            case RANGED -> RangedAttackHandler.applyRangedAttackEffects(attack, bot, bot.getClient());
-            case MAGIC -> MagicDamageHandler.applyMagicAttackEffects(attack, bot, bot.getClient());
+            case RANGED -> RangedAttackHandler.applyRangedBotAttackEffects(attack, bot, bot.getClient());
+            case MAGIC -> MagicDamageHandler.applyMagicBotAttackEffects(attack, bot, bot.getClient());
             default -> CloseRangeDamageHandler.applyCloseRangeEffects(attack, bot, bot.getClient());
         }
     }

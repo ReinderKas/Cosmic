@@ -283,7 +283,26 @@ public final class RangedAttackHandler extends AbstractDealDamageHandler {
         };
     }
 
-    private static void applyCooldownIfNeeded(AttackInfo attack, Character chr, Client c) {
+    /**
+     * Ranged attack path for bot characters. Bypasses the ammo/projectile check (bots have no
+     * USE-inventory projectiles) and broadcasts with visibleProjectile=0, equivalent to Soul Arrow
+     * behaviour — WASM shows immediate damage numbers without a bullet-sprite delay.
+     */
+    public static void applyRangedBotAttackEffects(AttackInfo attack, Character chr, Client c) {
+        // stance=0 → WASM Stance::by_id(0)=NONE → falls through to move.apply_actions(RANGED)
+        // → RegularAction::apply → CharLook::attack(bool) which always resets animation frames.
+        // Using attack.stance (e.g. SHOOT1=11) hits set_stance which skips animation when the
+        // stance hasn't changed since the last attack.
+        Packet packet = PacketCreator.rangedAttack(chr, attack.skill, attack.skilllevel,
+                0, attack.numAttackedAndDamage, 0, attack.targets,
+                attack.speed, attack.direction, attack.display);
+        chr.getMap().broadcastMessage(chr, packet, false, true);
+        applyCooldownIfNeeded(attack, chr, c);
+        cancelStealthBuffsIfNeeded(attack, chr);
+        applyAttack(attack, chr, 1);
+    }
+
+    static void applyCooldownIfNeeded(AttackInfo attack, Character chr, Client c) {
         if (attack.skill == 0) {
             return;
         }
@@ -302,7 +321,7 @@ public final class RangedAttackHandler extends AbstractDealDamageHandler {
         chr.addCooldown(attack.skill, currentServerTime(), SECONDS.toMillis(effect.getCooldown()));
     }
 
-    private static void cancelStealthBuffsIfNeeded(AttackInfo attack, Character chr) {
+    static void cancelStealthBuffsIfNeeded(AttackInfo attack, Character chr) {
         if (chr.getSkillLevel(SkillFactory.getSkill(NightWalker.VANISH)) > 0
                 && chr.getBuffedValue(BuffStat.DARKSIGHT) != null
                 && attack.numAttacked > 0

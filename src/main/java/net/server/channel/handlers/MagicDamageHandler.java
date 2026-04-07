@@ -96,6 +96,35 @@ public final class MagicDamageHandler extends AbstractDealDamageHandler {
         applyMpEater(attack, chr);
     }
 
+    /**
+     * Magic attack path for bot characters. Broadcasts with stance=0 so the WASM client falls
+     * through to move.apply_actions(MAGIC) → RegularAction::apply → CharLook::attack(bool),
+     * which always resets animation frames (unlike set_stance which skips if stance unchanged).
+     */
+    public static void applyMagicBotAttackEffects(AttackInfo attack, Character chr, Client c) {
+        int charge = (attack.skill == Evan.FIRE_BREATH || attack.skill == Evan.ICE_BREATH
+                || attack.skill == FPArchMage.BIG_BANG || attack.skill == ILArchMage.BIG_BANG
+                || attack.skill == Bishop.BIG_BANG) ? attack.charge : -1;
+        Packet packet = PacketCreator.magicAttack(chr, attack.skill, attack.skilllevel, 0,
+                attack.numAttackedAndDamage, attack.targets, charge, attack.speed, attack.direction, attack.display);
+        chr.getMap().broadcastMessage(chr, packet, false, true);
+
+        StatEffect effect = attack.getAttackEffect(chr, null);
+        if (effect == null) {
+            applyAttack(attack, chr, 1);
+            return;
+        }
+
+        Skill skill = SkillFactory.getSkill(attack.skill);
+        StatEffect skillEffect = skill.getEffect(chr.getSkillLevel(skill));
+        if (skillEffect.getCooldown() > 0 && !chr.skillIsCooling(attack.skill)) {
+            c.sendPacket(PacketCreator.skillCooldown(attack.skill, skillEffect.getCooldown()));
+            chr.addCooldown(attack.skill, currentServerTime(), SECONDS.toMillis(skillEffect.getCooldown()));
+        }
+
+        applyAttack(attack, chr, effect.getAttackCount());
+    }
+
     private static void applyMpEater(AttackInfo attack, Character chr) {
         Skill eaterSkill = SkillFactory.getSkill((chr.getJob().getId() - (chr.getJob().getId() % 10)) * 10000);
         int eaterLevel = chr.getSkillLevel(eaterSkill);
