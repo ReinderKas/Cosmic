@@ -28,6 +28,7 @@ public final class BotAttackDataProvider {
     private static final BotAttackDataProvider instance = new BotAttackDataProvider();
     private static final Map<String, Integer> BODY_ACTION_ID_OVERRIDES = createBodyActionIdOverrides();
     private static final Map<String, Integer> CLAW_BODY_ACTION_ID_OVERRIDES = createClawBodyActionIdOverrides();
+    private static final Map<String, Integer> WAND_BODY_ACTION_ID_OVERRIDES = createWandBodyActionIdOverrides();
     private static final Map<String, Integer> ATTACK_STANCE_IDS = createAttackStanceIds();
 
     public static BotAttackDataProvider getInstance() {
@@ -302,6 +303,14 @@ public final class BotAttackDataProvider {
         return Map.copyOf(overrides);
     }
 
+    private static Map<String, Integer> createWandBodyActionIdOverrides() {
+        // Wand/staff swingO block uses IDs 28/29 in actions.txt.
+        Map<String, Integer> overrides = new HashMap<>();
+        overrides.put("swingO1", 28);
+        overrides.put("swingO3", 29);
+        return Map.copyOf(overrides);
+    }
+
     private static Map<String, Integer> createClawBodyActionIdOverrides() {
         // Claw ranged attack uses the second swingO block in actions.txt (IDs 24/25/26),
         // not the standard sword swingO block (IDs 5/6/7).
@@ -448,6 +457,13 @@ public final class BotAttackDataProvider {
             Integer clawId = CLAW_BODY_ACTION_ID_OVERRIDES.get(actionName);
             if (clawId != null) {
                 return clawId;
+            }
+        }
+
+        if (weaponType == WeaponType.WAND || weaponType == WeaponType.STAFF) {
+            Integer wandId = WAND_BODY_ACTION_ID_OVERRIDES.get(actionName);
+            if (wandId != null) {
+                return wandId;
             }
         }
 

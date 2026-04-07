@@ -320,7 +320,7 @@ class BotCombatManager {
                 entry.healSkillId = skill.getId();
             }
 
-            if (atk > 0) {
+            if (fx.getMpCon() > 0) {  // mpCon > 0 identifies real attack/active skills; attackCount defaults to 1 for all skills
                 if (mobs >= 2) {
                     int score = mobs * atk;
                     if (score > bestAoeScore) {
@@ -376,21 +376,16 @@ class BotCombatManager {
                                                             int attackCount, int bestAttackCount,
                                                             int bestPriority, int bestDamage,
                                                             int currentBestSkillId) {
-        if (attackCount > bestAttackCount) {
-            return true;
-        }
-        if (attackCount < bestAttackCount) {
-            return false;
-        }
-
         int priority = singleTargetSkillPriority(bot, skill);
         if (priority != bestPriority) {
             return priority > bestPriority;
         }
 
         int damage = effect != null ? effect.getDamage() : 0;
-        if (damage != bestDamage) {
-            return damage > bestDamage;
+        int score = damage * attackCount;
+        int bestScore = bestDamage * bestAttackCount;
+        if (score != bestScore) {
+            return score > bestScore;
         }
 
         return currentBestSkillId == 0 || skill.getId() < currentBestSkillId;
