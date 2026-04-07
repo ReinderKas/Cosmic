@@ -804,7 +804,7 @@ public class BotChatManager {
                 final Character bot = entry.bot;
                 TimerManager.getInstance().schedule(
                         () -> {
-                    bot.changeFaceExpression(ThreadLocalRandom.current().nextBoolean() ? 1 : 7);
+                    bot.changeFaceExpression(ThreadLocalRandom.current().nextBoolean() ? 2 : 3);
                     BotManager.getInstance().botSay(bot, BotManager.randomReply(WB_REPLIES));
                 }, 2000);
             }
