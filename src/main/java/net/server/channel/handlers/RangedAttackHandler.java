@@ -138,11 +138,7 @@ public final class RangedAttackHandler extends AbstractDealDamageHandler {
             return;
         }
 
-        Packet packet = createAttackPacket(attack, chr, projectileContext.visibleProjectile);
-        chr.getMap().broadcastMessage(chr, packet, false, true);
-        applyCooldownIfNeeded(attack, chr, c);
-        cancelStealthBuffsIfNeeded(attack, chr);
-        applyAttack(attack, chr, projectileContext.bulletCount);
+        applyRangedWithProjectile(attack, chr, c, projectileContext.visibleProjectile, projectileContext.bulletCount);
     }
 
     private static ProjectileContext resolveProjectileContext(AttackInfo attack, Character chr, Client c, Item weapon, WeaponType type) {
@@ -285,21 +281,51 @@ public final class RangedAttackHandler extends AbstractDealDamageHandler {
 
     /**
      * Ranged attack path for bot characters. Bypasses the ammo/projectile check (bots have no
-     * USE-inventory projectiles) and broadcasts with visibleProjectile=0, equivalent to Soul Arrow
-     * behaviour — WASM shows immediate damage numbers without a bullet-sprite delay.
+     * USE-inventory projectiles). Broadcasts with stance=0 so WASM falls through to
+     * move.apply_actions(RANGED) → RegularAction::apply → CharLook::attack(bool), which always
+     * resets animation frames. Uses a weapon-appropriate default projectile ID so that WASM creates
+     * the bullet sprite (throwing star / bullet visual); without a non-zero projectile, claw/gun
+     * attacks show no visual even though the character technically animates.
      */
     public static void applyRangedBotAttackEffects(AttackInfo attack, Character chr, Client c) {
-        // stance=0 → WASM Stance::by_id(0)=NONE → falls through to move.apply_actions(RANGED)
-        // → RegularAction::apply → CharLook::attack(bool) which always resets animation frames.
-        // Using attack.stance (e.g. SHOOT1=11) hits set_stance which skips animation when the
-        // stance hasn't changed since the last attack.
-        Packet packet = PacketCreator.rangedAttack(chr, attack.skill, attack.skilllevel,
-                0, attack.numAttackedAndDamage, 0, attack.targets,
-                attack.speed, attack.direction, attack.display);
+        attack.stance = 0;
+        int projectile = resolveBotProjectile(chr);
+        int bulletCount = 1;
+        if (attack.skill != 0) {
+            StatEffect effect = attack.getAttackEffect(chr, null);
+            if (effect != null && effect.getBulletCount() > 0) {
+                bulletCount = effect.getBulletCount();
+            }
+        }
+        applyRangedWithProjectile(attack, chr, c, projectile, bulletCount);
+    }
+
+    private static void applyRangedWithProjectile(AttackInfo attack, Character chr, Client c,
+                                                   int projectile, int bulletCount) {
+        Packet packet = createAttackPacket(attack, chr, projectile);
         chr.getMap().broadcastMessage(chr, packet, false, true);
         applyCooldownIfNeeded(attack, chr, c);
         cancelStealthBuffsIfNeeded(attack, chr);
-        applyAttack(attack, chr, 1);
+        applyAttack(attack, chr, bulletCount);
+    }
+
+    /**
+     * Returns a default projectile item ID for the bot's equipped weapon type.
+     * Each type needs a matching projectile for the WASM client to create the bullet sprite.
+     */
+    private static int resolveBotProjectile(Character chr) {
+        Item weapon = chr.getInventory(InventoryType.EQUIPPED).getItem((short) -11);
+        if (weapon == null) {
+            return 0;
+        }
+        WeaponType type = server.ItemInformationProvider.getInstance().getWeaponType(weapon.getItemId());
+        return switch (type) {
+            case BOW      -> 2060000; // Bronze Arrow for Bow
+            case CROSSBOW -> 2061000; // Bronze Bolt for Crossbow
+            case CLAW     -> 2070000; // Subi Throwing Stars
+            case GUN      -> 2330000; // Bullet (basic)
+            default       -> 0;
+        };
     }
 
     static void applyCooldownIfNeeded(AttackInfo attack, Character chr, Client c) {

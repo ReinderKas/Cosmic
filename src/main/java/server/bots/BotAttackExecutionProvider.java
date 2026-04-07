@@ -74,10 +74,10 @@ final class BotAttackExecutionProvider {
                 : determineBasicWeaponRoute(weaponType);
         boolean closeRangeRoute = route == BotCombatManager.AttackRoute.CLOSE;
         CloseRangePacketFields closeRangePacketFields = mimicCloseRangePacketFields(action, fallbackAction, facingLeft);
-        int display = closeRangeRoute ? closeRangePacketFields.display() : baseDisplay + variantOffset;
+        int display = closeRangeRoute ? closeRangePacketFields.display() : 0;
         int direction = closeRangeRoute
                 ? closeRangePacketFields.bodyActionId()
-                : bodyActionId(action, fallbackAction);
+                : bodyActionId(action, fallbackAction, weaponType);
         int effectiveAttackSpeed = resolveEffectiveAttackSpeed(profile.getAttackSpeed(), bot);
 
         int rawAnimationDelayMs = provider.getBodyStanceDurationMs(action);
@@ -113,10 +113,10 @@ final class BotAttackExecutionProvider {
         boolean closeRangeRoute = route == BotCombatManager.AttackRoute.CLOSE;
         CloseRangePacketFields closeRangePacketFields =
                 mimicCloseRangePacketFields(action, attackSpec.primaryAction(), facingLeft);
-        int display = closeRangeRoute ? closeRangePacketFields.display() : attackSpec.display() + variantOffset;
+        int display = closeRangeRoute ? closeRangePacketFields.display() : 0;
         int direction = closeRangeRoute
                 ? closeRangePacketFields.bodyActionId()
-                : bodyActionId(action, attackSpec.primaryAction());
+                : bodyActionId(action, attackSpec.primaryAction(), weaponType);
         int effectiveAttackSpeed = resolveEffectiveAttackSpeed(baseAttackSpeed, bot);
         int rawAnimationDelayMs = provider.getBodyStanceDurationMs(action);
         if (rawAnimationDelayMs <= 0) {
@@ -136,14 +136,18 @@ final class BotAttackExecutionProvider {
     // This is not the same table as the client stance enum. It is the body action ordering
     // from Character/00002000.img and matches the server's packet byte 2 semantics.
     static int bodyActionId(String actionName, String fallbackAction) {
+        return bodyActionId(actionName, fallbackAction, null);
+    }
+
+    static int bodyActionId(String actionName, String fallbackAction, WeaponType weaponType) {
         BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
-        int actionId = provider.getBodyActionId(actionName);
+        int actionId = provider.getBodyActionId(actionName, weaponType);
         if (actionId >= 0) {
             return actionId;
         }
 
         if (fallbackAction != null && !fallbackAction.equals(actionName)) {
-            int fallbackActionId = provider.getBodyActionId(fallbackAction);
+            int fallbackActionId = provider.getBodyActionId(fallbackAction, weaponType);
             if (fallbackActionId >= 0) {
                 return fallbackActionId;
             }
@@ -207,8 +211,8 @@ final class BotAttackExecutionProvider {
 
     static void applyAttackRoute(BotCombatManager.AttackRoute route, AbstractDealDamageHandler.AttackInfo attack, Character bot) {
         switch (route) {
-            case RANGED -> RangedAttackHandler.applyRangedBotAttackEffects(attack, bot, bot.getClient());
-            case MAGIC -> MagicDamageHandler.applyMagicBotAttackEffects(attack, bot, bot.getClient());
+            case RANGED -> RangedAttackHandler.applyRangedAttackEffects(attack, bot, bot.getClient());
+            case MAGIC -> MagicDamageHandler.applyMagicAttackEffects(attack, bot, bot.getClient());
             default -> CloseRangeDamageHandler.applyCloseRangeEffects(attack, bot, bot.getClient());
         }
     }

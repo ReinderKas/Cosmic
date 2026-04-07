@@ -9,6 +9,9 @@ import org.w3c.dom.Node;
 import org.xml.sax.SAXException;
 import provider.wz.WZFiles;
 
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
 import java.awt.*;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -19,14 +22,12 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
 
 public final class BotAttackDataProvider {
     private static final Logger log = LoggerFactory.getLogger(BotAttackDataProvider.class);
     private static final BotAttackDataProvider instance = new BotAttackDataProvider();
     private static final Map<String, Integer> BODY_ACTION_ID_OVERRIDES = createBodyActionIdOverrides();
+    private static final Map<String, Integer> CLAW_BODY_ACTION_ID_OVERRIDES = createClawBodyActionIdOverrides();
     private static final Map<String, Integer> ATTACK_STANCE_IDS = createAttackStanceIds();
 
     public static BotAttackDataProvider getInstance() {
@@ -301,6 +302,16 @@ public final class BotAttackDataProvider {
         return Map.copyOf(overrides);
     }
 
+    private static Map<String, Integer> createClawBodyActionIdOverrides() {
+        // Claw ranged attack uses the second swingO block in actions.txt (IDs 24/25/26),
+        // not the standard sword swingO block (IDs 5/6/7).
+        Map<String, Integer> overrides = new HashMap<>();
+        overrides.put("swingO1", 24);
+        overrides.put("swingO2", 25);
+        overrides.put("swingO3", 26);
+        return Map.copyOf(overrides);
+    }
+
     private static Map<String, Integer> createAttackStanceIds() {
         Map<String, Integer> stanceIds = new HashMap<>();
         stanceIds.put("shot", 10);
@@ -362,7 +373,7 @@ public final class BotAttackDataProvider {
             return switch (weaponType) {
                 case BOW -> new AttackAnimationSpec(3, List.of("swingT1", "swingT3"));
                 case CROSSBOW -> new AttackAnimationSpec(4, List.of("swingT1", "stabT1"));
-                case CLAW -> new AttackAnimationSpec(7, List.of("swingT1", "stabT1"));
+                case CLAW -> new AttackAnimationSpec(7, List.of("stabO1", "stabO2"));
                 case GUN -> new AttackAnimationSpec(9, List.of("swingP1", "stabT2"));
                 default -> getBasicAttackSpec(weaponType, false);
             };
@@ -425,8 +436,19 @@ public final class BotAttackDataProvider {
     }
 
     public int getBodyActionId(String actionName) {
+        return getBodyActionId(actionName, null);
+    }
+
+    public int getBodyActionId(String actionName, WeaponType weaponType) {
         if (actionName == null || actionName.isBlank()) {
             return -1;
+        }
+
+        if (weaponType == WeaponType.CLAW) {
+            Integer clawId = CLAW_BODY_ACTION_ID_OVERRIDES.get(actionName);
+            if (clawId != null) {
+                return clawId;
+            }
         }
 
         ensureCurrentCharacterRoot();
@@ -632,17 +654,31 @@ public final class BotAttackDataProvider {
         int attack = getIntValue(findNamedChild(info, "attack"), 0);
         int reqLevel = getIntValue(findNamedChild(info, "reqLevel"), 0);
 
+        // Actions come from the weapon XML — the afterimage only covers a subset (e.g. swordOL
+        // bucket 0 has swingO1-swingOF/stabO1 but omits stabO2, stabOF, proneStab).
+        List<String> weaponActions = loadWeaponActions(weaponRoot);
+
         AttackBoundsData afterImageData = loadAfterimageBounds(afterImage, reqLevel);
         if (afterImageData == null) {
-            return new NormalAttackProfile(attackSpeed, attack, afterImage, null, List.of(), Map.of());
+            // Ranged weapons have no hitbox in afterimage (normal) — bounds stay null.
+            return new NormalAttackProfile(attackSpeed, attack, afterImage, null, weaponActions, Map.of());
         }
 
-        // Prefer afterimage for hit bounds (cleaner per-level data), but always use weapon
-        // action delay for timing — afterimage frame delays only cover the trail display window
-        // and are far shorter than the full swing animation.
+        // Use afterimage for hit bounds (cleaner per-level data), weapon XML for action list.
         return new NormalAttackProfile(attackSpeed, attack, afterImage, afterImageData.bounds,
-                afterImageData.sourceActions, afterImageData.firstFramesByAction);
+                weaponActions, afterImageData.firstFramesByAction);
 
+    }
+
+    private List<String> loadWeaponActions(Element weaponRoot) {
+        List<String> actions = new ArrayList<>();
+        for (Element child : getNamedChildren(weaponRoot)) {
+            String name = child.getAttribute("name");
+            if (!name.isBlank() && !"info".equals(name) && BODY_ACTION_ID_OVERRIDES.containsKey(name)) {
+                actions.add(name);
+            }
+        }
+        return List.copyOf(actions);
     }
 
     private AttackBoundsData loadAfterimageBounds(String afterImage, int reqLevel) {

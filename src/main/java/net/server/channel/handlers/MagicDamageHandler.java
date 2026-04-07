@@ -81,6 +81,10 @@ public final class MagicDamageHandler extends AbstractDealDamageHandler {
             return;
         }
 
+        if (effect.getMpCon() > 0) {
+            chr.addMP(-effect.getMpCon());
+        }
+
         Skill skill = SkillFactory.getSkill(attack.skill);
         StatEffect skillEffect = skill.getEffect(chr.getSkillLevel(skill));
         if (skillEffect.getCooldown() > 0) {
@@ -99,30 +103,11 @@ public final class MagicDamageHandler extends AbstractDealDamageHandler {
     /**
      * Magic attack path for bot characters. Broadcasts with stance=0 so the WASM client falls
      * through to move.apply_actions(MAGIC) → RegularAction::apply → CharLook::attack(bool),
-     * which always resets animation frames (unlike set_stance which skips if stance unchanged).
+     * which always resets animation frames. Delegates all effect logic to the real handler.
      */
     public static void applyMagicBotAttackEffects(AttackInfo attack, Character chr, Client c) {
-        int charge = (attack.skill == Evan.FIRE_BREATH || attack.skill == Evan.ICE_BREATH
-                || attack.skill == FPArchMage.BIG_BANG || attack.skill == ILArchMage.BIG_BANG
-                || attack.skill == Bishop.BIG_BANG) ? attack.charge : -1;
-        Packet packet = PacketCreator.magicAttack(chr, attack.skill, attack.skilllevel, 0,
-                attack.numAttackedAndDamage, attack.targets, charge, attack.speed, attack.direction, attack.display);
-        chr.getMap().broadcastMessage(chr, packet, false, true);
-
-        StatEffect effect = attack.getAttackEffect(chr, null);
-        if (effect == null) {
-            applyAttack(attack, chr, 1);
-            return;
-        }
-
-        Skill skill = SkillFactory.getSkill(attack.skill);
-        StatEffect skillEffect = skill.getEffect(chr.getSkillLevel(skill));
-        if (skillEffect.getCooldown() > 0 && !chr.skillIsCooling(attack.skill)) {
-            c.sendPacket(PacketCreator.skillCooldown(attack.skill, skillEffect.getCooldown()));
-            chr.addCooldown(attack.skill, currentServerTime(), SECONDS.toMillis(skillEffect.getCooldown()));
-        }
-
-        applyAttack(attack, chr, effect.getAttackCount());
+        attack.stance = 0;
+        applyMagicAttackEffects(attack, chr, c);
     }
 
     private static void applyMpEater(AttackInfo attack, Character chr) {
