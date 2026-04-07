@@ -392,7 +392,15 @@ public class BotChatManager {
         }
     }
 
+    private static void markOwnerActive(BotEntry entry) {
+        Character owner = entry.owner;
+        entry.ownerWasAfk = false;
+        entry.ownerAfkSinceMs = System.currentTimeMillis();
+        entry.ownerAfkPos = owner != null ? new Point(owner.getPosition()) : null;
+    }
+
     static void handleChat(BotEntry entry, String message) {
+        markOwnerActive(entry);
         // Logout / relog — two-step confirmation
         if (RELOG_PATTERN.matcher(message).find()) {
             TimerManager.getInstance().schedule(() -> {
