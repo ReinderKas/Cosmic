@@ -29,11 +29,13 @@ Add bots as friends. Bots will always show up as online. Invite a bot to party o
 All commands are sent via **general map chat** (normal typing).
 * Currently bot will also accept command across map even if you do normal chat (using follow command will teleport all bots you have spawned from other map to your location)
 
-With multiple bots: prefix the bot's name to target one specifically
+With multiple bots: target one specifically with a unique name-start prefix, full name, or slot number
 
 ```
 stop - party wide stop
 jason follow - only Jason will follow
+bo come - only the unique bot whose name starts with "bo" will follow
+1 stop - only bot slot 1 will stop
 grind - party wide auto grind
 jason stop - only jason will stop
 ```

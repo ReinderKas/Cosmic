@@ -131,8 +131,13 @@ public class BotManager {
     // Reserve `give ...` for item requests handled by BotChatManager.
     private static final Pattern TRANSFER_PATTERN = Pattern.compile(
             "\\btransfer\\s+(\\S+)(?:\\s+to)?\\s+(\\S+)\\b", Pattern.CASE_INSENSITIVE);
+    private static final int MIN_PREFIX_TARGET_LENGTH = 2;
 
     record BotTransferCommand(String botName, String targetName) {}
+
+    private record TargetedBotCommand(String targetToken, String commandText) {}
+
+    private record TargetedBotMatch(BotEntry entry, String commandText, String feedbackMessage) {}
 
     static BotTransferCommand matchBotTransferCommand(String message) {
         Matcher matcher = TRANSFER_PATTERN.matcher(message);
@@ -141,6 +146,100 @@ public class BotManager {
         }
 
         return new BotTransferCommand(matcher.group(1), matcher.group(2));
+    }
+
+    private static TargetedBotCommand parseTargetedBotCommand(String message) {
+        if (message == null) {
+            return null;
+        }
+
+        String trimmed = message.stripLeading();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+
+        int separatorIndex = 0;
+        while (separatorIndex < trimmed.length() && !isTargetSeparator(trimmed.charAt(separatorIndex))) {
+            separatorIndex++;
+        }
+        if (separatorIndex == 0 || separatorIndex >= trimmed.length()) {
+            return null;
+        }
+
+        String commandText = trimmed.substring(separatorIndex).replaceFirst("^[,!?\\s]+", "").trim();
+        if (commandText.isEmpty()) {
+            return null;
+        }
+
+        return new TargetedBotCommand(trimmed.substring(0, separatorIndex), commandText);
+    }
+
+    private static boolean isTargetSeparator(char ch) {
+        return java.lang.Character.isWhitespace(ch) || ch == ',' || ch == '!' || ch == '?';
+    }
+
+    private static boolean isNumericTarget(String targetToken) {
+        return !targetToken.isEmpty() && targetToken.chars().allMatch(java.lang.Character::isDigit);
+    }
+
+    private static String buildAmbiguousPrefixMessage(String prefix, List<BotEntry> matches) {
+        StringBuilder message = new StringBuilder("Ambiguous bot prefix '")
+                .append(prefix)
+                .append("': ");
+        for (int i = 0; i < matches.size(); i++) {
+            if (i > 0) {
+                message.append(", ");
+            }
+            message.append(i + 1).append(": ").append(matches.get(i).bot.getName());
+        }
+        message.append(". Use the full name or a slot number.");
+        return message.toString();
+    }
+
+    private static TargetedBotMatch resolveTargetedBot(List<BotEntry> entries, String message) {
+        if (entries == null || entries.isEmpty()) {
+            return new TargetedBotMatch(null, null, null);
+        }
+
+        TargetedBotCommand targetedCommand = parseTargetedBotCommand(message);
+        if (targetedCommand == null) {
+            return new TargetedBotMatch(null, null, null);
+        }
+
+        String targetToken = targetedCommand.targetToken();
+        for (BotEntry entry : entries) {
+            if (entry.bot.getName().equalsIgnoreCase(targetToken)) {
+                return new TargetedBotMatch(entry, targetedCommand.commandText(), null);
+            }
+        }
+
+        if (isNumericTarget(targetToken)) {
+            int slot = Integer.parseInt(targetToken);
+            if (slot < 1 || slot > entries.size()) {
+                return new TargetedBotMatch(null, null, "No bot in slot " + slot + ".");
+            }
+            return new TargetedBotMatch(entries.get(slot - 1), targetedCommand.commandText(), null);
+        }
+
+        if (targetToken.length() < MIN_PREFIX_TARGET_LENGTH) {
+            return new TargetedBotMatch(null, null, null);
+        }
+
+        List<BotEntry> prefixMatches = new ArrayList<>();
+        for (BotEntry entry : entries) {
+            if (entry.bot.getName().regionMatches(true, 0, targetToken, 0, targetToken.length())) {
+                prefixMatches.add(entry);
+            }
+        }
+
+        if (prefixMatches.size() == 1) {
+            return new TargetedBotMatch(prefixMatches.get(0), targetedCommand.commandText(), null);
+        }
+        if (prefixMatches.size() > 1) {
+            return new TargetedBotMatch(null, null, buildAmbiguousPrefixMessage(targetToken, prefixMatches));
+        }
+
+        return new TargetedBotMatch(null, null, null);
     }
 
     static String randomReply(List<String> list) {
@@ -682,19 +781,14 @@ public class BotManager {
         }
 
         // Name-prefix routing: "Jason pots?" → only Jason responds
-        String lowerMsg = message.toLowerCase();
-        for (BotEntry entry : entries) {
-            String name = entry.bot.getName().toLowerCase();
-            if (lowerMsg.startsWith(name) && lowerMsg.length() > name.length()) {
-                char next = lowerMsg.charAt(name.length());
-                if (next == ' ' || next == ',' || next == '!' || next == '?') {
-                    String rest = message.substring(name.length()).replaceFirst("^[,!?\\s]+", "").trim();
-                    if (!rest.isEmpty()) {
-                        BotChatManager.handleChat(entry, rest);
-                        return;
-                    }
-                }
-            }
+        TargetedBotMatch targetedBot = resolveTargetedBot(entries, message);
+        if (targetedBot.entry != null) {
+            BotChatManager.handleChat(targetedBot.entry, targetedBot.commandText);
+            return;
+        }
+        if (targetedBot.feedbackMessage != null) {
+            owner.yellowMessage(targetedBot.feedbackMessage);
+            return;
         }
 
         // No name prefix — broadcast to all bots
@@ -705,8 +799,6 @@ public class BotManager {
 
     private boolean handlePendingLootOfferResponse(Character speaker, String message) {
         List<BotEntry> matches = new ArrayList<>();
-        String lowerMessage = message.toLowerCase();
-
         for (List<BotEntry> entries : bots.values()) {
             for (BotEntry entry : entries) {
                 BotChatManager.expirePendingLootOffer(entry);
@@ -714,24 +806,24 @@ public class BotManager {
                     continue;
                 }
 
-                String botName = entry.bot.getName().toLowerCase();
-                if (lowerMessage.startsWith(botName) && lowerMessage.length() > botName.length()) {
-                    char next = lowerMessage.charAt(botName.length());
-                    if (next == ' ' || next == ',' || next == '!' || next == '?') {
-                        String rest = message.substring(botName.length()).replaceFirst("^[,!?\\s]+", "").trim();
-                        return !rest.isEmpty() && BotChatManager.handlePendingLootOfferResponse(entry, speaker, rest);
-                    }
-                }
-
                 matches.add(entry);
             }
+        }
+
+        TargetedBotMatch targetedBot = resolveTargetedBot(matches, message);
+        if (targetedBot.entry != null) {
+            return BotChatManager.handlePendingLootOfferResponse(targetedBot.entry, speaker, targetedBot.commandText);
+        }
+        if (targetedBot.feedbackMessage != null) {
+            speaker.dropMessage(5, targetedBot.feedbackMessage);
+            return true;
         }
 
         if (matches.size() == 1) {
             return BotChatManager.handlePendingLootOfferResponse(matches.get(0), speaker, message);
         }
         if (matches.size() > 1 && looksLikeConfirmation(message)) {
-            speaker.dropMessage(5, "More than one bot is waiting on you. Say '<botname> yes' or '<botname> no'.");
+            speaker.dropMessage(5, "More than one bot is waiting on you. Say '<botname> yes' or '<slot> yes'.");
             return true;
         }
 
