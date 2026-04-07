@@ -19,7 +19,10 @@ import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 final class BotAttackExecutionProvider {
-    record CloseRangePacketFields(int display, int direction, int stance) {
+    // This server's close-range packet path uses:
+    // byte 2 = body action id from Character/00002000.img
+    // byte 3 = facing mask (0 / 0x80)
+    record CloseRangePacketFields(int display, int bodyActionId, int facingMask) {
     }
 
     record SkillAttackTiming(int hitDelayMs, int cooldownMs) {
@@ -73,8 +76,8 @@ final class BotAttackExecutionProvider {
         CloseRangePacketFields closeRangePacketFields = mimicCloseRangePacketFields(action, fallbackAction, facingLeft);
         int display = closeRangeRoute ? closeRangePacketFields.display() : baseDisplay + variantOffset;
         int direction = closeRangeRoute
-                ? closeRangePacketFields.direction()
-                : basicAttackDirectionId(action, fallbackAction);
+                ? closeRangePacketFields.bodyActionId()
+                : bodyActionId(action, fallbackAction);
         int effectiveAttackSpeed = resolveEffectiveAttackSpeed(profile.getAttackSpeed(), bot);
 
         int rawAnimationDelayMs = provider.getBodyStanceDurationMs(action);
@@ -85,7 +88,7 @@ final class BotAttackExecutionProvider {
 
         int cooldownMs = toCooldownMs(adjustAttackDelayMillis(rawAnimationDelayMs, effectiveAttackSpeed));
         int hitDelayMs = adjustAttackDelayMillis(rawHitDelayMs, effectiveAttackSpeed);
-        int stance = closeRangeRoute ? closeRangePacketFields.stance() : packetStanceId(action, fallbackAction);
+        int stance = closeRangeRoute ? closeRangePacketFields.facingMask() : clientAttackStanceId(action, fallbackAction);
         Rectangle hitBox = closeRangeRoute
                 ? closeRangeBasicHitBox(bot.getPosition(), facingLeft)
                 : profile.hasBoundingBox()
@@ -112,8 +115,8 @@ final class BotAttackExecutionProvider {
                 mimicCloseRangePacketFields(action, attackSpec.primaryAction(), facingLeft);
         int display = closeRangeRoute ? closeRangePacketFields.display() : attackSpec.display() + variantOffset;
         int direction = closeRangeRoute
-                ? closeRangePacketFields.direction()
-                : basicAttackDirectionId(action, attackSpec.primaryAction());
+                ? closeRangePacketFields.bodyActionId()
+                : bodyActionId(action, attackSpec.primaryAction());
         int effectiveAttackSpeed = resolveEffectiveAttackSpeed(baseAttackSpeed, bot);
         int rawAnimationDelayMs = provider.getBodyStanceDurationMs(action);
         if (rawAnimationDelayMs <= 0) {
@@ -125,12 +128,14 @@ final class BotAttackExecutionProvider {
                 : bot != null ? rangedBasicHitBox(route, bot, facingLeft) : null;
 
         return new BasicAttackData(hitBox, display, direction, direction,
-                closeRangeRoute ? closeRangePacketFields.stance() : packetStanceId(action, attackSpec.primaryAction()),
+                closeRangeRoute ? closeRangePacketFields.facingMask() : clientAttackStanceId(action, attackSpec.primaryAction()),
                 effectiveAttackSpeed, defaultHitDelayMs(adjustedAnimationDelayMs), toCooldownMs(adjustedAnimationDelayMs),
                 route);
     }
 
-    static int basicAttackDirectionId(String actionName, String fallbackAction) {
+    // This is not the same table as the client stance enum. It is the body action ordering
+    // from Character/00002000.img and matches the server's packet byte 2 semantics.
+    static int bodyActionId(String actionName, String fallbackAction) {
         BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
         int actionId = provider.getBodyActionId(actionName);
         if (actionId >= 0) {
@@ -149,11 +154,13 @@ final class BotAttackExecutionProvider {
 
     static CloseRangePacketFields mimicCloseRangePacketFields(String actionName, String fallbackAction, boolean facingLeft) {
         return new CloseRangePacketFields(0,
-                basicAttackDirectionId(actionName, fallbackAction),
+                bodyActionId(actionName, fallbackAction),
                 facingLeft ? 0x80 : 0x00);
     }
 
-    static int packetStanceId(String actionName, String fallbackAction) {
+    // These ids match the WASM client's Stance::Id enum for attack stances and are used
+    // by packet byte 3 on ranged/magic routes.
+    static int clientAttackStanceId(String actionName, String fallbackAction) {
         BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
         int stanceId = provider.getAttackStanceId(actionName);
         if (stanceId > 0) {

@@ -213,8 +213,18 @@ public class BotChatManager {
 
     private static final Pattern AP_PURE_STR_PATTERN = Pattern.compile(
             "\\bpure\\s+str\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern AP_DEXLESS_PATTERN = Pattern.compile(
+            "\\bdexless\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern AP_LUKLESS_PATTERN = Pattern.compile(
+            "\\blukless\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern AP_STRLESS_PATTERN = Pattern.compile(
+            "\\bstrless\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern AP_FIXED_DEX_PATTERN = Pattern.compile(
             "\\b(\\d+)\\s*dex\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern AP_FIXED_LUK_PATTERN = Pattern.compile(
+            "\\b(\\d+)\\s*luk\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern AP_FIXED_STR_PATTERN = Pattern.compile(
+            "\\b(\\d+)\\s*str\\b", Pattern.CASE_INSENSITIVE);
     // Bare trade invite — whole-message match so "trade me" isn't swallowed by TRADE_ITEM_COMMAND_PATTERN
     private static final Pattern TRADE_INVITE_PATTERN = Pattern.compile(
             "^\\s*trade(\\s+(me|pls|please))?\\s*[?!.,]*\\s*$",
@@ -337,6 +347,9 @@ public class BotChatManager {
             Pattern.CASE_INSENSITIVE);
     private static final Pattern RESPEC_PATTERN = Pattern.compile(
             "\\b(respec|reset\\s+(skills?|sp)|rebuild\\s+(skills?|sp)|fix\\s+(skills?|sp|build))\\b",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern AP_RESPEC_PATTERN = Pattern.compile(
+            "\\b(respec\\s+ap|reset\\s+ap|rebuild\\s+ap|fix\\s+ap(?:\\s+build)?)\\b",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern LOGOUT_PATTERN = Pattern.compile(
             "\\b((save\\s+and\\s+)?log\\s*(off|out)|disconnect|(pls|please)\\s+log(\\s+me)?\\s+(off|out))\\b",
@@ -548,6 +561,11 @@ public class BotChatManager {
             TimerManager.getInstance().schedule(() -> reportBuffDebug(entry, entry.bot), 600);
             return;
         }
+        if (isApRespecCommand(message)) {
+            TimerManager.getInstance().schedule(() ->
+                    BotManager.getInstance().botSay(entry.bot, BotBuildManager.respecAp(entry, entry.bot)), 600);
+            return;
+        }
         if (isRespecCommand(message)) {
             TimerManager.getInstance().schedule(() ->
                     BotManager.getInstance().botSay(entry.bot, BotBuildManager.respecSp(entry, entry.bot)), 600);
@@ -637,27 +655,10 @@ public class BotChatManager {
         if (AP_CHANGE_BUILD_PATTERN.matcher(message).find()) {
             entry.apBuild      = null;
             entry.apPromptSent = false;
-            String prompt = BotBuildManager.buildApPrompt(entry, entry.bot);
+            String prompt = BotBuildManager.requestApBuildPrompt(entry, entry.bot);
             if (prompt != null) BotManager.getInstance().botSay(entry.bot, prompt);
         } else if (entry.apPromptSent) {
-            if (AP_PURE_STR_PATTERN.matcher(message).find()) {
-                if (entry.apBuild != null && entry.apBuild.dexTarget == 0) {
-                    BotManager.getInstance().botSay(entry.bot, "already doing pure str!");
-                } else {
-                    BotBuildManager.setApBuild(entry, new BotBuildManager.ApBuild(0), "pure str it is! dumping everything into str");
-                }
-            } else {
-                Matcher m = AP_FIXED_DEX_PATTERN.matcher(message);
-                if (m.find()) {
-                    int dexTarget = Integer.parseInt(m.group(1));
-                    if (entry.apBuild != null && entry.apBuild.dexTarget == dexTarget) {
-                        BotManager.getInstance().botSay(entry.bot, "already doing " + dexTarget + " dex build!");
-                    } else {
-                        BotBuildManager.setApBuild(entry, new BotBuildManager.ApBuild(dexTarget),
-                                "ok! keeping dex at " + dexTarget + ", rest into str");
-                    }
-                }
-            }
+            handleApBuildSelection(entry, message);
         }
 
         if (TRADE_INVITE_PATTERN.matcher(message).find()) {
@@ -970,7 +971,7 @@ public class BotChatManager {
     }
 
     private static void reportHelp(BotEntry entry) {
-        queueBotSay(entry, "commands: follow, stop, move here, grind, stats, skills, inventory, mesos, slots, scrolls, pots, debug stats, respec");
+        queueBotSay(entry, "commands: follow, stop, move here, grind, stats, skills, inventory, mesos, slots, scrolls, pots, debug stats, respec, respec ap");
         queueBotSay(entry, "support: support on/off, heals on/off, buff on/off, buff cheap/max, buff debug");
         queueBotSay(entry, "gear: ask 'any upgrades?' or say 'trade recommended gear'");
         queueBotSay(entry, "trade: mesos, scrolls, pots, equips, etc, or named items");
@@ -978,6 +979,95 @@ public class BotChatManager {
 
     static boolean isRespecCommand(String message) {
         return RESPEC_PATTERN.matcher(message).find();
+    }
+
+    static boolean isApRespecCommand(String message) {
+        return AP_RESPEC_PATTERN.matcher(message).find();
+    }
+
+    private static void handleApBuildSelection(BotEntry entry, String message) {
+        Job job = entry.bot.getJob();
+
+        if (job.isA(Job.WARRIOR) && AP_PURE_STR_PATTERN.matcher(message).find()) {
+            applyApBuildChoice(entry,
+                    new BotBuildManager.ApBuild(BotBuildManager.StatType.STR, BotBuildManager.StatType.DEX, 4),
+                    "pure str it is! dumping everything into str",
+                    "already doing pure str!");
+            return;
+        }
+        if (job.isA(Job.THIEF) && AP_DEXLESS_PATTERN.matcher(message).find()) {
+            applyApBuildChoice(entry,
+                    new BotBuildManager.ApBuild(BotBuildManager.StatType.LUK, BotBuildManager.StatType.DEX, 4),
+                    "dexless it is! keeping dex at base, rest into luk",
+                    "already doing dexless!");
+            return;
+        }
+        if (job.isA(Job.MAGICIAN) && AP_LUKLESS_PATTERN.matcher(message).find()) {
+            applyApBuildChoice(entry,
+                    new BotBuildManager.ApBuild(BotBuildManager.StatType.INT, BotBuildManager.StatType.LUK, 4),
+                    "lukless it is! keeping luk at base, rest into int",
+                    "already doing lukless!");
+            return;
+        }
+        if (job.isA(Job.BOWMAN) && AP_STRLESS_PATTERN.matcher(message).find()) {
+            applyApBuildChoice(entry,
+                    new BotBuildManager.ApBuild(BotBuildManager.StatType.DEX, BotBuildManager.StatType.STR, 4),
+                    "strless it is! keeping str at base, rest into dex",
+                    "already doing strless!");
+            return;
+        }
+
+        if (job.isA(Job.WARRIOR) || job.isA(Job.THIEF)) {
+            Matcher matcher = AP_FIXED_DEX_PATTERN.matcher(message);
+            if (matcher.find()) {
+                int dexTarget = Integer.parseInt(matcher.group(1));
+                BotBuildManager.StatType primary = job.isA(Job.WARRIOR)
+                        ? BotBuildManager.StatType.STR
+                        : BotBuildManager.StatType.LUK;
+                applyApBuildChoice(entry,
+                        new BotBuildManager.ApBuild(primary, BotBuildManager.StatType.DEX, dexTarget),
+                        "ok! keeping dex at " + Math.max(4, dexTarget) + ", rest into " + primary.name().toLowerCase(Locale.ROOT),
+                        "already doing " + Math.max(4, dexTarget) + " dex build!");
+                return;
+            }
+        }
+        if (job.isA(Job.MAGICIAN)) {
+            Matcher matcher = AP_FIXED_LUK_PATTERN.matcher(message);
+            if (matcher.find()) {
+                int lukTarget = Integer.parseInt(matcher.group(1));
+                applyApBuildChoice(entry,
+                        new BotBuildManager.ApBuild(BotBuildManager.StatType.INT, BotBuildManager.StatType.LUK, lukTarget),
+                        "ok! keeping luk at " + Math.max(4, lukTarget) + ", rest into int",
+                        "already doing " + Math.max(4, lukTarget) + " luk build!");
+                return;
+            }
+        }
+        if (job.isA(Job.BOWMAN)) {
+            Matcher matcher = AP_FIXED_STR_PATTERN.matcher(message);
+            if (matcher.find()) {
+                int strTarget = Integer.parseInt(matcher.group(1));
+                applyApBuildChoice(entry,
+                        new BotBuildManager.ApBuild(BotBuildManager.StatType.DEX, BotBuildManager.StatType.STR, strTarget),
+                        "ok! keeping str at " + Math.max(4, strTarget) + ", rest into dex",
+                        "already doing " + Math.max(4, strTarget) + " str build!");
+            }
+        }
+    }
+
+    private static void applyApBuildChoice(BotEntry entry, BotBuildManager.ApBuild build, String confirmMsg, String alreadyMsg) {
+        if (sameApBuild(entry.apBuild, build)) {
+            BotManager.getInstance().botSay(entry.bot, alreadyMsg);
+            return;
+        }
+        BotBuildManager.setApBuild(entry, build, confirmMsg);
+    }
+
+    private static boolean sameApBuild(BotBuildManager.ApBuild left, BotBuildManager.ApBuild right) {
+        return left != null
+                && right != null
+                && left.primaryStat == right.primaryStat
+                && left.secondaryStat == right.secondaryStat
+                && left.secondaryTarget == right.secondaryTarget;
     }
 
     private static void reportRecommendedGear(BotEntry entry, Character bot) {

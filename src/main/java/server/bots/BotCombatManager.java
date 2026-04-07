@@ -514,10 +514,10 @@ class BotCombatManager {
         attack.numAttacked = numAttacked;
         attack.numAttackedAndDamage = (numAttacked << 4) | attackPlan.numDamage;
         attack.speed = attackPlan.speed;
-        attack.stance = attackPlan.stance;
+        attack.stance = attackPlan.stance; // Historical server name: packet byte 3.
         attack.display = attackPlan.display;
-        attack.direction = attackPlan.direction;
-        attack.rangedirection = attackPlan.rangedDirection;
+        attack.direction = attackPlan.direction; // Historical server name: packet byte 2.
+        attack.rangedirection = attackPlan.rangedDirection; // Extra ranged byte after speed.
         attack.ranged = attackPlan.route == AttackRoute.RANGED;
         BotCombatFormulaProvider.DamageProfile damageProfile = BotCombatFormulaProvider.getInstance().resolveDamageProfile(
                 bot, attackPlan.skillId, attackPlan.skillLevel,
@@ -579,14 +579,14 @@ class BotCombatManager {
                 ? BotAttackExecutionProvider.mimicCloseRangePacketFields(action, fallbackAction, facingLeft)
                 : null;
         int direction = route == AttackRoute.CLOSE
-                ? closeRangePacketFields.direction()
-                : BotAttackExecutionProvider.basicAttackDirectionId(action, fallbackAction);
+                ? closeRangePacketFields.bodyActionId()
+                : BotAttackExecutionProvider.bodyActionId(action, fallbackAction);
         BotAttackExecutionProvider.SkillAttackTiming skillTiming =
                 BotAttackExecutionProvider.resolveSkillAttackTiming(skill, action, bot, fallbackAttackData);
         return new AttackPlan(entry.aoeSkillId, skillLevel, attackCount, hitBox, targets,
                 route, route == AttackRoute.CLOSE ? closeRangePacketFields.display() : 0,
                 direction, direction,
-                route == AttackRoute.CLOSE ? closeRangePacketFields.stance() : BotAttackExecutionProvider.packetStanceId(action, fallbackAction),
+                route == AttackRoute.CLOSE ? closeRangePacketFields.facingMask() : BotAttackExecutionProvider.clientAttackStanceId(action, fallbackAction),
                 fallbackAttackData.speed(), skillTiming.hitDelayMs(), skillTiming.cooldownMs());
     }
 
@@ -622,14 +622,14 @@ class BotCombatManager {
                 ? BotAttackExecutionProvider.mimicCloseRangePacketFields(action, fallbackAction, facingLeft)
                 : null;
         int direction = route == AttackRoute.CLOSE
-                ? closeRangePacketFields.direction()
-                : BotAttackExecutionProvider.basicAttackDirectionId(action, fallbackAction);
+                ? closeRangePacketFields.bodyActionId()
+                : BotAttackExecutionProvider.bodyActionId(action, fallbackAction);
         BotAttackExecutionProvider.SkillAttackTiming skillTiming =
                 BotAttackExecutionProvider.resolveSkillAttackTiming(skill, action, bot, fallbackAttackData);
         return new AttackPlan(entry.attackSkillId, skillLevel, attackCount, hitBox, List.of(primaryTarget),
                 route, route == AttackRoute.CLOSE ? closeRangePacketFields.display() : 0,
                 direction, direction,
-                route == AttackRoute.CLOSE ? closeRangePacketFields.stance() : BotAttackExecutionProvider.packetStanceId(action, fallbackAction),
+                route == AttackRoute.CLOSE ? closeRangePacketFields.facingMask() : BotAttackExecutionProvider.clientAttackStanceId(action, fallbackAction),
                 fallbackAttackData.speed(), skillTiming.hitDelayMs(), skillTiming.cooldownMs());
     }
 

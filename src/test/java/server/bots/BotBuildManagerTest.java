@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
@@ -28,6 +29,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -297,6 +299,89 @@ class BotBuildManagerTest {
         assertEquals(5, remainingSps[bishopBook]);
         verify(bot, never()).gainSp(anyInt(), anyInt(), anyBoolean());
         verify(bot, never()).changeSkillLevel(any(Skill.class), anyByte(), anyInt(), anyLong());
+    }
+
+    @Test
+    void mageLuklessBuildDumpsRemainingApIntoInt() {
+        Character bot = mock(Character.class);
+        BotEntry entry = new BotEntry(bot, mock(Character.class), mock(ScheduledFuture.class));
+        entry.apBuild = new BotBuildManager.ApBuild(BotBuildManager.StatType.INT, BotBuildManager.StatType.LUK, 4);
+
+        when(bot.getRemainingAp()).thenReturn(5);
+        when(bot.getLuk()).thenReturn(4);
+
+        BotBuildManager.autoAssignAp(entry, bot);
+
+        verify(bot).assignStrDexIntLuk(0, 0, 5, 0);
+    }
+
+    @Test
+    void thiefFixedDexBuildFillsDexBeforeLuk() {
+        Character bot = mock(Character.class);
+        BotEntry entry = new BotEntry(bot, mock(Character.class), mock(ScheduledFuture.class));
+        entry.apBuild = new BotBuildManager.ApBuild(BotBuildManager.StatType.LUK, BotBuildManager.StatType.DEX, 25);
+
+        when(bot.getRemainingAp()).thenReturn(5);
+        when(bot.getDex()).thenReturn(22);
+
+        BotBuildManager.autoAssignAp(entry, bot);
+
+        verify(bot).assignStrDexIntLuk(0, 3, 0, 2);
+    }
+
+    @Test
+    void bowmanStrlessBuildDumpsRemainingApIntoDex() {
+        Character bot = mock(Character.class);
+        BotEntry entry = new BotEntry(bot, mock(Character.class), mock(ScheduledFuture.class));
+        entry.apBuild = new BotBuildManager.ApBuild(BotBuildManager.StatType.DEX, BotBuildManager.StatType.STR, 4);
+
+        when(bot.getRemainingAp()).thenReturn(5);
+        when(bot.getStr()).thenReturn(4);
+
+        BotBuildManager.autoAssignAp(entry, bot);
+
+        verify(bot).assignStrDexIntLuk(0, 5, 0, 0);
+    }
+
+    @Test
+    void apRespecResetsToBaseStatsThenRebuildsUsingSavedPlan() {
+        Character bot = mock(Character.class);
+        BotEntry entry = new BotEntry(bot, mock(Character.class), mock(ScheduledFuture.class));
+        entry.apBuild = new BotBuildManager.ApBuild(BotBuildManager.StatType.INT, BotBuildManager.StatType.LUK, 4);
+
+        AtomicInteger str = new AtomicInteger(35);
+        AtomicInteger dex = new AtomicInteger(24);
+        AtomicInteger intStat = new AtomicInteger(60);
+        AtomicInteger luk = new AtomicInteger(18);
+        AtomicInteger remainingAp = new AtomicInteger(0);
+
+        when(bot.getJob()).thenReturn(Job.MAGICIAN);
+        when(bot.getStr()).thenAnswer(invocation -> str.get());
+        when(bot.getDex()).thenAnswer(invocation -> dex.get());
+        when(bot.getInt()).thenAnswer(invocation -> intStat.get());
+        when(bot.getLuk()).thenAnswer(invocation -> luk.get());
+        when(bot.getRemainingAp()).thenAnswer(invocation -> remainingAp.get());
+        doAnswer(invocation -> {
+            int deltaStr = invocation.getArgument(0);
+            int deltaDex = invocation.getArgument(1);
+            int deltaInt = invocation.getArgument(2);
+            int deltaLuk = invocation.getArgument(3);
+            str.addAndGet(deltaStr);
+            dex.addAndGet(deltaDex);
+            intStat.addAndGet(deltaInt);
+            luk.addAndGet(deltaLuk);
+            remainingAp.addAndGet(-(deltaStr + deltaDex + deltaInt + deltaLuk));
+            return true;
+        }).when(bot).assignStrDexIntLuk(anyInt(), anyInt(), anyInt(), anyInt());
+
+        assertEquals("ok, rebuilt my ap using the bot build", BotBuildManager.respecAp(entry, bot));
+
+        verify(bot, times(2)).assignStrDexIntLuk(anyInt(), anyInt(), anyInt(), anyInt());
+        assertEquals(4, str.get());
+        assertEquals(4, dex.get());
+        assertEquals(125, intStat.get());
+        assertEquals(4, luk.get());
+        assertEquals(0, remainingAp.get());
     }
 
     private static void stubSkillState(Character bot, int[] remainingSps, Map<Integer, Integer> skillLevels) {

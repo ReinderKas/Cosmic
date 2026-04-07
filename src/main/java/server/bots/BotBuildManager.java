@@ -15,17 +15,25 @@ import server.bots.build.ThiefBuilds;
 import server.bots.build.WarriorBuilds;
 
 class BotBuildManager {
+    enum StatType {
+        STR,
+        DEX,
+        INT,
+        LUK
+    }
 
     /**
-     * AP build for a warrior bot.
-     * dexTarget = 0 means pure STR.
-     * dexTarget > 0 means fill DEX to that value first, then all STR.
+     * AP build by job tree: fill the secondary stat up to its target, then dump all remaining AP into the primary stat.
      */
     public static class ApBuild {
-        final int dexTarget;
+        final StatType primaryStat;
+        final StatType secondaryStat;
+        final int secondaryTarget;
 
-        public ApBuild(int dexTarget) {
-            this.dexTarget = dexTarget;
+        public ApBuild(StatType primaryStat, StatType secondaryStat, int secondaryTarget) {
+            this.primaryStat = primaryStat;
+            this.secondaryStat = secondaryStat;
+            this.secondaryTarget = Math.max(4, secondaryTarget);
         }
     }
 
@@ -40,14 +48,20 @@ class BotBuildManager {
     /**
      * Returns a prompt asking the owner to choose an AP build, or null if:
      * no AP is pending, a build is already chosen, a prompt was already sent,
-     * or the bot is not on a supported warrior branch.
+     * or the bot is not on a supported branch.
      */
     static String buildApPrompt(BotEntry entry, Character bot) {
-        Job job = bot.getJob();
-        if (job != Job.WARRIOR && job != Job.FIGHTER && job != Job.PAGE && job != Job.SPEARMAN) return null;
+        String prompt = apPromptForJob(bot.getJob());
+        if (prompt == null) return null;
         if (entry.apBuild != null || entry.apPromptSent || bot.getRemainingAp() < 1) return null;
+        return requestApBuildPrompt(entry, bot);
+    }
+
+    static String requestApBuildPrompt(BotEntry entry, Character bot) {
+        String prompt = apPromptForJob(bot.getJob());
+        if (prompt == null) return null;
         entry.apPromptSent = true;
-        return "what AP build? type 'pure str' or e.g. '25 dex' to set a dex target";
+        return prompt;
     }
 
     /** Spends all remaining AP according to the stored build. */
@@ -55,18 +69,42 @@ class BotBuildManager {
         if (entry.apBuild == null || bot.getRemainingAp() < 1) return;
 
         int ap = bot.getRemainingAp();
-        int strGain = 0;
-        int dexGain = 0;
-        if (entry.apBuild.dexTarget > 0) {
-            int dexNeeded = Math.max(0, entry.apBuild.dexTarget - bot.getDex());
-            dexGain = Math.min(dexNeeded, ap);
-            ap -= dexGain;
-        }
-        strGain = ap;
+        int[] gains = new int[StatType.values().length];
+        int secondaryNeeded = Math.max(0, entry.apBuild.secondaryTarget - currentStat(bot, entry.apBuild.secondaryStat));
+        int secondaryGain = Math.min(secondaryNeeded, ap);
+        gains[entry.apBuild.secondaryStat.ordinal()] = secondaryGain;
+        ap -= secondaryGain;
+        gains[entry.apBuild.primaryStat.ordinal()] += ap;
 
-        if (strGain > 0 || dexGain > 0) {
-            bot.assignStrDexIntLuk(strGain, dexGain, 0, 0);
+        if (gains[StatType.STR.ordinal()] > 0
+                || gains[StatType.DEX.ordinal()] > 0
+                || gains[StatType.INT.ordinal()] > 0
+                || gains[StatType.LUK.ordinal()] > 0) {
+            bot.assignStrDexIntLuk(
+                    gains[StatType.STR.ordinal()],
+                    gains[StatType.DEX.ordinal()],
+                    gains[StatType.INT.ordinal()],
+                    gains[StatType.LUK.ordinal()]
+            );
         }
+    }
+
+    static String respecAp(BotEntry entry, Character bot) {
+        if (apPromptForJob(bot.getJob()) == null) {
+            return "dont have an ap build for my job yet";
+        }
+        if (entry.apBuild == null) {
+            entry.apPromptSent = false;
+            String prompt = requestApBuildPrompt(entry, bot);
+            return prompt != null ? prompt : "need your ap build first";
+        }
+
+        if (!bot.assignStrDexIntLuk(4 - bot.getStr(), 4 - bot.getDex(), 4 - bot.getInt(), 4 - bot.getLuk())) {
+            return "couldnt rebuild my ap";
+        }
+
+        autoAssignAp(entry, bot);
+        return "ok, rebuilt my ap using the bot build";
     }
 
     /**
@@ -212,6 +250,34 @@ class BotBuildManager {
             return thiefBuild;
         }
         return MageBuilds.getBuildOrder(job);
+    }
+
+    private static String apPromptForJob(Job job) {
+        if (job == null) {
+            return null;
+        }
+        if (job.isA(Job.WARRIOR)) {
+            return "what AP build? type 'pure str' or e.g. '25 dex' to set a dex target";
+        }
+        if (job.isA(Job.MAGICIAN)) {
+            return "what AP build? type 'lukless' or e.g. '25 luk' to set a luk target";
+        }
+        if (job.isA(Job.BOWMAN)) {
+            return "what AP build? type 'strless' or e.g. '25 str' to set a str target";
+        }
+        if (job.isA(Job.THIEF)) {
+            return "what AP build? type 'dexless' or e.g. '25 dex' to set a dex target";
+        }
+        return null;
+    }
+
+    private static int currentStat(Character bot, StatType statType) {
+        return switch (statType) {
+            case STR -> bot.getStr();
+            case DEX -> bot.getDex();
+            case INT -> bot.getInt();
+            case LUK -> bot.getLuk();
+        };
     }
 
     /**

@@ -28,13 +28,14 @@ class BotAttackDataProviderTest {
         assertEquals(69, provider.getBodyActionId("genesis"));
         assertEquals(77, provider.getBodyActionId("handgun"));
         assertEquals(86, provider.getBodyActionId("doublefire"));
-        assertEquals(6, BotAttackExecutionProvider.basicAttackDirectionId("swingO2", "swingO1"));
         BotAttackExecutionProvider.CloseRangePacketFields closeRangeFields =
                 BotAttackExecutionProvider.mimicCloseRangePacketFields("stabO1", "swingO1", false);
         assertEquals(0, closeRangeFields.display());
-        assertEquals(16, closeRangeFields.direction());
-        assertEquals(0, closeRangeFields.stance());
-        assertEquals(0x80, BotAttackExecutionProvider.mimicCloseRangePacketFields("stabO1", "swingO1", true).stance());
+        assertEquals(16, closeRangeFields.bodyActionId());
+        assertEquals(0, closeRangeFields.facingMask());
+        assertEquals(0x80, BotAttackExecutionProvider.mimicCloseRangePacketFields("stabO1", "swingO1", true).facingMask());
+        assertEquals(11, BotAttackExecutionProvider.clientAttackStanceId("shoot1", "shoot1"));
+        assertEquals(15, BotAttackExecutionProvider.clientAttackStanceId("stabO1", "stabO1"));
 
         BotAttackDataProvider.NormalAttackProfile profile = provider.getNormalAttackProfile(1302077);
         assertNotNull(profile);

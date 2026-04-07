@@ -98,4 +98,12 @@ class BotChatManagerTest {
         assertTrue(BotChatManager.isRespecCommand("reset skills"));
         assertTrue(BotChatManager.isRespecCommand("rebuild sp"));
     }
+
+    @Test
+    void shouldMatchApRespecCommands() {
+        assertTrue(BotChatManager.isApRespecCommand("respec ap"));
+        assertTrue(BotChatManager.isApRespecCommand("reset ap"));
+        assertTrue(BotChatManager.isApRespecCommand("rebuild ap"));
+        assertFalse(BotChatManager.isApRespecCommand("respec"));
+    }
 }
