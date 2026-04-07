@@ -9,7 +9,7 @@ import net.server.channel.handlers.UseItemHandler;
 import net.server.PlayerBuffValueHolder;
 import server.ItemInformationProvider;
 import server.StatEffect;
-import server.bots.combat.BotCombatFormulaProvider;
+import server.combat.CombatFormulaProvider;
 import server.life.Monster;
 import tools.Pair;
 
@@ -167,7 +167,7 @@ final class BotBuffManager {
             }
         }
         if (ref == null) return false;
-        return BotCombatFormulaProvider.getInstance().calculateMobHitChance(bot, ref) < ACC_HIT_THRESHOLD;
+        return CombatFormulaProvider.getInstance().calculateMobHitChance(bot, ref) < ACC_HIT_THRESHOLD;
     }
 
     private static List<ActiveBuff> collectActiveItemBuffs(Character bot) {

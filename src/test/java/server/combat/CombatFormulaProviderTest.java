@@ -1,4 +1,4 @@
-package server.bots;
+package server.combat;
 
 import client.BuffStat;
 import client.Character;
@@ -8,7 +8,6 @@ import client.inventory.Inventory;
 import client.inventory.InventoryType;
 import org.junit.jupiter.api.Test;
 import server.StatEffect;
-import server.bots.combat.BotCombatFormulaProvider;
 
 import java.util.List;
 
@@ -18,8 +17,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-class BotCombatFormulaProviderTest {
-    private final BotCombatFormulaProvider provider = BotCombatFormulaProvider.getInstance();
+class CombatFormulaProviderTest {
+    private final CombatFormulaProvider provider = CombatFormulaProvider.getInstance();
 
     @Test
     void shouldIncludeDerivedEquipAndBuffAccuracy() {
@@ -133,7 +132,7 @@ class BotCombatFormulaProviderTest {
         when(bot.calculateMinBaseDamage(100)).thenReturn(500);
         when(effect.getDamage()).thenReturn(260);
 
-        BotCombatFormulaProvider.DamageProfile profile = provider.resolveDamageProfile(bot, 1001005, effect, false);
+        CombatFormulaProvider.DamageProfile profile = provider.resolveDamageProfile(bot, 1001005, effect, false);
 
         assertEquals(1_300, profile.minDamage());
         assertEquals(2_600, profile.maxDamage());
@@ -142,34 +141,46 @@ class BotCombatFormulaProviderTest {
     }
 
     @Test
-    void shouldUseThrowingSkillBaseFormula() {
+    void shouldUseLuckySeven5xMaxAnd2point5xMinFormula() {
+        // Formula: MAX = LUK * 5 * ceil(watk/100), MIN = LUK * 2.5 * ceil(watk/100)
         Character bot = mockDamageBot();
         StatEffect effect = mock(StatEffect.class);
         when(bot.getTotalWatk()).thenReturn(90);
         when(bot.getTotalLuk()).thenReturn(200);
         when(effect.getDamage()).thenReturn(150);
 
-        BotCombatFormulaProvider.DamageProfile profile =
+        CombatFormulaProvider.DamageProfile profile =
                 provider.resolveDamageProfile(bot, constants.skills.Rogue.LUCKY_SEVEN, effect, false);
 
-        assertEquals(1_200, profile.minDamage());
+        // base max = 200*5*ceil(90/100)=1000, base min = round(1000*0.5)=500
+        // after skill 150%: max=1500, min=750
+        assertEquals(750, profile.minDamage());
         assertEquals(1_500, profile.maxDamage());
     }
 
     @Test
-    void shouldUseMagicBaseDamageForMagicSkills() {
+    void shouldUseMagicDamageBaseFormulaMatchingAntiCheat() {
+        // Formula: ceil((matk * ceil(matk/1000) + matk) / 30) + ceil(totalInt/200)
+        // matk=3000, totalInt=0: ceil((3000*3+3000)/30) + 0 = ceil(400) = 400
+        // With getMatk()=5: max = 2000, min = round(2000*0.8) = 1600
         Character bot = mockDamageBot();
         StatEffect effect = mock(StatEffect.class);
-        when(bot.getTotalMagic()).thenReturn(250);
-        when(bot.calculateMaxBaseMagicDamage(250)).thenReturn(600);
-        when(effect.getMatk()).thenReturn((short) 3);
+        when(bot.getTotalMagic()).thenReturn(3000);
+        when(bot.getTotalInt()).thenReturn(0);
+        when(effect.getMatk()).thenReturn((short) 5);
 
-        BotCombatFormulaProvider.DamageProfile profile = provider.resolveDamageProfile(bot, 2101004, effect, true);
+        CombatFormulaProvider.DamageProfile profile = provider.resolveDamageProfile(bot, 2101004, effect, true);
 
-        assertEquals(1_440, profile.minDamage());
-        assertEquals(1_800, profile.maxDamage());
+        assertEquals(1_600, profile.minDamage());
+        assertEquals(2_000, profile.maxDamage());
         assertTrue(profile.magicAttack());
         assertFalse(profile.alwaysHit());
+    }
+
+    @Test
+    void shouldExposeStandaloneMagicDamageBaseMethod() {
+        // matk=3000, totalInt=200: ceil((3000*3+3000)/30) + ceil(200/200) = 400 + 1 = 401
+        assertEquals(401L, provider.magicDamageBase(3000, 200));
     }
 
     @Test
@@ -178,7 +189,7 @@ class BotCombatFormulaProviderTest {
         StatEffect effect = mock(StatEffect.class);
         when(effect.getFixDamage()).thenReturn(777);
 
-        BotCombatFormulaProvider.DamageProfile profile = provider.resolveDamageProfile(bot, 0, effect, false);
+        CombatFormulaProvider.DamageProfile profile = provider.resolveDamageProfile(bot, 0, effect, false);
 
         assertEquals(777, profile.minDamage());
         assertEquals(777, profile.maxDamage());

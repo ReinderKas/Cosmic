@@ -27,7 +27,7 @@ import constants.skills.WindArcher;
 import net.server.channel.handlers.AbstractDealDamageHandler;
 import server.StatEffect;
 import server.bots.combat.BotAttackDataProvider;
-import server.bots.combat.BotCombatFormulaProvider;
+import server.combat.CombatFormulaProvider;
 import server.bots.combat.BotDefenseDataProvider;
 import server.bots.combat.BotMobHitboxProvider;
 import server.life.Monster;
@@ -514,7 +514,7 @@ class BotCombatManager {
         attack.direction = attackPlan.direction; // Historical server name: packet byte 2.
         attack.rangedirection = attackPlan.rangedDirection; // Extra ranged byte after speed.
         attack.ranged = attackPlan.route == AttackRoute.RANGED;
-        BotCombatFormulaProvider.DamageProfile damageProfile = BotCombatFormulaProvider.getInstance().resolveDamageProfile(
+        CombatFormulaProvider.DamageProfile damageProfile = CombatFormulaProvider.getInstance().resolveDamageProfile(
                 bot, attackPlan.skillId, attackPlan.skillLevel,
                 attackPlan.route == AttackRoute.MAGIC);
         attack.magic = damageProfile.magicAttack();
@@ -522,7 +522,7 @@ class BotCombatManager {
 
         for (Monster target : attackPlan.targets) {
             attack.targets.put(target.getObjectId(),
-                    BotCombatFormulaProvider.getInstance().makeTarget(bot, target, attackPlan.numDamage,
+                    CombatFormulaProvider.getInstance().makeTarget(bot, target, attackPlan.numDamage,
                             damageProfile, attackPlan.hitDelayMs));
         }
 

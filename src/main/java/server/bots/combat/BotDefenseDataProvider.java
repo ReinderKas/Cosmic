@@ -159,7 +159,7 @@ public final class BotDefenseDataProvider {
         if (physicalAttackDamage <= 0) {
             return 1;
         }
-        if (!BotCombatFormulaProvider.getInstance().doesMobHit(bot, mob)) {
+        if (!server.combat.CombatFormulaProvider.getInstance().doesMobHit(bot, mob)) {
             return 0;
         }
 

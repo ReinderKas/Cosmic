@@ -1,4 +1,4 @@
-package server.bots.combat;
+package server.combat;
 
 import client.BuffStat;
 import client.Character;
@@ -26,16 +26,26 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
-public final class BotCombatFormulaProvider {
+public final class CombatFormulaProvider {
     public record DamageProfile(int minDamage, int maxDamage, boolean magicAttack, boolean alwaysHit) {
     }
 
     private static final double MIN_HIT_CHANCE = 0.01d;
     private static final double MAX_HIT_CHANCE = 1.0d;
-    private static final BotCombatFormulaProvider instance = new BotCombatFormulaProvider();
+    private static final CombatFormulaProvider instance = new CombatFormulaProvider();
 
-    public static BotCombatFormulaProvider getInstance() {
+    public static CombatFormulaProvider getInstance() {
         return instance;
+    }
+
+    /**
+     * Standard spell damage base, matching the anti-cheat formula in AbstractDealDamageHandler.
+     * Formula: ceil((matk * ceil(matk/1000) + matk) / 30) + ceil(totalInt/200)
+     * Equivalent to: (Magic² / 1000 + Magic) / 30 + INT / 200
+     */
+    public long magicDamageBase(int matk, int totalInt) {
+        return (long) (Math.ceil((matk * Math.ceil(matk / 1000.0) + matk) / 30.0)
+                + Math.ceil(totalInt / 200.0));
     }
 
     public int getTotalAccuracy(Character bot) {
@@ -180,8 +190,9 @@ public final class BotCombatFormulaProvider {
                 || skillId == NightWalker.LUCKY_SEVEN
                 || skillId == NightLord.TRIPLE_THROW
                 || skillId == NightWalker.TRIPLE_THROW) {
+            // Formula: MAX = LUK * 5 * watk/100, MIN = LUK * 2.5 * watk/100
             maxDamage = (long) (bot.getTotalLuk() * 5L) * (long) Math.ceil(watk / 100.0d);
-            minDamage = Math.max(1L, Math.round(maxDamage * 0.8d));
+            minDamage = Math.max(1L, Math.round(maxDamage * 0.5d));
         } else if (skillId == DragonKnight.DRAGON_ROAR) {
             maxDamage = (long) (bot.getTotalStr() * 4L + bot.getTotalDex()) * (long) Math.ceil(watk / 100.0d);
             minDamage = Math.max(1L, Math.round(maxDamage * 0.8d));
@@ -215,7 +226,8 @@ public final class BotCombatFormulaProvider {
                     * bot.getTotalMagic() / 1000.0d);
             maxDamage = maxDamage * Math.max(0, effect.getHp()) / 100L;
         } else {
-            maxDamage = bot.calculateMaxBaseMagicDamage(bot.getTotalMagic());
+            // Standard spell formula — same as anti-cheat in AbstractDealDamageHandler.parseDamage
+            maxDamage = magicDamageBase(bot.getTotalMagic(), bot.getTotalInt());
             maxDamage = applyMagicAmplification(bot, maxDamage);
             if (effect != null && effect.getMatk() > 0) {
                 maxDamage *= effect.getMatk();
