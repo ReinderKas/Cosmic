@@ -10,6 +10,8 @@ import client.inventory.WeaponType;
 import client.inventory.manipulator.InventoryManipulator;
 import constants.inventory.EquipSlot;
 import constants.inventory.ItemConstants;
+import constants.skills.Pirate;
+import constants.skills.Rogue;
 import server.ItemInformationProvider;
 import server.bots.combat.BotAttackDataProvider;
 
@@ -74,6 +76,7 @@ class BotEquipManager {
             short primary = (short) eslot.getPrimarySlot();
             if (primary == 0) continue;
             if (!ii.canWearEquipment(bot, (Equip) item, primary)) continue;
+            if (primary == (short) -11 && !isWeaponCompatible(bot, ii.getWeaponType(item.getItemId()))) continue;
             bySlot.computeIfAbsent(primary, k -> new ArrayList<>()).add((Equip) item);
         }
 
@@ -105,18 +108,19 @@ class BotEquipManager {
             if (slot == (short) -6 && overallEquipped) continue;
 
             Equip current = (Equip) eqdInv.getItem(slot);
-            Equip best = findBest(bot, ii, weaponType, current, bySlot.get(slot));
+            Equip effectiveCurrent = slot == (short) -11 ? compatibleWeaponOrNull(bot, ii, current) : current;
+            Equip best = findBest(bot, ii, weaponType, effectiveCurrent, bySlot.get(slot));
             // 2H weapon displaces shield — only upgrade if 2H beats current weapon+shield combined.
             if (slot == (short) -11 && best != null && best != current && ii.isTwoHanded(best.getItemId())) {
                 Equip shield = (Equip) eqdInv.getItem((short) -10);
-                if (compareScores(scoreEquipWithLoss(bot, ii, weaponType, current, best, shield),
-                                  scoreEquip(bot, ii, weaponType, current, current)) <= 0) best = current;
+                if (compareScores(scoreEquipWithLoss(bot, ii, weaponType, effectiveCurrent, best, shield),
+                                  scoreEquip(bot, ii, weaponType, effectiveCurrent, effectiveCurrent)) <= 0) best = effectiveCurrent;
             }
             // Overall displaces pants — only upgrade if overall beats current top+pants combined.
             if (slot == (short) -5 && best != null && best != current && isOverall(best, ii)) {
                 Equip pants = (Equip) eqdInv.getItem((short) -6);
-                if (compareScores(scoreEquipWithLoss(bot, ii, weaponType, current, best, pants),
-                                  scoreEquip(bot, ii, weaponType, current, current)) <= 0) best = current;
+                if (compareScores(scoreEquipWithLoss(bot, ii, weaponType, effectiveCurrent, best, pants),
+                                  scoreEquip(bot, ii, weaponType, effectiveCurrent, effectiveCurrent)) <= 0) best = effectiveCurrent;
             }
             if (best != null && best != current) {
                 InventoryManipulator.handleItemMove(bot.getClient(), InventoryType.EQUIP, best.getPosition(), slot, (short) 1);
@@ -156,6 +160,9 @@ class BotEquipManager {
             if (!ii.canWearEquipment(receiver, equip, primary)) {
                 continue;
             }
+            if (primary == (short) -11 && !isWeaponCompatible(receiver, ii.getWeaponType(item.getItemId()))) {
+                continue;
+            }
 
             bySlot.computeIfAbsent(primary, ignored -> new ArrayList<>()).add(equip);
         }
@@ -177,20 +184,21 @@ class BotEquipManager {
             if (slot == (short) -10 && receiverHas2H) continue;
             if (slot == (short) -6 && overallRec) continue;
             Equip current = (Equip) receiverEquippedInv.getItem(slot);
-            Equip best = findBest(receiver, ii, weaponType, current, bySlot.get(slot));
+            Equip effectiveCurrent = slot == (short) -11 ? compatibleWeaponOrNull(receiver, ii, current) : current;
+            Equip best = findBest(receiver, ii, weaponType, effectiveCurrent, bySlot.get(slot));
             // 2H weapon displaces shield — only recommend if 2H beats current weapon+shield combined.
             if (slot == (short) -11 && best != null && best != current && ii.isTwoHanded(best.getItemId())) {
                 Equip shield = (Equip) receiverEquippedInv.getItem((short) -10);
-                if (compareScores(scoreEquipWithLoss(receiver, ii, weaponType, current, best, shield),
-                                  scoreEquip(receiver, ii, weaponType, current, current)) <= 0) best = current;
+                if (compareScores(scoreEquipWithLoss(receiver, ii, weaponType, effectiveCurrent, best, shield),
+                                  scoreEquip(receiver, ii, weaponType, effectiveCurrent, effectiveCurrent)) <= 0) best = effectiveCurrent;
             }
             // Overall displaces pants — only recommend if overall beats current top+pants combined.
             if (slot == (short) -5 && best != null && best != current && isOverall(best, ii)) {
                 Equip pants = (Equip) receiverEquippedInv.getItem((short) -6);
-                if (compareScores(scoreEquipWithLoss(receiver, ii, weaponType, current, best, pants),
-                                  scoreEquip(receiver, ii, weaponType, current, current)) <= 0) best = current;
+                if (compareScores(scoreEquipWithLoss(receiver, ii, weaponType, effectiveCurrent, best, pants),
+                                  scoreEquip(receiver, ii, weaponType, effectiveCurrent, effectiveCurrent)) <= 0) best = effectiveCurrent;
             }
-            if (best != null && best != current && isBetterThanCurrent(receiver, ii, weaponType, current, best)) {
+            if (best != null && best != current && isBetterThanCurrent(receiver, ii, weaponType, effectiveCurrent, best)) {
                 recommendations.add(new EquipRecommendation(slot, current, best));
                 if (slot == (short) -5) overallRec = isOverall(best, ii);
             }
@@ -239,6 +247,9 @@ class BotEquipManager {
         if (!ii.canWearEquipment(receiver, candidate, primarySlot)) {
             return null;
         }
+        if (primarySlot == (short) -11 && !isWeaponCompatible(receiver, ii.getWeaponType(candidate.getItemId()))) {
+            return null;
+        }
 
         // Shield is unusable with a 2H weapon.
         if (primarySlot == (short) -10) {
@@ -247,6 +258,9 @@ class BotEquipManager {
         }
 
         Equip current = (Equip) receiverEquippedInv.getItem(primarySlot);
+        if (primarySlot == (short) -11) {
+            current = compatibleWeaponOrNull(receiver, ii, current);
+        }
         if (!isBetterThanCurrent(receiver, ii, weaponType, current, candidate)) {
             return null;
         }
@@ -590,6 +604,64 @@ class BotEquipManager {
     private static boolean isOverall(Item item, ItemInformationProvider ii) {
         if (item == null) return false;
         return "MaPn".equals(ii.getEquipmentSlot(item.getItemId()));
+    }
+
+    static boolean isWeaponCompatible(Character bot, WeaponType weaponType) {
+        if (weaponType == null || weaponType == WeaponType.NOT_A_WEAPON) {
+            return true;
+        }
+
+        Job job = bot.getJob();
+        if (job == Job.THIEF) {
+            if (bot.getSkillLevel(Rogue.LUCKY_SEVEN) > 0) {
+                return weaponType == WeaponType.CLAW;
+            }
+            if (bot.getSkillLevel(Rogue.DOUBLE_STAB) > 0) {
+                return isThiefDagger(weaponType);
+            }
+        }
+        if (job == Job.PIRATE) {
+            boolean gunBuild = bot.getSkillLevel(Pirate.DOUBLE_SHOT) > 0;
+            boolean knuckleBuild = bot.getSkillLevel(Pirate.FLASH_FIST) > 0
+                    || bot.getSkillLevel(Pirate.SOMERSAULT_KICK) > 0;
+            if (gunBuild && !knuckleBuild) {
+                return weaponType == WeaponType.GUN;
+            }
+            if (knuckleBuild && !gunBuild) {
+                return weaponType == WeaponType.KNUCKLE;
+            }
+            return weaponType == WeaponType.GUN || weaponType == WeaponType.KNUCKLE;
+        }
+
+        return switch (job) {
+            case BOWMAN -> weaponType == WeaponType.BOW || weaponType == WeaponType.CROSSBOW;
+            case FIGHTER, CRUSADER, HERO, PAGE, WHITEKNIGHT, PALADIN -> isSword(weaponType);
+            case SPEARMAN, DRAGONKNIGHT, DARKKNIGHT -> weaponType == WeaponType.SPEAR_STAB;
+            case MAGICIAN, FP_WIZARD, FP_MAGE, FP_ARCHMAGE, IL_WIZARD, IL_MAGE, IL_ARCHMAGE, CLERIC, PRIEST, BISHOP ->
+                    weaponType == WeaponType.WAND || weaponType == WeaponType.STAFF;
+            case HUNTER, RANGER, BOWMASTER -> weaponType == WeaponType.BOW;
+            case CROSSBOWMAN, SNIPER, MARKSMAN -> weaponType == WeaponType.CROSSBOW;
+            case ASSASSIN, HERMIT, NIGHTLORD -> weaponType == WeaponType.CLAW;
+            case BANDIT, CHIEFBANDIT, SHADOWER -> isThiefDagger(weaponType);
+            case BRAWLER, MARAUDER, BUCCANEER -> weaponType == WeaponType.KNUCKLE;
+            case GUNSLINGER, OUTLAW, CORSAIR -> weaponType == WeaponType.GUN;
+            default -> true;
+        };
+    }
+
+    private static Equip compatibleWeaponOrNull(Character bot, ItemInformationProvider ii, Equip equip) {
+        if (equip == null) {
+            return null;
+        }
+        return isWeaponCompatible(bot, ii.getWeaponType(equip.getItemId())) ? equip : null;
+    }
+
+    private static boolean isSword(WeaponType weaponType) {
+        return weaponType == WeaponType.SWORD1H || weaponType == WeaponType.SWORD2H;
+    }
+
+    private static boolean isThiefDagger(WeaponType weaponType) {
+        return weaponType == WeaponType.DAGGER_OTHER || weaponType == WeaponType.DAGGER_THIEVES;
     }
 
     private static WeaponType currentWeaponType(Character bot, ItemInformationProvider ii) {

@@ -1,13 +1,19 @@
 package server.bots;
 
+import client.Character;
 import client.Job;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class BotStarterKitManagerTest {
     @Test
@@ -38,5 +44,20 @@ class BotStarterKitManagerTest {
         assertTrue(BotStarterKitManager.isFirstJobAdvancement(Job.BEGINNER, Job.MAGICIAN));
         assertFalse(BotStarterKitManager.isFirstJobAdvancement(Job.WARRIOR, Job.FIGHTER));
         assertFalse(BotStarterKitManager.isFirstJobAdvancement(Job.BEGINNER, Job.FIGHTER));
+    }
+
+    @Test
+    void advanceJobAlwaysReevaluatesAutoEquip() {
+        Character bot = mock(Character.class);
+        Character owner = mock(Character.class);
+
+        when(bot.getJob()).thenReturn(Job.BOWMAN);
+
+        try (MockedStatic<BotEquipManager> equipManager = mockStatic(BotEquipManager.class)) {
+            BotStarterKitManager.advanceJob(bot, owner, Job.HUNTER);
+
+            verify(bot).changeJob(Job.HUNTER);
+            equipManager.verify(() -> BotEquipManager.autoEquip(bot, owner, null));
+        }
     }
 }

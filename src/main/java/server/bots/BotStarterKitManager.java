@@ -47,7 +47,8 @@ final class BotStarterKitManager {
     static void advanceJob(Character bot, Character owner, Job newJob) {
         Job oldJob = bot.getJob();
         bot.changeJob(newJob);
-        grantStarterKitIfEligible(bot, owner, oldJob, newJob);
+        grantStarterKitIfEligible(bot, oldJob, newJob);
+        BotEquipManager.autoEquip(bot, owner, null);
     }
 
     static List<ItemGrant> starterKitFor(Job job) {
@@ -58,7 +59,7 @@ final class BotStarterKitManager {
         return oldJob == Job.BEGINNER && FIRST_JOB_KITS.containsKey(newJob);
     }
 
-    private static void grantStarterKitIfEligible(Character bot, Character owner, Job oldJob, Job newJob) {
+    private static void grantStarterKitIfEligible(Character bot, Job oldJob, Job newJob) {
         if (!isFirstJobAdvancement(oldJob, newJob)) {
             return;
         }
@@ -78,7 +79,6 @@ final class BotStarterKitManager {
                         bot.getName(), grant.itemId(), grant.quantity(), newJob);
             }
         }
-        BotEquipManager.autoEquip(bot, owner, null);
     }
 
     private static boolean canHoldStarterKit(Character bot, List<ItemGrant> starterKit) {
