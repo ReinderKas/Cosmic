@@ -275,7 +275,10 @@ class BotDropManager {
         entry.pendingTradeBotDone  = false;
         Trade.startTrade(bot);
         Trade.inviteTrade(bot, recipient);
-        BotManager.getInstance().botSay(bot, BotManager.randomReply(TRADE_INVITATION_MSGS));
+        // pot_share already announced itself ("got some HP pots, inv u") — skip the redundant "k i inv"
+        if (!"pot_share".equals(entry.pendingTradeCategory)) {
+            BotManager.getInstance().botSay(bot, BotManager.randomReply(TRADE_INVITATION_MSGS));
+        }
     }
 
     /** Called every bot simulation tick while a trade sequence is in progress. */
