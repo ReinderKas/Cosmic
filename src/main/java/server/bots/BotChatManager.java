@@ -661,7 +661,7 @@ public class BotChatManager {
         }
 
         // AP build selection — "change build" always triggers a re-prompt;
-        // "pure str" / "X dex" only apply when bot is actively waiting for the answer (apPromptSent=true)
+        // "dexless" / "X dex" only apply when bot is actively waiting for the answer (apPromptSent=true)
         if (AP_CHANGE_BUILD_PATTERN.matcher(message).find()) {
             entry.apBuild      = null;
             entry.apPromptSent = false;
@@ -1000,8 +1000,8 @@ public class BotChatManager {
         if (job.isA(Job.WARRIOR) && AP_PURE_STR_PATTERN.matcher(message).find()) {
             applyApBuildChoice(entry,
                     new BotBuildManager.ApBuild(BotBuildManager.StatType.STR, BotBuildManager.StatType.DEX, 4),
-                    "pure str it is! dumping everything into str",
-                    "already doing pure str!");
+                    "dexless it is! dumping everything into str",
+                    "already doing dexless!");
             return;
         }
         if (job.isA(Job.THIEF) && AP_DEXLESS_PATTERN.matcher(message).find()) {

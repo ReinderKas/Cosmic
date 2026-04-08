@@ -257,7 +257,7 @@ class BotBuildManager {
             return null;
         }
         if (job.isA(Job.WARRIOR)) {
-            return "what AP build? type 'pure str' or e.g. '25 dex' to set a dex target";
+            return "what AP build? type 'dexless' or e.g. '25 dex' to set a dex target";
         }
         if (job.isA(Job.MAGICIAN)) {
             return "what AP build? type 'lukless' or e.g. '25 luk' to set a luk target";
