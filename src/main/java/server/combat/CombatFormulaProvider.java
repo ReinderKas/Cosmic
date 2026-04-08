@@ -199,11 +199,13 @@ public final class CombatFormulaProvider {
                 || skillId == NightWalker.LUCKY_SEVEN
                 || skillId == NightLord.TRIPLE_THROW
                 || skillId == NightWalker.TRIPLE_THROW) {
-            // Formula: MAX = LUK * 5 * watk/100, MIN = LUK * 2.5 * watk/100
-            maxDamage = (long) (bot.getTotalLuk() * 5L) * (long) Math.ceil(watk / 100.0d);
+//            Lucky Seven/Triple Throw (credit to HS.net / LazyBui for recent verification):
+//            MAX = (LUK * 5.0) * Weapon Attack / 100
+//            MIN = (LUK * 2.5) * Weapon Attack / 100
+            maxDamage = (long) Math.ceil(bot.getTotalLuk() * 5L * watk / 100.0d);
             minDamage = Math.max(1L, Math.round(maxDamage * 0.5d));
         } else if (skillId == DragonKnight.DRAGON_ROAR) {
-            maxDamage = (long) (bot.getTotalStr() * 4L + bot.getTotalDex()) * (long) Math.ceil(watk / 100.0d);
+            maxDamage = (long) Math.ceil(bot.getTotalStr() * 4L + bot.getTotalDex() *  watk / 100.0d);
             minDamage = Math.max(1L, Math.round(maxDamage * 0.8d));
         } else if (skillId == NightLord.VENOMOUS_STAR || skillId == Shadower.VENOMOUS_STAB) {
             maxDamage = (long) Math.ceil((18.5d * (bot.getTotalStr() + bot.getTotalLuk()) + bot.getTotalDex() * 2.0d)
