@@ -81,10 +81,6 @@ public final class MagicDamageHandler extends AbstractDealDamageHandler {
             return;
         }
 
-        if (effect.getMpCon() > 0) {
-            chr.addMP(-effect.getMpCon());
-        }
-
         Skill skill = SkillFactory.getSkill(attack.skill);
         StatEffect skillEffect = skill.getEffect(chr.getSkillLevel(skill));
         if (skillEffect.getCooldown() > 0) {
@@ -98,16 +94,6 @@ public final class MagicDamageHandler extends AbstractDealDamageHandler {
 
         applyAttack(attack, chr, effect.getAttackCount());
         applyMpEater(attack, chr);
-    }
-
-    /**
-     * Magic attack path for bot characters. Broadcasts with stance=0 so the WASM client falls
-     * through to move.apply_actions(MAGIC) → RegularAction::apply → CharLook::attack(bool),
-     * which always resets animation frames. Delegates all effect logic to the real handler.
-     */
-    public static void applyMagicBotAttackEffects(AttackInfo attack, Character chr, Client c) {
-        attack.stance = 0;
-        applyMagicAttackEffects(attack, chr, c);
     }
 
     private static void applyMpEater(AttackInfo attack, Character chr) {

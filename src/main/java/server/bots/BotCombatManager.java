@@ -312,7 +312,7 @@ class BotCombatManager {
             if (lvl <= 0) continue;
 
             StatEffect fx = skill.getEffect(lvl);
-            int atk = fx.getAttackCount();
+            int atk = effectiveHitCount(fx);
             int mobs = fx.getMobCount();
             int dur = fx.getDuration();
 
@@ -603,7 +603,7 @@ class BotCombatManager {
             return null;
         }
 
-        int attackCount = Math.max(1, effect.getAttackCount());
+        int attackCount = effectiveHitCount(effect);
         WeaponType weaponType = BotAttackExecutionProvider.getEquippedWeaponType(bot);
         if (!BotAttackExecutionProvider.canUseRangedAttackRoute(route, weaponType, bot.getPosition(), primaryTarget.getPosition())) {
             return null;
@@ -753,6 +753,15 @@ class BotCombatManager {
         boolean inHRange = dx <= BotCombatManager.cfg.ATTACK_RANGE_X;
         boolean inVRange = dy >= -BotCombatManager.cfg.ATTACK_DOWN_MAX && dy <= BotCombatManager.cfg.ATTACK_RANGE_Y;
         return inHRange && inVRange;
+    }
+
+    /**
+     * Returns the number of damage lines a skill fires per target.
+     * Uses the larger of attackCount and bulletCount from skill data —
+     * claw skills like Lucky Seven store their projectile count in bulletCount.
+     */
+    private static int effectiveHitCount(StatEffect effect) {
+        return Math.max(1, Math.max(effect.getAttackCount(), effect.getBulletCount()));
     }
 
     private static int compareGrindTargets(Character bot, Point botPos, Foothold botFoothold, Monster left, Monster right) {
