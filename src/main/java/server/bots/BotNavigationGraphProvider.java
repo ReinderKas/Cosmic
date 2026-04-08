@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
-    private static final int GRAPH_VERSION = 17;
+    private static final int GRAPH_VERSION = 18;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
     private static final int ROPE_ANCHOR_INTERVAL_PX = 30;
     private static final int MAX_PROFILED_JUMP_REGIONS = 5;
@@ -245,6 +245,11 @@ final class BotNavigationGraphProvider {
         return GRAPHS.computeIfAbsent(map.getId(), ignored -> loadOrBuildGraph(map));
     }
 
+    /** Returns the cached graph without triggering a build. */
+    static BotNavigationGraph peekGraph(MapleMap map) {
+        return GRAPHS.get(map.getId());
+    }
+
     static BotNavigationGraph rebuildGraph(MapleMap map) {
         BotNavigationGraph rebuilt = buildGraph(map);
         GRAPHS.put(map.getId(), rebuilt);
@@ -307,10 +312,16 @@ final class BotNavigationGraphProvider {
             Map<Integer, Foothold> footholdsById = new HashMap<>();
             List<Foothold> walkableFootholds = new ArrayList<>();
             long phaseStartedAt = System.nanoTime();
+            Set<Integer> collidableWallIds = new HashSet<>();
             for (Foothold foothold : footholds) {
                 footholdsById.put(foothold.getId(), foothold);
                 if (!foothold.isWall()) {
                     walkableFootholds.add(foothold);
+                }
+            }
+            for (Foothold foothold : footholds) {
+                if (Foothold.isCollidableWall(foothold, footholdsById)) {
+                    collidableWallIds.add(foothold.getId());
                 }
             }
             profile.collectFootholdsNs = System.nanoTime() - phaseStartedAt;
@@ -393,7 +404,7 @@ final class BotNavigationGraphProvider {
             }
             profile.buildPortalEdgesNs = System.nanoTime() - phaseStartedAt;
 
-            BotNavigationGraph graph = new BotNavigationGraph(map.getId(), GRAPH_VERSION, regions, regionsById, regionIdByFootholdId, outgoing);
+            BotNavigationGraph graph = new BotNavigationGraph(map.getId(), GRAPH_VERSION, regions, regionsById, regionIdByFootholdId, outgoing, collidableWallIds);
             GraphBuildReport report = profile.finish();
             LAST_BUILD_REPORTS.put(map.getId(), report);
             log.debug("Built bot nav graph map {} in {} ms (regions={}, edges={}, jump={} ms, jumpSamples={}, cacheHits={})",

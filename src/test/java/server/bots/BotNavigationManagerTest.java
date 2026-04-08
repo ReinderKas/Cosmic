@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -238,7 +239,8 @@ class BotNavigationManagerTest {
                 List.of(startRegion, targetRegion),
                 regionsById,
                 Map.of(1, 1, 2, 2),
-                Map.of(1, List.of(leftEntry, rightEntry))
+                Map.of(1, List.of(leftEntry, rightEntry)),
+                Set.of()
         );
 
         List<BotNavigationGraph.Edge> leftPath = BotNavigationManager.findPath(

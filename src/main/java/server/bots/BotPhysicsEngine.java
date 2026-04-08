@@ -1140,9 +1140,10 @@ final class BotPhysicsEngine {
             return AirCollision.none();
         }
 
+        java.util.Set<Integer> collidableWalls = getCollidableWallIds(map);
         AirCollision best = AirCollision.none();
         for (Foothold foothold : map.getFootholds().getAllFootholds()) {
-            if (!foothold.isWall()) {
+            if (!foothold.isWall() || !collidableWalls.contains(foothold.getId())) {
                 continue;
             }
             AirCollision collision = wallCollision(foothold, previousPos, nextPos);
@@ -1151,6 +1152,30 @@ final class BotPhysicsEngine {
             }
         }
         return best;
+    }
+
+    /**
+     * Returns the collidable wall set from the nav graph if available, otherwise computes it
+     * directly from the foothold tree.  This avoids a circular dependency when the nav graph
+     * is still being built.
+     */
+    private static java.util.Set<Integer> getCollidableWallIds(MapleMap map) {
+        BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(map);
+        if (graph != null) {
+            return graph.collidableWallIds;
+        }
+        java.util.List<Foothold> all = map.getFootholds().getAllFootholds();
+        java.util.Map<Integer, Foothold> byId = new java.util.HashMap<>(all.size());
+        for (Foothold fh : all) {
+            byId.put(fh.getId(), fh);
+        }
+        java.util.Set<Integer> result = new java.util.HashSet<>();
+        for (Foothold fh : all) {
+            if (Foothold.isCollidableWall(fh, byId)) {
+                result.add(fh.getId());
+            }
+        }
+        return result;
     }
 
     private static AirCollision landingAtX(MapleMap map,

@@ -42,6 +42,37 @@ public class Foothold implements Comparable<Foothold> {
         return p1.x == p2.x;
     }
 
+    /**
+     * A wall foothold is collidable (blocks airborne movement) only if both ends of its
+     * prev/next chain eventually reach a non-wall (ground) foothold.  Platform-edge walls
+     * have one open end (prev=0 or next=0 before reaching ground) and should not collide.
+     */
+    public static boolean isCollidableWall(Foothold wall, java.util.Map<Integer, Foothold> footholdsById) {
+        if (wall == null || !wall.isWall()) {
+            return false;
+        }
+        return chainReachesGround(wall, true, footholdsById)
+                && chainReachesGround(wall, false, footholdsById);
+    }
+
+    private static boolean chainReachesGround(Foothold start, boolean followNext,
+                                              java.util.Map<Integer, Foothold> footholdsById) {
+        int id = followNext ? start.next : start.prev;
+        int depth = 0;
+        while (id != 0 && depth < 10) {
+            Foothold fh = footholdsById.get(id);
+            if (fh == null) {
+                return false;
+            }
+            if (!fh.isWall()) {
+                return true;
+            }
+            id = followNext ? fh.next : fh.prev;
+            depth++;
+        }
+        return false;
+    }
+
     public int getX1() {
         return p1.x;
     }
