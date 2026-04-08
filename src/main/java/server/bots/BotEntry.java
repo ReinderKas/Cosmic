@@ -87,6 +87,8 @@ public class BotEntry {
     int potCheckTimerMs = 0;
     int mpRecoveryTimerMs = 0;
     int invFullWarnCooldownMs = 0;
+    boolean potShareRequestedHp = false; // true once an HP pot-share request has been broadcast this episode
+    boolean potShareRequestedMp = false; // reset when pot count recovers above POT_LOW_WARN
 
     // Job advancement prompts
     int jobPromptSent = 0;

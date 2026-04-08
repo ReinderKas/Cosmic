@@ -739,4 +739,62 @@ class BotDropManager {
         return "i only have " + GameConstants.numberWithCommas(currentMesos)
                 + " mesos rn, not " + GameConstants.numberWithCommas(requestedMesos);
     }
+
+    // ─── Pot-share helpers ────────────────────────────────────────────────────
+
+    /**
+     * Recovery score used to sort pots "worst first" (ascending).
+     * Flat HP/MP values come first; hpRate/mpRate pots score 1 000 000+ so they're
+     * always considered better than any flat-value pot. Within each tier lower = worse.
+     */
+    private static int potRecoveryScore(int itemId, boolean forHp) {
+        StatEffect eff = itemEffect(itemId);
+        if (eff == null) return Integer.MAX_VALUE;
+        if (forHp) {
+            if (eff.getHpRate() > 0) return 1_000_000 + (int) (eff.getHpRate() * 1000);
+            return eff.getHp();
+        } else {
+            if (eff.getMpRate() > 0) return 1_000_000 + (int) (eff.getMpRate() * 1000);
+            return eff.getMp();
+        }
+    }
+
+    /**
+     * Collects the donor bot's worst recovery pots (sorted ascending by recovery score)
+     * up to {@code maxQty} total quantity or 9 item stacks, whichever limit is reached first.
+     * Only pure recovery pots are included (buff pots excluded via isRecoveryPotion).
+     */
+    static List<Item> collectPotShareItems(Character donorBot, boolean forHp, int maxQty) {
+        if (maxQty <= 0) return List.of();
+        List<Item> candidates = new ArrayList<>();
+        Inventory useInv = donorBot.getInventory(InventoryType.USE);
+        for (short slot = 1; slot <= useInv.getSlotLimit(); slot++) {
+            Item item = useInv.getItem(slot);
+            if (item == null || !isRecoveryPotion(item.getItemId())) continue;
+            StatEffect eff = itemEffect(item.getItemId());
+            if (eff == null) continue;
+            if (forHp  && eff.getHp() == 0 && eff.getHpRate() == 0) continue;
+            if (!forHp && eff.getMp() == 0 && eff.getMpRate() == 0) continue;
+            candidates.add(item);
+        }
+        candidates.sort((a, b) -> Integer.compare(
+                potRecoveryScore(a.getItemId(), forHp),
+                potRecoveryScore(b.getItemId(), forHp)));
+        List<Item> result = new ArrayList<>();
+        int totalQty = 0;
+        for (Item item : candidates) {
+            if (result.size() >= 9 || totalQty >= maxQty) break;
+            result.add(item);
+            totalQty += item.getQuantity();
+        }
+        return result;
+    }
+
+    /** Initiates a bot-to-bot pot-share trade (single batch; donor auto-confirms). */
+    static void startPotShareTransfer(List<Item> items, Character recipient, BotEntry entry, Character bot) {
+        if (items.isEmpty()) return;
+        if (bot.getTrade() != null || entry.pendingTradeCategory != null) return;
+        if (recipient.getTrade() != null) return;
+        startTradeSequence("pot_share", recipient, items, 0, true, entry, bot);
+    }
 }

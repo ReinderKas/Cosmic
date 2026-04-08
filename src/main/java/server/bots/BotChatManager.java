@@ -615,6 +615,7 @@ public class BotChatManager {
                 entry.moveTarget = null;
                 BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem);
                 BotManager.getInstance().botSay(entry.bot, BotManager.randomReply(FOLLOW_REPLIES));
+                BotManager.getInstance().checkPotShareOnModeStart(entry, entry.bot);
                 TimerManager.getInstance().schedule(() -> entry.following = true, 250 + ThreadLocalRandom.current().nextInt(0, 500));
             }, 1500 + ThreadLocalRandom.current().nextInt(0, 500));
         } else if (GRIND_PATTERN.matcher(message).find()) {
@@ -624,6 +625,7 @@ public class BotChatManager {
                 BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem);
                 BotManager.getInstance().setupAutopotForBot(entry.bot);
                 BotManager.getInstance().botSay(entry.bot, BotManager.getInstance().grindStartMessage(entry.bot));
+                BotManager.getInstance().checkPotShareOnModeStart(entry, entry.bot);
                 TimerManager.getInstance().schedule(() -> {
                     entry.grinding = true;
                     checkBotStatus(entry, entry.bot);

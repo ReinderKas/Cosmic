@@ -85,6 +85,8 @@ public class BotManager {
     private final Map<Integer, List<BotEntry>> bots = new ConcurrentHashMap<>();
     // ownerCharId → current formation (in-memory only, defaults to stagger)
     private final Map<Integer, FormationState> ownerFormations = new ConcurrentHashMap<>();
+    // ownerCharId → timestamp when the next pot-share request is allowed (covers HP and MP; 30 s cooldown)
+    private final Map<Integer, Long> potShareCooldownUntil = new ConcurrentHashMap<>();
 
     enum FormationType { STAGGER, RANDOM, STACK, SPREAD, LEFT, RIGHT }
 
@@ -1525,6 +1527,31 @@ public class BotManager {
             "lezgo", "gonna get some kills", "on it boss",
             "time to work", "lets do this");
 
+    private static final List<String> POT_REQUEST_HP_MSGS = List.of(
+            "anyone have HP pots? running low",
+            "low on HP pots, does anyone have some?",
+            "need HP pots!! anyone?",
+            "HP pots? who has some",
+            "anyone got HP pots to spare?");
+    private static final List<String> POT_REQUEST_MP_MSGS = List.of(
+            "anyone have MP pots? running low",
+            "low on MP pots, does anyone have some?",
+            "need MP pots!! anyone?",
+            "MP pots? who has some",
+            "anyone got MP pots to spare?");
+    private static final List<String> POT_OFFER_HP_MSGS = List.of(
+            "got some HP pots, inv u",
+            "yep i have HP pots, inv u",
+            "sure, got spare HP pots",
+            "coming, inv",
+            "got you");
+    private static final List<String> POT_OFFER_MP_MSGS = List.of(
+            "got some MP pots, inv u",
+            "yep i have MP pots, inv u",
+            "sure, got spare MP pots",
+            "coming, inv",
+            "got you");
+
     /** Builds grind-start reply with low-potion warning when below POT_LOW_WARN. */
     String grindStartMessage(Character bot) {
         int[] pots = countPotions(bot);
@@ -1662,14 +1689,114 @@ public class BotManager {
 
         setupAutopotForBot(bot);
 
-        if (!entry.grinding) return;
+        if (!entry.grinding && !entry.following) return;
+
         int[] pots = countPotions(bot);
+
+        // Edge-triggered pot-share requests: fire once when count crosses below POT_LOW_WARN,
+        // reset the flag when pots are replenished above the threshold.
+        // Flag is only set if the request was actually broadcast (not blocked by owner cooldown),
+        // so other bots whose requests were suppressed will retry once the cooldown clears.
+        if (pots[0] >= cfg.POT_LOW_WARN) {
+            entry.potShareRequestedHp = false;
+        } else if (!entry.potShareRequestedHp && requestPotShare(entry, bot, true)) {
+            entry.potShareRequestedHp = true;
+        }
+        if (pots[1] >= cfg.POT_LOW_WARN) {
+            entry.potShareRequestedMp = false;
+        } else if (!entry.potShareRequestedMp && requestPotShare(entry, bot, false)) {
+            entry.potShareRequestedMp = true;
+        }
+
+        if (!entry.grinding) return;
         if (pots[0] < cfg.POT_STOP && bot.getHp() < bot.getMaxHp() * 0.4f) {
             entry.grinding = false;
             entry.following = true;
             botSay(bot, "low on pots!! walking to you");
             bot.changeFaceExpression(Emote.GLARE.getValue());
         }
+    }
+
+    /**
+     * Resets pot-share request flags and immediately triggers a request for any category
+     * already below POT_LOW_WARN. Call this on grind/follow mode start.
+     */
+    void checkPotShareOnModeStart(BotEntry entry, Character bot) {
+        entry.potShareRequestedHp = false;
+        entry.potShareRequestedMp = false;
+        int[] pots = countPotions(bot);
+        if (pots[0] < cfg.POT_LOW_WARN && requestPotShare(entry, bot, true)) {
+            entry.potShareRequestedHp = true;
+        }
+        if (pots[1] < cfg.POT_LOW_WARN && requestPotShare(entry, bot, false)) {
+            entry.potShareRequestedMp = true;
+        }
+    }
+
+    /**
+     * Broadcasts a pot request from the needy bot, then schedules the best-qualified
+     * same-owner sibling bot to donate pots via the existing trade system.
+     * If no bot has enough to qualify, the highest-count sibling says so after a longer delay.
+     */
+    /**
+     * Broadcasts a pot request and schedules a donation, using a 30 s per-owner cooldown so
+     * only one request fires at a time. Returns true if the request was actually broadcast.
+     * Callers that receive false should NOT mark their flag — they will retry naturally when
+     * the cooldown expires and their tickPotionCheck fires again.
+     */
+    private boolean requestPotShare(BotEntry entry, Character bot, boolean forHp) {
+        Character owner = entry.owner;
+        if (owner == null || bot.getTrade() != null || entry.pendingTradeCategory != null) return false;
+
+        long now = System.currentTimeMillis();
+        if (now < potShareCooldownUntil.getOrDefault(owner.getId(), 0L)) return false;
+        potShareCooldownUntil.put(owner.getId(), now + 30_000L);
+
+        botSay(bot, randomReply(forHp ? POT_REQUEST_HP_MSGS : POT_REQUEST_MP_MSGS));
+
+        // Find the sibling bot with the highest pot count of this type on the same map
+        List<BotEntry> siblings = getBotEntries(owner.getId());
+        BotEntry bestEntry = null;
+        int bestCount = 0;
+        for (BotEntry sibling : siblings) {
+            if (sibling == entry || sibling.bot == null) continue;
+            if (sibling.bot.getMapId() != bot.getMapId()) continue;
+            int[] pots = countPotions(sibling.bot);
+            int count = forHp ? pots[0] : pots[1];
+            if (count > bestCount) {
+                bestCount = count;
+                bestEntry = sibling;
+            }
+        }
+
+        if (bestEntry == null) return true; // request broadcast, no donator available
+
+        final BotEntry donorEntry = bestEntry;
+        final Character donorBot  = donorEntry.bot;
+        final boolean qualifies   = bestCount > cfg.POT_LOW_WARN * 3;
+        final int maxQty          = bestCount / 3;
+        final Character needyBot  = bot;
+
+        if (qualifies) {
+            TimerManager.getInstance().schedule(() -> {
+                if (donorBot.getTrade() != null || donorEntry.pendingTradeCategory != null) return;
+                List<Item> items = BotDropManager.collectPotShareItems(donorBot, forHp, maxQty);
+                if (items.isEmpty()) return;
+                botSay(donorBot, randomReply(forHp ? POT_OFFER_HP_MSGS : POT_OFFER_MP_MSGS));
+                BotDropManager.startPotShareTransfer(items, needyBot, donorEntry, donorBot);
+            }, 2_000 + ThreadLocalRandom.current().nextInt(0, 1_000));
+        } else {
+            String ownerName = owner.getName();
+            List<String> noQualMsgs = List.of(
+                    "low too, maybe " + ownerName + " has some?",
+                    "wish i could help, try " + ownerName + "?",
+                    "i'm low too :/ check with " + ownerName,
+                    "barely have any myself, ask " + ownerName);
+            TimerManager.getInstance().schedule(() ->
+                    botSay(donorBot, randomReply(noQualMsgs)),
+                    4_000 + ThreadLocalRandom.current().nextInt(0, 2_000));
+        }
+        return true;
     }
 
     private void tickPassiveMpRecovery(BotEntry entry, Character bot) {
