@@ -26,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Manages automatic use of buff consumable items from the bot's USE inventory.
  *
- * Validity check: BotDropManager.isBuffConsumable (has statups) - same predicate used by
+ * Validity check: BotInventoryManager.isBuffConsumable (has statups) - same predicate used by
  * inv? and the trade/drop "buff" category, so all commands are consistent.
  *
  * Default: off. Configured via chat ("buff on/off", "buff cheap/max").
@@ -114,9 +114,9 @@ final class BotBuffManager {
             if (item == null || item.getQuantity() <= 0) continue;
 
             int itemId = item.getItemId();
-            if (!BotDropManager.isBuffConsumable(itemId)) continue;
+            if (!BotInventoryManager.isBuffConsumable(itemId)) continue;
 
-            StatEffect fx = fxCache.computeIfAbsent(itemId, BotDropManager::itemEffect);
+            StatEffect fx = fxCache.computeIfAbsent(itemId, BotInventoryManager::itemEffect);
             if (fx == null || fx.getStatups().isEmpty()) continue;
 
             List<BuffStat> statKey = buildStatKey(fx);
@@ -181,7 +181,7 @@ final class BotBuffManager {
             }
 
             int itemId = effect.getSourceId();
-            if (!BotDropManager.isBuffConsumable(itemId)) {
+            if (!BotInventoryManager.isBuffConsumable(itemId)) {
                 continue;
             }
 

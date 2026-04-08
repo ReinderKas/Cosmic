@@ -96,7 +96,7 @@ class BotManagerTest {
                 2000004, dualEffect,
                 2040002, nonPotionEffect);
 
-        int[] counts = BotManager.countPotions(
+        int[] counts = BotPotionManager.countPotions(
                 java.util.List.of(hpItem, mpItem, dualItem, nonPotion),
                 effects::get);
 
@@ -180,33 +180,33 @@ class BotManagerTest {
         @SuppressWarnings("unchecked")
         Map<Integer, List<BotEntry>> bots = (Map<Integer, List<BotEntry>>) field(BotManager.class, "bots").get(manager);
         @SuppressWarnings("unchecked")
-        Map<Integer, Long> sharedCooldown = (Map<Integer, Long>) field(BotManager.class, "potShareCooldownUntil").get(manager);
+        Map<Integer, Long> sharedCooldown = (Map<Integer, Long>) field(BotPotionManager.class, "potShareCooldownUntil").get(null);
         @SuppressWarnings("unchecked")
-        Map<Integer, Long> hpBackoff = (Map<Integer, Long>) field(BotManager.class, "potShareHpBackoffUntil").get(manager);
+        Map<Integer, Long> hpBackoff = (Map<Integer, Long>) field(BotPotionManager.class, "potShareHpBackoffUntil").get(null);
         @SuppressWarnings("unchecked")
-        Map<Integer, Long> mpBackoff = (Map<Integer, Long>) field(BotManager.class, "potShareMpBackoffUntil").get(manager);
+        Map<Integer, Long> mpBackoff = (Map<Integer, Long>) field(BotPotionManager.class, "potShareMpBackoffUntil").get(null);
 
         bots.put(owner.getId(), List.of(entry));
         sharedCooldown.remove(owner.getId());
         hpBackoff.remove(owner.getId());
         mpBackoff.remove(owner.getId());
 
-        Method requestPotShare = BotManager.class.getDeclaredMethod("requestPotShare", BotEntry.class, Character.class, boolean.class);
+        Method requestPotShare = BotPotionManager.class.getDeclaredMethod("requestPotShare", BotEntry.class, Character.class, boolean.class);
         requestPotShare.setAccessible(true);
         try {
-            assertTrue((Boolean) requestPotShare.invoke(manager, entry, bot, false),
+            assertTrue((Boolean) requestPotShare.invoke(null, entry, bot, false),
                     "first MP request should broadcast and install MP-only long backoff when no donor exists");
             assertTrue(mpBackoff.get(owner.getId()) > System.currentTimeMillis());
             assertFalse(hpBackoff.containsKey(owner.getId()));
 
             sharedCooldown.put(owner.getId(), 0L);
 
-            assertTrue((Boolean) requestPotShare.invoke(manager, entry, bot, true),
+            assertTrue((Boolean) requestPotShare.invoke(null, entry, bot, true),
                     "HP request should still be allowed after shared 30 s cooldown even if MP is under 10 min backoff");
             assertTrue(hpBackoff.get(owner.getId()) > System.currentTimeMillis());
 
             sharedCooldown.put(owner.getId(), 0L);
-            assertFalse((Boolean) requestPotShare.invoke(manager, entry, bot, false),
+            assertFalse((Boolean) requestPotShare.invoke(null, entry, bot, false),
                     "MP request should remain blocked by its own 10 min backoff");
         } finally {
             bots.remove(owner.getId());

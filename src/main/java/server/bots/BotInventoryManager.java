@@ -1,17 +1,23 @@
 package server.bots;
 
+import client.BotClient;
 import client.Character;
 import client.inventory.Inventory;
 import client.inventory.InventoryType;
 import client.inventory.Item;
 import client.inventory.manipulator.InventoryManipulator;
 import constants.game.GameConstants;
+import constants.id.ItemId;
 import constants.inventory.ItemConstants;
+import net.packet.Packet;
 import server.ItemInformationProvider;
 import server.StatEffect;
 import server.Trade;
+import server.bots.pq.BotPqHooks;
+import server.maps.MapItem;
 import tools.PacketCreator;
 
+import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -19,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Predicate;
 
-class BotDropManager {
+class BotInventoryManager {
     private static final Set<Integer> manualTradeGreetingSent = ConcurrentHashMap.newKeySet();
     private static final List<String> TRADE_INVITATION_MSGS = List.of(
             "k", "ok", "kk", "sure", "k, I inv", "k i inv",
@@ -48,6 +54,74 @@ class BotDropManager {
             "that's all!", "done adding stuff!", "all set!", "everything's in!",
             "that's everything!", "done!", "added it all", "check it out"
     );
+
+    static void tickPassiveLoot(BotEntry entry, Character bot) {
+        if (entry.lootInhibitMs > 0) {
+            entry.lootInhibitMs = BotMovementManager.tickDown(entry.lootInhibitMs);
+            return;
+        }
+        if (entry.pendingTradeCategory != null) {
+            return;
+        }
+
+        entry.invFullWarnCooldownMs = BotMovementManager.tickDown(entry.invFullWarnCooldownMs);
+        Point botPos = bot.getPosition();
+        for (MapItem drop : bot.getMap().getDroppedItems()) {
+            if (drop.isPickedUp() || bot.getMap().getMapObject(drop.getObjectId()) != drop) {
+                cleanupBotLootGhostDrop(bot, drop);
+                continue;
+            }
+            if (!drop.canBePickedBy(bot)) {
+                continue;
+            }
+            if (drop.getItemId() == 4001008) {
+                continue;
+            }
+            if (drop.getItemId() == 4001007 && (BotPqHooks.shouldSkipCouponLoot(entry)
+                    || (entry.kpq.couponTarget > 0 && bot.getItemQuantity(4001007, false) >= entry.kpq.couponTarget))) {
+                continue;
+            }
+            if (System.currentTimeMillis() - drop.getDropTime() < 3000) {
+                continue;
+            }
+
+            Point dropPos = drop.getPosition();
+            if (Math.abs(dropPos.x - botPos.x) > BotManager.cfg.LOOT_RADIUS
+                    || Math.abs(dropPos.y - botPos.y) > BotManager.cfg.LOOT_RADIUS) {
+                continue;
+            }
+
+            if (drop.getMeso() <= 0 && drop.getItemId() > 0) {
+                InventoryType type = ItemConstants.getInventoryType(drop.getItemId());
+                Inventory inventory = bot.getInventory(type);
+                if (inventory != null && inventory.isFull()) {
+                    if (entry.invFullWarnCooldownMs <= 0) {
+                        BotManager.getInstance().botSay(bot, type.name().toLowerCase() + " inventory is full!");
+                        entry.invFullWarnCooldownMs = BotMovementManager.delayAfterCurrentTick(BotManager.cfg.INV_FULL_WARN_CD_MS);
+                    }
+                    continue;
+                }
+            }
+
+            Item pickedItem = drop.getItem();
+            int pickedItemId = drop.getItemId();
+            if (ItemId.isNxCard(pickedItemId) && entry.owner != null && entry.owner.getMap() == bot.getMap()) {
+                entry.owner.pickupItem(drop);
+            } else {
+                bot.pickupItem(drop);
+            }
+            cleanupBotLootGhostDrop(bot, drop);
+            if (pickedItem != null
+                    && pickedItemId > 0
+                    && ItemConstants.getInventoryType(pickedItemId) == InventoryType.EQUIP
+                    && hasItem(bot, pickedItem)) {
+                BotEquipManager.autoEquip(bot, entry.owner, entry.pendingLootOfferItem);
+                if (hasItem(bot, pickedItem)) {
+                    BotChatManager.scheduleLootOfferPrompt(entry, bot, pickedItem, 5_000L);
+                }
+            }
+        }
+    }
 
     static void tickManualTrade(BotEntry entry, Character bot) {
         if (entry.pendingTradeCategory != null) return;
@@ -123,6 +197,27 @@ class BotDropManager {
     }
 
     // ─── Entry point from chat choice ─────────────────────────────────────────
+
+    private static void cleanupBotLootGhostDrop(Character bot, MapItem drop) {
+        if (drop == null) {
+            return;
+        }
+        if (!drop.isPickedUp() && bot.getMap().getMapObject(drop.getObjectId()) == drop) {
+            return;
+        }
+
+        Packet removePacket = PacketCreator.removeItemFromMap(drop.getObjectId(), 1, 0);
+        for (Character player : bot.getMap().getAllPlayers()) {
+            if (player.getClient() instanceof BotClient) {
+                continue;
+            }
+            if (!player.isMapObjectVisible(drop)) {
+                continue;
+            }
+            player.removeVisibleMapObject(drop);
+            player.sendPacket(removePacket);
+        }
+    }
 
     /**
      * Called after the owner chooses "drop" or "trade" in the item-choice prompt.

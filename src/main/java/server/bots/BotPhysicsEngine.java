@@ -681,25 +681,6 @@ final class BotPhysicsEngine {
                 stepX, velocityFromDeltaX(displaced.physX() - currentPos.x), false);
     }
 
-    static void abortGroundMotion(BotEntry entry, Character bot) {
-        Point position = bot.getPosition();
-        entry.inAir = false;
-        entry.climbing = false;
-        entry.climbRope = null;
-        entry.crouching = false;
-        entry.climbUpIntent = false;
-        entry.velY = 0f;
-        entry.airVelX = 0;
-        entry.airSteerVelX = 0.0;
-        entry.physX = position.x;
-        entry.physY = position.y;
-        entry.downJumpPending = false;
-        entry.blockedRopeGrab = null;
-        stopGroundMotion(entry);
-        setMovementVelocity(entry, 0, 0);
-        syncCharacterState(entry);
-    }
-
     private static Point roundedAirPosition(BotEntry entry) {
         return new Point((int) Math.round(entry.physX), (int) Math.round(entry.physY));
     }

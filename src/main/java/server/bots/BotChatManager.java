@@ -435,12 +435,12 @@ public class BotChatManager {
                     entry.pendingAction       = null;
                     entry.pendingDropCategory = null;
                     BotManager.after(BotManager.randMs(400, 600),
-                            () -> BotDropManager.executeChoice(category, true, entry, entry.bot));
+                            () -> BotInventoryManager.executeChoice(category, true, entry, entry.bot));
                 } else if (DROP_CHOICE_DROP_PATTERN.matcher(message).find()) {
                     entry.pendingAction       = null;
                     entry.pendingDropCategory = null;
                     BotManager.after(BotManager.randMs(400, 600),
-                            () -> BotDropManager.executeChoice(category, false, entry, entry.bot));
+                            () -> BotInventoryManager.executeChoice(category, false, entry, entry.bot));
                 } else {
                     // any other response = cancel
                     entry.pendingAction       = null;
@@ -614,7 +614,7 @@ public class BotChatManager {
                 entry.moveTarget = null;
                 BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem);
                 BotManager.getInstance().botSay(entry.bot, BotManager.randomReply(FOLLOW_REPLIES));
-                BotManager.getInstance().checkPotShareOnModeStart(entry, entry.bot);
+                BotPotionManager.checkPotShareOnModeStart(entry, entry.bot);
                 BotManager.after(BotManager.randMs(250, 750), () -> entry.following = true);
             });
         } else if (GRIND_PATTERN.matcher(message).find()) {
@@ -622,9 +622,9 @@ public class BotChatManager {
                 entry.following = false;
                 entry.moveTarget = null;
                 BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem);
-                BotManager.getInstance().setupAutopotForBot(entry.bot);
-                BotManager.getInstance().botSay(entry.bot, BotManager.getInstance().grindStartMessage(entry.bot));
-                BotManager.getInstance().checkPotShareOnModeStart(entry, entry.bot);
+                BotPotionManager.setupAutopotForBot(entry.bot);
+                BotManager.getInstance().botSay(entry.bot, BotPotionManager.grindStartMessage(entry.bot));
+                BotPotionManager.checkPotShareOnModeStart(entry, entry.bot);
                 BotManager.after(BotManager.randMs(250, 750), () -> {
                     entry.grinding = true;
                     checkBotStatus(entry, entry.bot);
@@ -890,7 +890,7 @@ public class BotChatManager {
     }
 
     private static void reportInventory(BotEntry entry, Character bot) {
-        queueBotSay(entry, BotDropManager.inventorySummary(bot));
+        queueBotSay(entry, BotInventoryManager.inventorySummary(bot));
     }
 
     private static void reportMesos(BotEntry entry, Character bot) {
@@ -898,7 +898,7 @@ public class BotChatManager {
     }
 
     private static void reportInventorySlots(BotEntry entry, Character bot) {
-        queueBotSay(entry, BotDropManager.slotsReport(bot));
+        queueBotSay(entry, BotInventoryManager.slotsReport(bot));
     }
 
     private static void reportScrolls(BotEntry entry, Character bot) {
@@ -913,7 +913,7 @@ public class BotChatManager {
     }
 
     private static void reportPotions(BotEntry entry, Character bot) {
-        int[] counts = BotManager.getInstance().countPotions(bot);
+        int[] counts = BotPotionManager.countPotions(bot);
         queueBotSay(entry, buildPotionReport(counts[0], counts[1]));
     }
 
@@ -1176,7 +1176,7 @@ public class BotChatManager {
 
     private static void offerGearItem(BotEntry entry, Character bot, Character owner, Item item) {
         if (entry.pendingAction != null || entry.pendingTradeCategory != null
-                || !BotDropManager.hasItem(bot, item)) {
+                || !BotInventoryManager.hasItem(bot, item)) {
             return;
         }
         entry.pendingAction = RECOMMENDED_TRADE_ACTION;
@@ -1223,7 +1223,7 @@ public class BotChatManager {
                 entry.pendingLootOfferRecipientId = 0;
                 BotManager.after(BotManager.randMs(900, 1100), () -> {
                     entry.pendingLootOfferItem = null;
-                    BotDropManager.startTradeTransfer(item, speaker, entry, entry.bot);
+                    BotInventoryManager.startTradeTransfer(item, speaker, entry, entry.bot);
                 });
             }
             return true;
@@ -1256,7 +1256,7 @@ public class BotChatManager {
         if (owner == null
                 || entry.pendingAction != null
                 || entry.pendingTradeCategory != null
-                || !BotDropManager.hasItem(bot, item)) {
+                || !BotInventoryManager.hasItem(bot, item)) {
             return;
         }
 
@@ -1571,21 +1571,21 @@ public class BotChatManager {
 
     private static void handleTransferCommand(BotEntry entry, TransferCommand transferCommand) {
         String category = transferCommand.category;
-        if (transferCommand.mode == TransferMode.TRADE && BotDropManager.isMesoCategory(category)) {
+        if (transferCommand.mode == TransferMode.TRADE && BotInventoryManager.isMesoCategory(category)) {
             BotManager.after(BotManager.randMs(500, 700), () ->
-                    BotDropManager.startTradeTransfer(category, entry, entry.bot));
+                    BotInventoryManager.startTradeTransfer(category, entry, entry.bot));
             return;
         }
 
-        if (!BotDropManager.hasTransferableItems(category, entry, entry.bot)) {
+        if (!BotInventoryManager.hasTransferableItems(category, entry, entry.bot)) {
             BotManager.after(BotManager.randMs(500, 700), () ->
-                    BotManager.getInstance().botSay(entry.bot, BotDropManager.noItemsReply(category)));
+                    BotManager.getInstance().botSay(entry.bot, BotInventoryManager.noItemsReply(category)));
             return;
         }
 
         switch (transferCommand.mode) {
             case TRADE -> BotManager.after(BotManager.randMs(500, 700), () ->
-                    BotDropManager.startTradeTransfer(category, entry, entry.bot));
+                    BotInventoryManager.startTradeTransfer(category, entry, entry.bot));
             case CHOICE -> {
                 entry.pendingAction = "item_choice";
                 entry.pendingDropCategory = category;

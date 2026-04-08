@@ -3,33 +3,19 @@ package server.bots;
 import client.BotClient;
 import client.Character;
 import client.QuestStatus;
-import client.Skill;
-import client.SkillFactory;
-import client.inventory.Inventory;
 import client.inventory.InventoryType;
 import client.inventory.Item;
-import client.keybind.KeyBinding;
-import constants.id.ItemId;
 import constants.inventory.ItemConstants;
-import constants.skills.Crusader;
-import constants.skills.DawnWarrior;
-import constants.skills.Magician;
-import constants.skills.Warrior;
-import constants.skills.WhiteKnight;
-import net.packet.Packet;
 import net.server.Server;
 import net.server.world.Party;
 import net.server.world.PartyCharacter;
 import net.server.world.PartyOperation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import server.ItemInformationProvider;
-import server.StatEffect;
 import server.TimerManager;
 import server.life.Monster;
 import server.bots.pq.BotPqHooks;
 import server.maps.Foothold;
-import server.maps.MapItem;
 import server.maps.MapleMap;
 import server.quest.Quest;
 import tools.PacketCreator;
@@ -85,13 +71,6 @@ public class BotManager {
     private final Map<Integer, List<BotEntry>> bots = new ConcurrentHashMap<>();
     // ownerCharId → current formation (in-memory only, defaults to stagger)
     private final Map<Integer, FormationState> ownerFormations = new ConcurrentHashMap<>();
-    // ownerCharId → timestamp when the next pot-share request is allowed (shared HP/MP 30 s cooldown)
-    private final Map<Integer, Long> potShareCooldownUntil = new ConcurrentHashMap<>();
-    // ownerCharId → timestamp when the next same-category pot-share request is allowed after a
-    // failed attempt (10 min backoff is category-specific so MP shortage does not suppress HP).
-    private final Map<Integer, Long> potShareHpBackoffUntil = new ConcurrentHashMap<>();
-    private final Map<Integer, Long> potShareMpBackoffUntil = new ConcurrentHashMap<>();
-
     enum FormationType { STAGGER, RANDOM, STACK, SPREAD, LEFT, RIGHT }
 
     record FormationState(FormationType type, int px, int snapRange) {
@@ -1214,13 +1193,13 @@ public class BotManager {
             return true;
         }
         tickReleaseMonsterControl(bot);
-        tickPassiveLoot(entry, bot);
-        tickPotionCheck(entry, bot);
-        tickPassiveMpRecovery(entry, bot);
+        BotInventoryManager.tickPassiveLoot(entry, bot);
+        BotPotionManager.tickPotionCheck(entry, bot);
+        BotPotionManager.tickPassiveRecovery(entry, bot);
         BotBuildManager.checkLevelUp(entry, bot);
         BotChatManager.tickAfkCheck(entry, owner);
-        BotDropManager.tickTrade(entry, bot);
-        BotDropManager.tickManualTrade(entry, bot);
+        BotInventoryManager.tickTrade(entry, bot);
+        BotInventoryManager.tickManualTrade(entry, bot);
         BotPqHooks.tick(entry, bot, owner);
         if (BotPqHooks.isNpcLocked(entry)) {
             return true;
@@ -1464,122 +1443,6 @@ public class BotManager {
     }
 
     // -------------------------------------------------------------------------
-    // Potion management
-    // -------------------------------------------------------------------------
-
-    /**
-     * Counts HP and MP potions in the bot's USE inventory.
-     * Uses isRecoveryPotion (heals only, no statups) so combo pots don't inflate the count.
-     * Items restoring both HP and MP (elixirs) count toward both totals.
-     * @return int[2]: [hpCount, mpCount]
-     */
-    int[] countPotions(Character bot) {
-        List<Item> items = bot.getInventory(InventoryType.USE).list().stream()
-                .filter(item -> BotDropManager.isRecoveryPotion(item.getItemId()))
-                .toList();
-        return countPotions(items, BotDropManager::itemEffect);
-    }
-
-    static int[] countPotions(List<Item> items, Function<Integer, StatEffect> effectLookup) {
-        int hp = 0, mp = 0;
-        for (Item item : items) {
-            StatEffect eff = effectLookup.apply(item.getItemId());
-            if (eff == null) continue;
-            int qty = item.getQuantity();
-            if (eff.getHp() > 0 || eff.getHpRate() > 0) hp += qty;
-            if (eff.getMp() > 0 || eff.getMpRate() > 0) mp += qty;
-        }
-        return new int[]{hp, mp};
-    }
-
-    /**
-     * Binds the best HP/MP potions from inventory to autopot keymap slots 91/92.
-     * Called on grind start and every POT_CHECK_INTERVAL_MS to handle type depletion.
-     */
-    void setupAutopotForBot(Character bot) {
-        ItemInformationProvider ii = ItemInformationProvider.getInstance();
-        int hpItemId = -1, mpItemId = -1;
-        int bestHp = 0, bestMp = 0;
-        for (Item item : bot.getInventory(InventoryType.USE).list()) {
-            if (item.getQuantity() <= 0) continue;
-            StatEffect eff;
-            try { eff = ii.getItemEffect(item.getItemId()); } catch (Exception e) { continue; }
-            if (eff == null) continue;
-
-            int hpGain = resolveEffectiveRecoveryAmount(bot, eff, true);
-            if (hpGain > bestHp) {
-                bestHp = hpGain;
-                hpItemId = item.getItemId();
-            }
-
-            int mpGain = resolveEffectiveRecoveryAmount(bot, eff, false);
-            if (mpGain > bestMp) {
-                bestMp = mpGain;
-                mpItemId = item.getItemId();
-            }
-        }
-        if (hpItemId > 0) {
-            bot.changeKeybinding(91, new KeyBinding(2, hpItemId));
-            bot.setAutopotHpAlert(cfg.AUTOPOT_HP_THRESH);
-        } else {
-            bot.getKeymap().remove(91);
-            bot.setAutopotHpAlert(0f);
-        }
-        if (mpItemId > 0) {
-            bot.changeKeybinding(92, new KeyBinding(2, mpItemId));
-            bot.setAutopotMpAlert(cfg.AUTOPOT_MP_THRESH);
-        } else {
-            bot.getKeymap().remove(92);
-            bot.setAutopotMpAlert(0f);
-        }
-    }
-
-    private static final List<String> GRIND_REPLIES = List.of(
-            "ok", "on it", "lets get it", "farming time", "got it",
-            "sure", "ok boss", "time to grind",
-            "lets farm", "hunting time", "aye, killing stuff",
-            "lezgo", "gonna get some kills", "on it boss",
-            "time to work", "lets do this");
-
-    private static final List<String> POT_REQUEST_HP_MSGS = List.of(
-            "anyone have HP pots? running low",
-            "low on HP pots, does anyone have some?",
-            "need HP pots!! anyone?",
-            "HP pots? who has some",
-            "anyone got HP pots to spare?");
-    private static final List<String> POT_REQUEST_MP_MSGS = List.of(
-            "anyone have MP pots? running low",
-            "low on MP pots, does anyone have some?",
-            "need MP pots!! anyone?",
-            "MP pots? who has some",
-            "anyone got MP pots to spare?");
-    private static final List<String> POT_OFFER_HP_MSGS = List.of(
-            "got some HP pots, inv u",
-            "yep i have HP pots, inv u",
-            "sure, got spare HP pots",
-            "coming, inv",
-            "got you");
-    private static final List<String> POT_OFFER_MP_MSGS = List.of(
-            "got some MP pots, inv u",
-            "yep i have MP pots, inv u",
-            "sure, got spare MP pots",
-            "coming, inv",
-            "got you");
-
-    /** Builds grind-start reply with low-potion warning when below POT_LOW_WARN. */
-    String grindStartMessage(Character bot) {
-        int[] pots = countPotions(bot);
-        int hp = pots[0], mp = pots[1];
-        String base = randomReply(GRIND_REPLIES);
-        if (hp >= cfg.POT_LOW_WARN && mp >= cfg.POT_LOW_WARN) return base;
-        StringBuilder msg = new StringBuilder(base).append(", but");
-        if (hp < cfg.POT_LOW_WARN) msg.append(" only ").append(hp).append(" HP pots");
-        if (hp < cfg.POT_LOW_WARN && mp < cfg.POT_LOW_WARN) msg.append(" and");
-        if (mp < cfg.POT_LOW_WARN) msg.append(" only ").append(mp).append(" MP pots");
-        return msg.append(" left").toString();
-    }
-
-    // -------------------------------------------------------------------------
     // Monster control hand-off
     // -------------------------------------------------------------------------
 
@@ -1607,334 +1470,6 @@ public class BotManager {
                 monster.aggroRemoveController();
             }
         }
-    }
-
-    // Passive loot
-    // -------------------------------------------------------------------------
-
-    /** Picks up lootable drops within LOOT_RADIUS — runs every tick in all modes. */
-    private void tickPassiveLoot(BotEntry entry, Character bot) {
-        if (entry.lootInhibitMs > 0) {
-            entry.lootInhibitMs = BotMovementManager.tickDown(entry.lootInhibitMs);
-            return;
-        }
-        if (entry.pendingTradeCategory != null) return; // don't loot while trading — keeps inventory state consistent
-        entry.invFullWarnCooldownMs = BotMovementManager.tickDown(entry.invFullWarnCooldownMs);
-        Point botPos = bot.getPosition();
-        for (MapItem drop : bot.getMap().getDroppedItems()) {
-            if (drop.isPickedUp() || bot.getMap().getMapObject(drop.getObjectId()) != drop) {
-                cleanupBotLootGhostDrop(bot, drop);
-                continue;
-            }
-            if (!drop.canBePickedBy(bot)) continue;
-            if (drop.getItemId() == 4001008) continue; // KPQ pass — only the party leader should pick this up
-            if (drop.getItemId() == 4001007 && (BotPqHooks.shouldSkipCouponLoot(entry)
-                    || (entry.kpq.couponTarget > 0 && bot.getItemQuantity(4001007, false) >= entry.kpq.couponTarget))) continue;
-            if (System.currentTimeMillis() - drop.getDropTime() < 3000) continue; // wait 3s after spawn
-            Point dp = drop.getPosition();
-            if (Math.abs(dp.x - botPos.x) > cfg.LOOT_RADIUS
-                    || Math.abs(dp.y - botPos.y) > cfg.LOOT_RADIUS) continue;
-            if (drop.getMeso() <= 0 && drop.getItemId() > 0) {
-                InventoryType type = ItemConstants.getInventoryType(drop.getItemId());
-                Inventory inv = bot.getInventory(type);
-                if (inv != null && inv.isFull()) {
-                    if (entry.invFullWarnCooldownMs <= 0) {
-                        botSay(bot, type.name().toLowerCase() + " inventory is full!");
-                        entry.invFullWarnCooldownMs = BotMovementManager.delayAfterCurrentTick(cfg.INV_FULL_WARN_CD_MS);
-                    }
-                    continue;
-                }
-            }
-            Item pickedItem = drop.getItem();
-            int pickedItemId = drop.getItemId();
-            if (ItemId.isNxCard(pickedItemId) && entry.owner != null && entry.owner.getMap() == bot.getMap()) {
-                entry.owner.pickupItem(drop);
-            } else {
-                bot.pickupItem(drop);
-            }
-            cleanupBotLootGhostDrop(bot, drop);
-            if (pickedItem != null
-                    && pickedItemId > 0
-                    && ItemConstants.getInventoryType(pickedItemId) == InventoryType.EQUIP
-                    && BotDropManager.hasItem(bot, pickedItem)) {
-                BotEquipManager.autoEquip(bot, entry.owner, entry.pendingLootOfferItem);
-                if (BotDropManager.hasItem(bot, pickedItem)) {
-                    BotChatManager.scheduleLootOfferPrompt(entry, bot, pickedItem, 5_000L);
-                }
-                // else: item was an upgrade — bot self-equipped it, no offer needed
-            }
-        }
-    }
-
-    private void cleanupBotLootGhostDrop(Character bot, MapItem drop) {
-        if (drop == null) {
-            return;
-        }
-        if (!drop.isPickedUp() && bot.getMap().getMapObject(drop.getObjectId()) == drop) {
-            return;
-        }
-
-        var map = bot.getMap();
-        Packet removePacket = PacketCreator.removeItemFromMap(drop.getObjectId(), 1, 0);
-        for (Character player : map.getAllPlayers()) {
-            if (player.getClient() instanceof BotClient) {
-                continue;
-            }
-            if (!player.isMapObjectVisible(drop)) {
-                continue;
-            }
-
-            player.removeVisibleMapObject(drop);
-            player.sendPacket(removePacket);
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Potion check tick
-    // -------------------------------------------------------------------------
-
-    /** Periodically rebinds autopot and stops grinding when HP pots are critically low. */
-    private void tickPotionCheck(BotEntry entry, Character bot) {
-        if (entry.potCheckTimerMs > 0) {
-            entry.potCheckTimerMs = BotMovementManager.tickDown(entry.potCheckTimerMs);
-            return;
-        }
-        entry.potCheckTimerMs = BotMovementManager.delayAfterCurrentTick(cfg.POT_CHECK_INTERVAL_MS);
-
-        setupAutopotForBot(bot);
-
-        if (!entry.grinding && !entry.following) return;
-
-        int[] pots = countPotions(bot);
-
-        // Edge-triggered pot-share requests: fire once when count crosses below POT_LOW_WARN,
-        // reset the flag when pots are replenished above the threshold.
-        // Flag is only set if the request was actually broadcast (not blocked by owner cooldown),
-        // so other bots whose requests were suppressed will retry once the cooldown clears.
-        if (pots[0] >= cfg.POT_LOW_WARN) {
-            entry.potShareRequestedHp = false;
-        } else if (!entry.potShareRequestedHp && requestPotShare(entry, bot, true)) {
-            entry.potShareRequestedHp = true;
-        }
-        if (pots[1] >= cfg.POT_LOW_WARN) {
-            entry.potShareRequestedMp = false;
-        } else if (!entry.potShareRequestedMp && requestPotShare(entry, bot, false)) {
-            entry.potShareRequestedMp = true;
-        }
-
-        if (!entry.grinding) return;
-        if (pots[0] < cfg.POT_STOP && bot.getHp() < bot.getMaxHp() * 0.4f) {
-            entry.grinding = false;
-            entry.following = true;
-            botSay(bot, "low on pots!! walking to you");
-            bot.changeFaceExpression(Emote.GLARE.getValue());
-        }
-    }
-
-    /**
-     * Resets pot-share request flags and immediately triggers a request for any category
-     * already below POT_LOW_WARN. Call this on grind/follow mode start.
-     */
-    void checkPotShareOnModeStart(BotEntry entry, Character bot) {
-        entry.potShareRequestedHp = false;
-        entry.potShareRequestedMp = false;
-        int[] pots = countPotions(bot);
-        if (pots[0] < cfg.POT_LOW_WARN && requestPotShare(entry, bot, true)) {
-            entry.potShareRequestedHp = true;
-        }
-        if (pots[1] < cfg.POT_LOW_WARN && requestPotShare(entry, bot, false)) {
-            entry.potShareRequestedMp = true;
-        }
-    }
-
-    /**
-     * Broadcasts a pot request from the needy bot, then schedules the best-qualified
-     * same-owner sibling bot to donate pots via the existing trade system.
-     * If no bot has enough to qualify, the highest-count sibling says so after a longer delay.
-     */
-    /**
-     * Broadcasts a pot request and schedules a donation, using a 30 s per-owner cooldown so
-     * only one request fires at a time. Returns true if the request was actually broadcast.
-     * Callers that receive false should NOT mark their flag — they will retry naturally when
-     * the cooldown expires and their tickPotionCheck fires again.
-     */
-    private boolean requestPotShare(BotEntry entry, Character bot, boolean forHp) {
-        Character owner = entry.owner;
-        if (owner == null || bot.getTrade() != null || entry.pendingTradeCategory != null) return false;
-
-        long now = System.currentTimeMillis();
-        Map<Integer, Long> categoryBackoff = forHp ? potShareHpBackoffUntil : potShareMpBackoffUntil;
-        if (now < categoryBackoff.getOrDefault(owner.getId(), 0L)) return false;
-        if (now < potShareCooldownUntil.getOrDefault(owner.getId(), 0L)) return false;
-        potShareCooldownUntil.put(owner.getId(), now + 30_000L);
-
-        botSay(bot, randomReply(forHp ? POT_REQUEST_HP_MSGS : POT_REQUEST_MP_MSGS));
-
-        // Find the sibling bot with the highest pot count of this type on the same map
-        List<BotEntry> siblings = getBotEntries(owner.getId());
-        BotEntry bestEntry = null;
-        int bestCount = 0;
-        for (BotEntry sibling : siblings) {
-            if (sibling == entry || sibling.bot == null) continue;
-            if (sibling.bot.getMapId() != bot.getMapId()) continue;
-            int[] pots = countPotions(sibling.bot);
-            int count = forHp ? pots[0] : pots[1];
-            if (count > bestCount) {
-                bestCount = count;
-                bestEntry = sibling;
-            }
-        }
-
-        if (bestEntry == null) {
-            // No sibling bots on the same map — nobody to ask; back off for 10 min
-            categoryBackoff.put(owner.getId(), now + 10 * 60_000L);
-            return true;
-        }
-
-        final BotEntry donorEntry = bestEntry;
-        final Character donorBot  = donorEntry.bot;
-        final boolean qualifies   = bestCount > cfg.POT_LOW_WARN * 3;
-        final int maxQty          = bestCount / 3;
-        final Character needyBot  = bot;
-
-        if (qualifies) {
-            after(randMs(2000, 3000), () -> {
-                if (donorBot.getTrade() != null || donorEntry.pendingTradeCategory != null) return;
-                List<Item> items = BotDropManager.collectPotShareItems(donorBot, forHp, maxQty);
-                if (items.isEmpty()) return;
-                botSay(donorBot, randomReply(forHp ? POT_OFFER_HP_MSGS : POT_OFFER_MP_MSGS));
-                after(randMs(900, 1100), () ->
-                        BotDropManager.startPotShareTransfer(items, needyBot, donorEntry, donorBot, maxQty));
-            });
-        } else {
-            // Best donor is also low — nobody can help; back off for 10 min
-            categoryBackoff.put(owner.getId(), now + 10 * 60_000L);
-            String ownerName = owner.getName();
-            List<String> noQualMsgs = List.of(
-                    "low too, maybe " + ownerName + " has some?",
-                    "wish i could help, try " + ownerName + "?",
-                    "i'm low too :/ check with " + ownerName,
-                    "barely have any myself, ask " + ownerName);
-            after(randMs(4000, 6000), () ->
-                    botSay(donorBot, randomReply(noQualMsgs)));
-        }
-        return true;
-    }
-
-    private void tickPassiveMpRecovery(BotEntry entry, Character bot) {
-        boolean hpFull = bot.getHp() >= bot.getCurrentMaxHp();
-        boolean mpFull = bot.getMp() >= bot.getCurrentMaxMp();
-        if (hpFull && mpFull) {
-            entry.mpRecoveryTimerMs = 0;
-            return;
-        }
-        if (entry.mpRecoveryTimerMs > 0) {
-            entry.mpRecoveryTimerMs = BotMovementManager.tickDown(entry.mpRecoveryTimerMs);
-            return;
-        }
-
-        entry.mpRecoveryTimerMs = BotMovementManager.delayAfterCurrentTick(cfg.MP_RECOVERY_INTERVAL_MS);
-
-        int hpRecovery = hpFull ? 0 : calculatePassiveHpRecovery(entry, bot);
-        int mpRecovery = mpFull ? 0 : calculatePassiveMpRecovery(entry, bot);
-        if (hpRecovery <= 0 && mpRecovery <= 0) {
-            return;
-        }
-
-        bot.addMPHP(hpRecovery, mpRecovery);
-    }
-
-    private int calculatePassiveHpRecovery(BotEntry entry, Character bot) {
-        int recovery = cfg.BASE_HP_RECOVERY;
-        if (!isStandingStillForRecovery(entry, bot)) {
-            return recovery;
-        }
-
-        recovery += getFlatHpRecoveryBonus(bot, Warrior.IMPROVED_HPREC);
-        return recovery;
-    }
-
-    private int calculatePassiveMpRecovery(BotEntry entry, Character bot) {
-        int recovery = cfg.BASE_MP_RECOVERY;
-        if (!isStandingStillForRecovery(entry, bot)) {
-            return recovery;
-        }
-
-        recovery += getFlatMpRecoveryBonus(bot, Crusader.IMPROVING_MPREC);
-        recovery += getFlatMpRecoveryBonus(bot, WhiteKnight.IMPROVING_MP_RECOVERY);
-        recovery += getFlatMpRecoveryBonus(bot, DawnWarrior.INCREASED_MP_RECOVERY);
-        recovery += getMagicianMpRecoveryBonus(bot);
-        return recovery;
-    }
-
-    private boolean isStandingStillForRecovery(BotEntry entry, Character bot) {
-        if (entry.inAir || entry.climbing) {
-            return false;
-        }
-
-        return entry.lastDesiredDirection == 0
-                && BotPhysicsEngine.isStandingStance(BotPhysicsEngine.resolveStance(entry));
-    }
-
-    private int getFlatHpRecoveryBonus(Character bot, int skillId) {
-        Skill skill = SkillFactory.getSkill(skillId);
-        if (skill == null) {
-            return 0;
-        }
-
-        int level = bot.getSkillLevel(skill);
-        if (level <= 0) {
-            return 0;
-        }
-
-        return skill.getEffect(level).getHp();
-    }
-
-    private int getFlatMpRecoveryBonus(Character bot, int skillId) {
-        Skill skill = SkillFactory.getSkill(skillId);
-        if (skill == null) {
-            return 0;
-        }
-
-        int level = bot.getSkillLevel(skill);
-        if (level <= 0) {
-            return 0;
-        }
-
-        return skill.getEffect(level).getMp();
-    }
-
-    private int getMagicianMpRecoveryBonus(Character bot) {
-        Skill skill = SkillFactory.getSkill(Magician.IMPROVED_MP_RECOVERY);
-        if (skill == null) {
-            return 0;
-        }
-
-        int level = bot.getSkillLevel(skill);
-        if (level <= 0) {
-            return 0;
-        }
-
-        return Math.max(0, (bot.getInt() / 10) * level);
-    }
-
-    private int resolveEffectiveRecoveryAmount(Character bot, StatEffect effect, boolean hp) {
-        if (effect == null) {
-            return 0;
-        }
-
-        int flat = hp ? effect.getHp() : effect.getMp();
-        if (flat > 0) {
-            return flat;
-        }
-
-        double rate = hp ? effect.getHpRate() : effect.getMpRate();
-        if (rate <= 0) {
-            return 0;
-        }
-
-        int max = hp ? bot.getCurrentMaxHp() : bot.getCurrentMaxMp();
-        return (int) Math.ceil(max * rate);
     }
 
     // -------------------------------------------------------------------------
