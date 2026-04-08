@@ -1271,6 +1271,23 @@ public class BotChatManager {
         entry.pendingLootOfferRecipientId = recipient.getId();
         entry.pendingLootOfferExpiresAt = System.currentTimeMillis() + 30_000L;
         queueBotSay(entry, buildLootOfferPrompt(recipient, owner, item));
+
+        // If recipient is a same-owner bot, auto-accept after 2 s on their behalf
+        if (recipient.getClient() instanceof BotClient) {
+            TimerManager.getInstance().schedule(() -> autoAcceptLootOffer(entry, recipient), 2_000L);
+        }
+    }
+
+    private static final List<String> BOT_ACCEPT_MSGS = List.of(
+            "sure!", "ok!", "ty!", "yes pls", "thx!", "ooh nice, ty", "yes!");
+
+    private static void autoAcceptLootOffer(BotEntry entry, Character recipientBot) {
+        if (!RECOMMENDED_TRADE_ACTION.equals(entry.pendingAction)
+                || entry.pendingLootOfferRecipientId != recipientBot.getId()) {
+            return; // offer expired or was cancelled
+        }
+        BotManager.getInstance().botSay(recipientBot, BotManager.randomReply(BOT_ACCEPT_MSGS));
+        handlePendingLootOfferResponse(entry, recipientBot, "yes");
     }
 
     static String buildLootOfferPrompt(String recipientName, String itemName, boolean targetIsOwner) {
@@ -1302,22 +1319,24 @@ public class BotChatManager {
         if (owner == null) {
             return null;
         }
+        // Priority 1: owner
         if (BotEquipManager.findRecommendationForItem(owner, bot, item) != null) {
             return owner;
         }
-
+        // Priority 2: other bots owned by the same owner in the party on the same map
+        BotOwnershipService ownership = BotOwnershipService.getInstance();
         for (Character member : owner.getPartyMembersOnSameMap()) {
             if (member == null
                     || member.getId() == owner.getId()
                     || member.getId() == bot.getId()
-                    || member.getClient() instanceof BotClient) {
+                    || !(member.getClient() instanceof BotClient)
+                    || !ownership.isAuthorizedOwner(member.getId(), owner.getId())) {
                 continue;
             }
             if (BotEquipManager.findRecommendationForItem(member, bot, item) != null) {
                 return member;
             }
         }
-
         return null;
     }
 

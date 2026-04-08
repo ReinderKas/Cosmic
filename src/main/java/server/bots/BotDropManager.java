@@ -66,7 +66,28 @@ class BotDropManager {
                 && ownerTrade.getPartner() == trade
                 && owner.getId() == ownerTrade.getChr().getId();
         if (!isOwnerTrade) {
-            manualTradeGreetingSent.remove(bot.getId());
+            // Handle peer-bot trade: same-owner bot offering an item to this bot
+            boolean isPeerBotTrade = partner != null
+                    && partner.getChr().getClient() instanceof client.BotClient
+                    && owner != null
+                    && BotOwnershipService.getInstance().isAuthorizedOwner(partner.getChr().getId(), owner.getId());
+            if (!isPeerBotTrade) {
+                manualTradeGreetingSent.remove(bot.getId());
+                return;
+            }
+            // Accept invite if not yet joined
+            if (!trade.isFullTrade()) {
+                if (trade.getNumber() != 1) return;
+                Trade.visitTrade(bot, partner.getChr());
+                trade = bot.getTrade();
+                if (trade == null || !trade.isFullTrade()) return;
+            }
+            // Confirm once the offering bot has confirmed its side
+            if (trade.isPartnerConfirmed()) {
+                completeTradeAndThank(entry, bot, trade);
+                BotEquipManager.autoEquip(bot, owner, null);
+                entry.ownerGivenItems.removeIf(item -> !hasItem(bot, item));
+            }
             return;
         }
 
@@ -367,7 +388,9 @@ class BotDropManager {
         // ── WAITING FOR OWNER TO CLICK OK ─────────────────────────────────
         if (!entry.pendingTradeBotDone) {
             entry.pendingTradeTimerMs += BotMovementManager.cfg.TICK_MS;
-            if (trade.isPartnerConfirmed()) {
+            Character recipient = resolveTradeRecipient(entry, bot);
+            boolean recipientIsBot = recipient != null && recipient.getClient() instanceof client.BotClient;
+            if (recipientIsBot || trade.isPartnerConfirmed()) {
                 completeTradeAndThank(entry, bot, trade);
                 entry.pendingTradeBotDone = true;
                 entry.pendingTradeTimerMs = 0;
