@@ -10,6 +10,10 @@ import server.maps.MapleMap;
 import server.maps.Rope;
 
 import java.awt.*;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -159,9 +163,68 @@ class BotManagerTest {
                 new Point(60, 100)));
     }
 
+    @Test
+    void shouldKeepTenMinutePotShareBackoffSeparateForHpAndMp() throws Exception {
+        BotManager manager = BotManager.getInstance();
+        MapleMap map = mock(MapleMap.class);
+        Character owner = mock(Character.class);
+        Character bot = mock(Character.class);
+        BotEntry entry = new BotEntry(bot, owner, null);
+
+        when(owner.getId()).thenReturn(77);
+        when(owner.getName()).thenReturn("Owner");
+        when(bot.getId()).thenReturn(88);
+        when(bot.getTrade()).thenReturn(null);
+        when(bot.getMap()).thenReturn(map);
+
+        @SuppressWarnings("unchecked")
+        Map<Integer, List<BotEntry>> bots = (Map<Integer, List<BotEntry>>) field(BotManager.class, "bots").get(manager);
+        @SuppressWarnings("unchecked")
+        Map<Integer, Long> sharedCooldown = (Map<Integer, Long>) field(BotManager.class, "potShareCooldownUntil").get(manager);
+        @SuppressWarnings("unchecked")
+        Map<Integer, Long> hpBackoff = (Map<Integer, Long>) field(BotManager.class, "potShareHpBackoffUntil").get(manager);
+        @SuppressWarnings("unchecked")
+        Map<Integer, Long> mpBackoff = (Map<Integer, Long>) field(BotManager.class, "potShareMpBackoffUntil").get(manager);
+
+        bots.put(owner.getId(), List.of(entry));
+        sharedCooldown.remove(owner.getId());
+        hpBackoff.remove(owner.getId());
+        mpBackoff.remove(owner.getId());
+
+        Method requestPotShare = BotManager.class.getDeclaredMethod("requestPotShare", BotEntry.class, Character.class, boolean.class);
+        requestPotShare.setAccessible(true);
+        try {
+            assertTrue((Boolean) requestPotShare.invoke(manager, entry, bot, false),
+                    "first MP request should broadcast and install MP-only long backoff when no donor exists");
+            assertTrue(mpBackoff.get(owner.getId()) > System.currentTimeMillis());
+            assertFalse(hpBackoff.containsKey(owner.getId()));
+
+            sharedCooldown.put(owner.getId(), 0L);
+
+            assertTrue((Boolean) requestPotShare.invoke(manager, entry, bot, true),
+                    "HP request should still be allowed after shared 30 s cooldown even if MP is under 10 min backoff");
+            assertTrue(hpBackoff.get(owner.getId()) > System.currentTimeMillis());
+
+            sharedCooldown.put(owner.getId(), 0L);
+            assertFalse((Boolean) requestPotShare.invoke(manager, entry, bot, false),
+                    "MP request should remain blocked by its own 10 min backoff");
+        } finally {
+            bots.remove(owner.getId());
+            sharedCooldown.remove(owner.getId());
+            hpBackoff.remove(owner.getId());
+            mpBackoff.remove(owner.getId());
+        }
+    }
+
     private static MapleMap createEmptyTestMap(int mapId) {
         MapleMap map = new MapleMap(mapId, 0, 0, mapId, 1.0f);
         map.setFootholds(new FootholdTree(new Point(-2000, -2000), new Point(2000, 2000)));
         return map;
+    }
+
+    private static Field field(Class<?> type, String name) throws Exception {
+        Field field = type.getDeclaredField(name);
+        field.setAccessible(true);
+        return field;
     }
 }

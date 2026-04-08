@@ -85,8 +85,12 @@ public class BotManager {
     private final Map<Integer, List<BotEntry>> bots = new ConcurrentHashMap<>();
     // ownerCharId → current formation (in-memory only, defaults to stagger)
     private final Map<Integer, FormationState> ownerFormations = new ConcurrentHashMap<>();
-    // ownerCharId → timestamp when the next pot-share request is allowed (covers HP and MP; 30 s cooldown)
+    // ownerCharId → timestamp when the next pot-share request is allowed (shared HP/MP 30 s cooldown)
     private final Map<Integer, Long> potShareCooldownUntil = new ConcurrentHashMap<>();
+    // ownerCharId → timestamp when the next same-category pot-share request is allowed after a
+    // failed attempt (10 min backoff is category-specific so MP shortage does not suppress HP).
+    private final Map<Integer, Long> potShareHpBackoffUntil = new ConcurrentHashMap<>();
+    private final Map<Integer, Long> potShareMpBackoffUntil = new ConcurrentHashMap<>();
 
     enum FormationType { STAGGER, RANDOM, STACK, SPREAD, LEFT, RIGHT }
 
@@ -1759,6 +1763,8 @@ public class BotManager {
         if (owner == null || bot.getTrade() != null || entry.pendingTradeCategory != null) return false;
 
         long now = System.currentTimeMillis();
+        Map<Integer, Long> categoryBackoff = forHp ? potShareHpBackoffUntil : potShareMpBackoffUntil;
+        if (now < categoryBackoff.getOrDefault(owner.getId(), 0L)) return false;
         if (now < potShareCooldownUntil.getOrDefault(owner.getId(), 0L)) return false;
         potShareCooldownUntil.put(owner.getId(), now + 30_000L);
 
@@ -1781,7 +1787,7 @@ public class BotManager {
 
         if (bestEntry == null) {
             // No sibling bots on the same map — nobody to ask; back off for 10 min
-            potShareCooldownUntil.put(owner.getId(), now + 10 * 60_000L);
+            categoryBackoff.put(owner.getId(), now + 10 * 60_000L);
             return true;
         }
 
@@ -1802,7 +1808,7 @@ public class BotManager {
             });
         } else {
             // Best donor is also low — nobody can help; back off for 10 min
-            potShareCooldownUntil.put(owner.getId(), now + 10 * 60_000L);
+            categoryBackoff.put(owner.getId(), now + 10 * 60_000L);
             String ownerName = owner.getName();
             List<String> noQualMsgs = List.of(
                     "low too, maybe " + ownerName + " has some?",
