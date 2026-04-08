@@ -627,8 +627,8 @@ final class BotPhysicsEngine {
         // platform happens to be within MAX_SLOPE_UP above. That is not an uphill slope of the
         // current foothold - the bot should fall, not jump up to the unconnected platform.
         if (step.lostGround()) {
-            abortGroundMotion(entry, bot);
-            return new GroundMotion(0, true);
+            beginFall(entry, bot, step.stepX());
+            return new GroundMotion(step.stepX(), true);
         }
 
         Point position = step.point();
@@ -673,9 +673,8 @@ final class BotPhysicsEngine {
         }
 
         if (preview.lostGround()) {
-            return new GroundStepResult(currentPos, foothold,
-                    new GroundTravelState(currentPos.x, 0.0, 0.0),
-                    0, 0, true);
+            return new GroundStepResult(currentPos, foothold, displaced,
+                    stepX, velocityFromDeltaX(displaced.physX() - currentPos.x), true);
         }
 
         return new GroundStepResult(preview.point(), preview.foothold() != null ? preview.foothold() : foothold, displaced,

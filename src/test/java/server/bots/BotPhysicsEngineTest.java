@@ -473,6 +473,9 @@ class BotPhysicsEngineTest {
         BotPhysicsEngine.GroundMotion motion = BotPhysicsEngine.applyGroundMotion(entry, bot, platform, 1);
 
         assertTrue(motion.lostGround());
+        assertTrue(entry.inAir, "walk-off should transition directly into airborne state");
+        assertTrue(entry.airVelX > 0, "walk-off should preserve horizontal momentum instead of zeroing X velocity for one tick");
+        assertTrue(entry.movementVelX > 0, "movement packet should carry non-zero horizontal velocity on the ledge-drop tick");
     }
 
     private record StandingLookupCase(Point point, Foothold exactFoothold, Foothold offsetFoothold) {
