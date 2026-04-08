@@ -1779,7 +1779,11 @@ public class BotManager {
             }
         }
 
-        if (bestEntry == null) return true; // request broadcast, no donator available
+        if (bestEntry == null) {
+            // No sibling bots on the same map — nobody to ask; back off for 10 min
+            potShareCooldownUntil.put(owner.getId(), now + 10 * 60_000L);
+            return true;
+        }
 
         final BotEntry donorEntry = bestEntry;
         final Character donorBot  = donorEntry.bot;
@@ -1797,6 +1801,8 @@ public class BotManager {
                         BotDropManager.startPotShareTransfer(items, needyBot, donorEntry, donorBot));
             });
         } else {
+            // Best donor is also low — nobody can help; back off for 10 min
+            potShareCooldownUntil.put(owner.getId(), now + 10 * 60_000L);
             String ownerName = owner.getName();
             List<String> noQualMsgs = List.of(
                     "low too, maybe " + ownerName + " has some?",
