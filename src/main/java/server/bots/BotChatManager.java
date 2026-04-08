@@ -1217,7 +1217,7 @@ public class BotChatManager {
             } else {
                 Item item = entry.pendingLootOfferItem;
                 // Clear the action/expiry but keep pendingLootOfferItem set so autoEquip
-                // won't equip it during the 500 ms delay before the trade opens.
+                // won't equip it during the delay before the trade opens.
                 entry.pendingAction = null;
                 entry.pendingDropCategory = null;
                 entry.pendingLootOfferExpiresAt = 0L;
@@ -1226,7 +1226,7 @@ public class BotChatManager {
                 TimerManager.getInstance().schedule(() -> {
                     entry.pendingLootOfferItem = null;
                     BotDropManager.startTradeTransfer(item, speaker, entry, entry.bot);
-                }, 500);
+                }, 1_000);
             }
             return true;
         }

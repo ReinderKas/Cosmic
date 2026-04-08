@@ -9,6 +9,7 @@ import constants.game.GameConstants;
 import constants.inventory.ItemConstants;
 import server.ItemInformationProvider;
 import server.StatEffect;
+import server.TimerManager;
 import server.Trade;
 import tools.PacketCreator;
 
@@ -56,6 +57,7 @@ class BotDropManager {
         Character owner = entry.owner;
         if (trade == null || owner == null) {
             manualTradeGreetingSent.remove(bot.getId());
+            entry.manualTradeAcceptDelayMs = 0;
             return;
         }
 
@@ -75,9 +77,13 @@ class BotDropManager {
                 manualTradeGreetingSent.remove(bot.getId());
                 return;
             }
-            // Accept invite if not yet joined
+            // Accept invite if not yet joined — small delay so it feels human
             if (!trade.isFullTrade()) {
                 if (trade.getNumber() != 1) return;
+                if (entry.manualTradeAcceptDelayMs == 0)
+                    entry.manualTradeAcceptDelayMs = 500 + BotMovementManager.cfg.TICK_MS;
+                entry.manualTradeAcceptDelayMs = BotMovementManager.tickDown(entry.manualTradeAcceptDelayMs);
+                if (entry.manualTradeAcceptDelayMs > 0) return;
                 Trade.visitTrade(bot, partner.getChr());
                 trade = bot.getTrade();
                 if (trade == null || !trade.isFullTrade()) return;
@@ -95,6 +101,10 @@ class BotDropManager {
             // Only accept on bot's behalf when the owner was the initiator (bot is slot 1).
             // When bot is slot 0 (bot initiated via "trade me"), wait for owner to accept.
             if (trade.getNumber() != 1) return;
+            if (entry.manualTradeAcceptDelayMs == 0)
+                entry.manualTradeAcceptDelayMs = 500 + BotMovementManager.cfg.TICK_MS;
+            entry.manualTradeAcceptDelayMs = BotMovementManager.tickDown(entry.manualTradeAcceptDelayMs);
+            if (entry.manualTradeAcceptDelayMs > 0) return;
             Trade.visitTrade(bot, owner);
             trade = bot.getTrade();
             if (trade == null || !trade.isFullTrade()) return;
@@ -434,12 +444,17 @@ class BotDropManager {
         }
         boolean receivedSomething = trade.getPartner() != null && trade.getPartner().hasAnyOffer();
         Trade.completeTrade(bot);
+        long replyDelay = 800 + ThreadLocalRandom.current().nextInt(0, 500);
         if (receivedSomething) {
             bot.changeFaceExpression(Emote.HAPPY.getValue());
-            BotManager.getInstance().botSay(bot, BotManager.randomReply(TRADE_THANKS_MSGS));
+            TimerManager.getInstance().schedule(
+                    () -> BotManager.getInstance().botSay(bot, BotManager.randomReply(TRADE_THANKS_MSGS)),
+                    replyDelay);
         } else if (ThreadLocalRandom.current().nextInt(100) < 20) {
             bot.changeFaceExpression(ThreadLocalRandom.current().nextBoolean() ? Emote.GLARE.getValue() : Emote.ANNOYED.getValue());
-            BotManager.getInstance().botSay(bot, BotManager.randomReply(TRADE_FREEBIE_QUIPS));
+            TimerManager.getInstance().schedule(
+                    () -> BotManager.getInstance().botSay(bot, BotManager.randomReply(TRADE_FREEBIE_QUIPS)),
+                    replyDelay);
         }
     }
 

@@ -1783,7 +1783,9 @@ public class BotManager {
                 List<Item> items = BotDropManager.collectPotShareItems(donorBot, forHp, maxQty);
                 if (items.isEmpty()) return;
                 botSay(donorBot, randomReply(forHp ? POT_OFFER_HP_MSGS : POT_OFFER_MP_MSGS));
-                BotDropManager.startPotShareTransfer(items, needyBot, donorEntry, donorBot);
+                TimerManager.getInstance().schedule(
+                        () -> BotDropManager.startPotShareTransfer(items, needyBot, donorEntry, donorBot),
+                        1_000L);
             }, 2_000 + ThreadLocalRandom.current().nextInt(0, 1_000));
         } else {
             String ownerName = owner.getName();

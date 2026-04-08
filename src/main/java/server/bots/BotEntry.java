@@ -185,6 +185,9 @@ public class BotEntry {
     int stuckCheckX = Integer.MIN_VALUE;
     int stuckCheckY = Integer.MIN_VALUE;
 
+    // Manual trade: countdown before bot accepts an incoming trade invite (both owner and peer-bot)
+    int manualTradeAcceptDelayMs = 0;
+
     // Movement packet cache so repeated no-op packets are suppressed
     boolean movementBroadcastValid = false;
     int lastBroadcastX = 0;
