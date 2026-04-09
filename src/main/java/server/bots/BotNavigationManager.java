@@ -114,8 +114,22 @@ final class BotNavigationManager {
             return false;
         }
 
-        NavigationDirective directive = tryExecuteEdge(
-                entry, entry.bot, entry.bot.getPosition(), rawTargetPos, entry.navEdge, true);
+        // Validate the edge is still applicable before attempting execution.
+        // tickAirborne may have landed the bot at the destination in this same tick; the navEdge
+        // isn't cleared until the next resolveTarget call, so reuseCommittedEdge would correctly
+        // discard a DROP/JUMP edge whose toRegionId matches the bot's current region. Without this
+        // check, tryExecuteDrop re-fires from the landing platform where there's no lower foothold,
+        // sending the bot out of the map.
+        BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(entry.bot.getMap());
+        Point botPos = entry.bot.getPosition();
+        int startRegionId = resolveCurrentRegionId(graph, entry, entry.bot.getMap(), botPos);
+        BotNavigationGraph.Edge edge = reuseCommittedEdge(graph, entry, startRegionId, entry.navTargetRegionId);
+        if (edge == null) {
+            BotMovementManager.clearNavigationState(entry);
+            return false;
+        }
+
+        NavigationDirective directive = tryExecuteEdge(entry, entry.bot, botPos, rawTargetPos, edge, true);
         if (directive == null || !directive.consumedTick) {
             return false;
         }
