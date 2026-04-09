@@ -84,6 +84,10 @@ public final class SpecialMoveHandler extends AbstractPacketHandler {
         }
 
         StatEffect effect = skill.getEffect(skillLevel);
+        if (!effect.canPaySkillCost(chr)) {
+            c.sendPacket(PacketCreator.enableActions());
+            return;
+        }
         if (effect.getCooldown() > 0) {
             int sourceid = effect.getSourceId();
             if (chr.skillIsCooling(skillid)) {

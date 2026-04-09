@@ -174,8 +174,12 @@ public abstract class AbstractDealDamageHandler extends AbstractPacketHandler {
                     return;
                 }
 
-                if (player.getMp() < attackEffect.getMpCon()) {
-                    AutobanFactory.MPCON.addPoint(player.getAutobanManager(), "Skill: " + attack.skill + "; Player MP: " + player.getMp() + "; MP Needed: " + attackEffect.getMpCon());
+                if (!attackEffect.canPaySkillCost(player)) {
+                    if (player.getMp() < attackEffect.getMpCon()) {
+                        AutobanFactory.MPCON.addPoint(player.getAutobanManager(), "Skill: " + attack.skill + "; Player MP: " + player.getMp() + "; MP Needed: " + attackEffect.getMpCon());
+                    }
+                    player.sendPacket(PacketCreator.enableActions());
+                    return;
                 }
 
                 int mobCount = attackEffect.getMobCount();

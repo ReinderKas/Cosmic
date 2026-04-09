@@ -367,8 +367,9 @@ class BotCombatManager {
             if (lvl <= 0) continue;
 
             StatEffect fx = skill.getEffect(lvl);
-            castSupportSkill(entry, bot, skill, fx, now);
-            return;
+            if (castSupportSkill(entry, bot, skill, fx, now)) {
+                return;
+            }
         }
     }
 
@@ -416,7 +417,12 @@ class BotCombatManager {
         if (lvl <= 0) return;
 
         StatEffect fx = skill.getEffect(lvl);
-        fx.applyTo(bot);
+        if (!fx.canPaySkillCost(bot)) {
+            return;
+        }
+        if (!fx.applyTo(bot)) {
+            return;
+        }
 
         entry.nextSupportHealAt = now + cfg.SUPPORT_HEAL_CD_MS;
         BotAttackExecutionProvider.BasicAttackData fallbackAttackData =
@@ -500,6 +506,9 @@ class BotCombatManager {
         if (entry.attackCooldownMs > 0) {
             return;
         }
+        if (attackPlan.skillId != 0 && !canUseSkill(bot, attackPlan.skillId, attackPlan.skillLevel)) {
+            return;
+        }
 
         int numAttacked = attackPlan.targets.size();
         AbstractDealDamageHandler.AttackInfo attack = new AbstractDealDamageHandler.AttackInfo();
@@ -549,6 +558,9 @@ class BotCombatManager {
         }
 
         StatEffect effect = skill.getEffect(skillLevel);
+        if (!effect.canPaySkillCost(bot)) {
+            return null;
+        }
         AttackRoute route = BotAttackExecutionProvider.determineSkillRoute(bot, entry.aoeSkillId);
         Rectangle hitBox = calculateSkillHitBox(effect, bot, primaryTarget, route);
         if (hitBox == null) {
@@ -597,6 +609,9 @@ class BotCombatManager {
         }
 
         StatEffect effect = skill.getEffect(skillLevel);
+        if (!effect.canPaySkillCost(bot)) {
+            return null;
+        }
         AttackRoute route = BotAttackExecutionProvider.determineSkillRoute(bot, entry.attackSkillId);
         Rectangle hitBox = calculateSkillHitBox(effect, bot, primaryTarget, route);
         if (hitBox == null || !doesHitBoxIntersectMonster(hitBox, primaryTarget)) {
@@ -901,16 +916,22 @@ class BotCombatManager {
                 continue;
             }
 
-            castSupportSkill(entry, bot, skill, fx, now);
-            entry.nextSupportBuffAt.put(skillId, now + cfg.SUPPORT_REBUFF_CD_MS);
-            return true;
+            if (castSupportSkill(entry, bot, skill, fx, now)) {
+                entry.nextSupportBuffAt.put(skillId, now + cfg.SUPPORT_REBUFF_CD_MS);
+                return true;
+            }
         }
 
         return false;
     }
 
-    private static void castSupportSkill(BotEntry entry, Character bot, Skill skill, StatEffect fx, long now) {
-        fx.applyTo(bot, null);
+    private static boolean castSupportSkill(BotEntry entry, Character bot, Skill skill, StatEffect fx, long now) {
+        if (!fx.canPaySkillCost(bot)) {
+            return false;
+        }
+        if (!fx.applyTo(bot, null)) {
+            return false;
+        }
 
         long dur = fx.getDuration();
         if (dur > 0) {
@@ -926,6 +947,16 @@ class BotCombatManager {
         if (fx.getCooldown() > 0) {
             bot.addCooldown(skill.getId(), now, fx.getCooldown() * 1000L);
         }
+        return true;
+    }
+
+    private static boolean canUseSkill(Character bot, int skillId, int skillLevel) {
+        Skill skill = SkillFactory.getSkill(skillId);
+        if (skill == null || skillLevel <= 0) {
+            return false;
+        }
+
+        return skill.getEffect(skillLevel).canPaySkillCost(bot);
     }
 
     private static boolean hasNearbyPartyMemberMissingBuff(Character bot, StatEffect fx) {

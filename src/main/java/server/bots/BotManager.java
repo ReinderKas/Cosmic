@@ -117,6 +117,7 @@ public class BotManager {
     private static final Pattern TRANSFER_PATTERN = Pattern.compile(
             "\\btransfer\\s+(\\S+)(?:\\s+to)?\\s+(\\S+)\\b", Pattern.CASE_INSENSITIVE);
     private static final int MIN_PREFIX_TARGET_LENGTH = 2;
+    private static final int MAX_NUMERIC_TARGET_SLOT = 5;
 
     record BotTransferCommand(String botName, String targetName) {}
 
@@ -200,7 +201,10 @@ public class BotManager {
 
         if (isNumericTarget(targetToken)) {
             int slot = Integer.parseInt(targetToken);
-            if (slot < 1 || slot > entries.size()) {
+            if (slot < 1 || slot > MAX_NUMERIC_TARGET_SLOT) {
+                return new TargetedBotMatch(null, null, null);
+            }
+            if (slot > entries.size()) {
                 return new TargetedBotMatch(null, null, "No bot in slot " + slot + ".");
             }
             return new TargetedBotMatch(entries.get(slot - 1), targetedCommand.commandText(), null);

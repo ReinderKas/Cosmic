@@ -1818,6 +1818,18 @@ public class StatEffect {
         return prop == 1.0 || Math.random() < prop;
     }
 
+    public boolean canPaySkillCost(Character chr) {
+        if (!skill || chr == null) {
+            return true;
+        }
+
+        if (chr.getMp() < mpCon) {
+            return false;
+        }
+
+        return hpCon <= 0 || chr.getHp() > hpCon || chr.isGM();
+    }
+
     /*
      private static class CancelEffectAction implements Runnable {
 

@@ -492,7 +492,7 @@ public class BotChatManager {
             return;
         }
 
-        if (HELP_PATTERN.matcher(message).find()) {
+        if (matchesWholeCommand(HELP_PATTERN, message)) {
             BotManager.after(BotManager.randMs(500, 700), () -> reportHelp(entry));
             return;
         }
@@ -557,14 +557,14 @@ public class BotChatManager {
             });
             return;
         }
-        if (BUFF_LIST_PATTERN.matcher(message).find()) {
+        if (matchesWholeCommand(BUFF_LIST_PATTERN, message)) {
             BotManager.after(BotManager.randMs(500, 700), () -> {
                 String summary = BotBuffManager.getChatSummary(entry.buffConsumablesEnabled, entry.buffCheapMode, entry.bot);
                 BotManager.getInstance().botSay(entry.bot, summary);
             });
             return;
         }
-        if (BUFF_DEBUG_PATTERN.matcher(message).find()) {
+        if (matchesWholeCommand(BUFF_DEBUG_PATTERN, message)) {
             BotManager.after(BotManager.randMs(500, 700), () -> reportBuffDebug(entry, entry.bot));
             return;
         }
@@ -694,35 +694,35 @@ public class BotChatManager {
         }
 
         // Info commands
-        if (REQUEST_UPGRADE_PATTERN.matcher(message).find()) {
+        if (matchesWholeCommand(REQUEST_UPGRADE_PATTERN, message)) {
             BotManager.after(BotManager.randMs(500, 700), () -> handleRequestUpgradeCommand(entry, entry.bot));
             return;
         }
-        if (RECOMMENDED_GEAR_PATTERN.matcher(message).find()) {
+        if (matchesWholeCommand(RECOMMENDED_GEAR_PATTERN, message)) {
             BotManager.after(BotManager.randMs(500, 700), () -> reportRecommendedGear(entry, entry.bot));
             return;
         }
-        if (SKILLS_PATTERN.matcher(message).find()) {
+        if (matchesWholeCommand(SKILLS_PATTERN, message)) {
             BotManager.after(BotManager.randMs(900, 1100), () -> reportSkills(entry, entry.bot));
             return;
         }
-        if (STATS_PATTERN.matcher(message).find())
+        if (matchesWholeCommand(STATS_PATTERN, message))
             BotManager.after(BotManager.randMs(900, 1100), () -> reportStats(entry, entry.bot));
-        if (RANGE_PATTERN.matcher(message).find())
+        if (matchesWholeCommand(RANGE_PATTERN, message))
             BotManager.after(BotManager.randMs(900, 1100), () -> reportRange(entry, entry.bot));
-        if (BUILD_PATTERN.matcher(message).find())
+        if (matchesWholeCommand(BUILD_PATTERN, message))
             BotManager.after(BotManager.randMs(900, 1100), () -> reportBuild(entry, entry.bot));
-        if (INVENTORY_PATTERN.matcher(message).find())
+        if (matchesWholeCommand(INVENTORY_PATTERN, message))
             BotManager.after(BotManager.randMs(900, 1100), () -> reportInventory(entry, entry.bot));
         if (isMesoQuery(message))
             BotManager.after(BotManager.randMs(900, 1100), () -> reportMesos(entry, entry.bot));
-        if (INV_SLOTS_PATTERN.matcher(message).find())
+        if (matchesWholeCommand(INV_SLOTS_PATTERN, message))
             BotManager.after(BotManager.randMs(900, 1100), () -> reportInventorySlots(entry, entry.bot));
-        if (SCROLLS_PATTERN.matcher(message).find())
+        if (matchesWholeCommand(SCROLLS_PATTERN, message))
             BotManager.after(BotManager.randMs(900, 1100), () -> reportScrolls(entry, entry.bot));
-        if (POTIONS_PATTERN.matcher(message).find())
+        if (matchesWholeCommand(POTIONS_PATTERN, message))
             BotManager.after(BotManager.randMs(900, 1100), () -> reportPotions(entry, entry.bot));
-        if (DEBUG_STATS_PATTERN.matcher(message).find())
+        if (matchesWholeCommand(DEBUG_STATS_PATTERN, message))
             BotManager.after(BotManager.randMs(900, 1100), () -> reportDebugStats(entry, entry.bot));
 
         // Job advancement — check if message contains a valid job selection
@@ -933,7 +933,7 @@ public class BotChatManager {
     }
 
     static boolean isMesoQuery(String message) {
-        return MESOS_PATTERN.matcher(message).find();
+        return matchesWholeCommand(MESOS_PATTERN, message);
     }
 
     static String buildMesoReport(int mesos) {
@@ -1077,6 +1077,26 @@ public class BotChatManager {
                 && left.primaryStat == right.primaryStat
                 && left.secondaryStat == right.secondaryStat
                 && left.secondaryTarget == right.secondaryTarget;
+    }
+
+    private static boolean matchesWholeCommand(Pattern pattern, String message) {
+        String normalized = normalizeCommandText(message);
+        return !normalized.isEmpty() && pattern.matcher(normalized).matches();
+    }
+
+    private static String normalizeCommandText(String message) {
+        if (message == null) {
+            return "";
+        }
+
+        return message.strip()
+                .replaceAll("^[\\p{Punct}\\s]+", "")
+                .replaceAll("[\\p{Punct}\\s]+$", "")
+                .replaceFirst("^(?:(?:please|pls|hey|yo)\\s+)+", "")
+                .replaceFirst("^(?:(?:can|could|will|would)\\s+you\\s+)", "")
+                .replaceFirst("^(?:(?:please|pls)\\s+)+", "")
+                .replaceFirst("\\s+(?:please|pls)$", "")
+                .replaceAll("\\s+", " ");
     }
 
     private static void reportRecommendedGear(BotEntry entry, Character bot) {
