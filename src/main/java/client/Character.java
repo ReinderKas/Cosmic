@@ -669,7 +669,9 @@ public class Character extends AbstractCharacterObject {
     }
 
     public void addCrushRing(Ring r) {
-        crushRings.add(r);
+        synchronized (crushRings) {
+            crushRings.add(r);
+        }
     }
 
     public Ring getRingById(int id) {
@@ -748,7 +750,9 @@ public class Character extends AbstractCharacterObject {
     }
 
     public void addFriendshipRing(Ring r) {
-        friendshipRings.add(r);
+        synchronized (friendshipRings) {
+            friendshipRings.add(r);
+        }
     }
 
     public void addMarriageRing(Ring r) {
@@ -4789,8 +4793,11 @@ public class Character extends AbstractCharacterObject {
     }
 
     public List<Ring> getCrushRings() {
-        Collections.sort(crushRings);
-        return crushRings;
+        synchronized (crushRings) {
+            List<Ring> copy = new ArrayList<>(crushRings);
+            Collections.sort(copy);
+            return copy;
+        }
     }
 
     public int getCurrentCI() {
@@ -5147,9 +5154,11 @@ public class Character extends AbstractCharacterObject {
     }
 
     public List<Ring> getFriendshipRings() {
-        List<Ring> copy = new ArrayList<>(friendshipRings);
-        Collections.sort(copy);
-        return copy;
+        synchronized (friendshipRings) {
+            List<Ring> copy = new ArrayList<>(friendshipRings);
+            Collections.sort(copy);
+            return copy;
+        }
     }
 
     public int getGender() {

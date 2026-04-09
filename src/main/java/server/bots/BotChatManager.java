@@ -1,6 +1,5 @@
 package server.bots;
 
-import client.BotClient;
 import client.Character;
 import client.Job;
 import client.Skill;
@@ -25,7 +24,6 @@ import java.util.regex.Pattern;
 
 public class BotChatManager {
     private static final String SKILL_TREE_CHOICE_ACTION = "skill_tree_choice";
-    private static final String RECOMMENDED_TRADE_ACTION = "recommended_trade_offer";
 
     private record LearnedSkill(int id, String name, int level) {}
 
@@ -427,7 +425,7 @@ public class BotChatManager {
             });
             return;
         }
-        if (entry.pendingAction != null && !RECOMMENDED_TRADE_ACTION.equals(entry.pendingAction)) {
+        if (entry.pendingAction != null) {
             // Item-choice: three-way "drop / trade / cancel" — handled independently of yes/no
             if ("item_choice".equals(entry.pendingAction)) {
                 String category = entry.pendingDropCategory;
@@ -787,12 +785,10 @@ public class BotChatManager {
         if (!entry.spawnUpgradeCheckDone) {
             entry.spawnUpgradeCheckDone = true;
             Character owner = entry.owner;
-            if (owner != null && !isOwnerIdle(entry) && entry.pendingAction == null) {
+            if (owner != null && !isOwnerIdle(entry) && entry.pendingAction == null && !BotOfferManager.hasPendingOffer(entry)) {
                 List<BotEquipManager.EquipRecommendation> recs = BotEquipManager.findRecommendedEquips(bot, owner);
                 if (!recs.isEmpty()) {
-                    Item candidate = recs.get(0).candidate();
-                    entry.requestedUpgradeItemIds.add(candidate.getItemId());
-                    requestUpgradeFromOwner(entry, bot, owner, candidate);
+                    BotOfferManager.notifyOwnerGainedEquip(entry, bot, recs.get(0).candidate());
                 }
             }
         }
@@ -1106,14 +1102,9 @@ public class BotChatManager {
             queueBotSay(entry, "can't check your gear rn");
             return;
         }
-
-        List<BotEquipManager.EquipRecommendation> recs = BotEquipManager.findRecommendedEquips(owner, bot);
-        if (recs.isEmpty()) {
+        if (!BotOfferManager.offerBestRecommendedGear(entry, bot, owner)) {
             queueBotSay(entry, "no better gear for you rn");
-            return;
         }
-
-        offerGearItem(entry, bot, owner, recs.get(0).candidate());
         entry.nextGearSuggestionAt = System.currentTimeMillis() + 60_000L;
     }
 
@@ -1124,13 +1115,9 @@ public class BotChatManager {
             return;
         }
 
-        List<BotEquipManager.EquipRecommendation> recs = BotEquipManager.findRecommendedEquips(owner, bot);
-        if (recs.isEmpty()) {
-            return;
+        if (BotOfferManager.offerBestRecommendedGear(entry, bot, owner)) {
+            entry.nextGearSuggestionAt = now + 60_000L;
         }
-
-        offerGearItem(entry, bot, owner, recs.get(0).candidate());
-        entry.nextGearSuggestionAt = now + 60_000L;
     }
 
     /** Check if this bot has gear that would be an upgrade for a sibling bot. */
@@ -1141,17 +1128,8 @@ public class BotChatManager {
             return;
         }
 
-        List<BotEntry> siblings = BotManager.getInstance().getBotEntries(owner.getId());
-        for (BotEntry sibling : siblings) {
-            if (sibling == entry || sibling.bot == null || sibling.bot.getMapId() != bot.getMapId()) {
-                continue;
-            }
-            List<BotEquipManager.EquipRecommendation> recs = BotEquipManager.findRecommendedEquips(sibling.bot, bot);
-            if (!recs.isEmpty()) {
-                offerGearItem(entry, bot, sibling.bot, recs.get(0).candidate());
-                entry.nextGearSuggestionAt = now + 60_000L;
-                return;
-            }
+        if (BotOfferManager.offerBestGearToSibling(entry, bot)) {
+            entry.nextGearSuggestionAt = now + 60_000L;
         }
     }
 
@@ -1160,238 +1138,8 @@ public class BotChatManager {
         return entry.ownerWasAfk;
     }
 
-    /**
-     * Called when the owner gains an equip item (loot, buy, etc.).
-     * If it is an upgrade for the bot and hasn't been requested before, ask for it once.
-     */
-    static void notifyOwnerGainedEquip(BotEntry entry, Character bot, Item item) {
-        if (isOwnerIdle(entry)) return;
-        if (entry.requestedUpgradeItemIds.contains(item.getItemId())) return;
-        if (entry.pendingAction != null || entry.pendingTradeCategory != null) return;
-        Character owner = entry.owner;
-        if (owner == null) return;
-
-        List<BotEquipManager.EquipRecommendation> recs = BotEquipManager.findRecommendedEquips(bot, owner);
-        boolean isUpgrade = recs.stream().anyMatch(r -> r.candidate().getItemId() == item.getItemId());
-        if (!isUpgrade) return;
-
-        entry.requestedUpgradeItemIds.add(item.getItemId());
-        requestUpgradeFromOwner(entry, bot, owner, item);
-    }
-
-    private static void requestUpgradeFromOwner(BotEntry entry, Character bot, Character owner, Item ownerItem) {
-        ItemInformationProvider ii = ItemInformationProvider.getInstance();
-        String itemName = ii.getName(ownerItem.getItemId());
-        if (itemName == null || itemName.isBlank()) itemName = String.valueOf(ownerItem.getItemId());
-
-        entry.pendingAction = RECOMMENDED_TRADE_ACTION;
-        entry.pendingDropCategory = null;
-        entry.pendingLootOfferItem = ownerItem;
-        entry.pendingLootOfferRecipientId = owner.getId();
-        entry.pendingLootOfferExpiresAt = System.currentTimeMillis() + 45_000L;
-        entry.pendingLootOfferBotRequesting = true;
-
-        List<String> prompts = List.of(
-                "hey, that " + itemName + " would be an upgrade for me, can i have it pls?",
-                "Can I have your " + itemName + "?",
-                "Your " + itemName + " would be better on me! trade it over?",
-                "I could use that " + itemName + " of yours ;)",
-                "that " + itemName + " is an upgrade for me, want to trade?");
-        queueBotSay(entry, BotManager.randomReply(prompts));
-    }
-
     private static void handleRequestUpgradeCommand(BotEntry entry, Character bot) {
-        Character owner = entry.owner;
-        if (owner == null) return;
-        if (entry.pendingAction != null || entry.pendingTradeCategory != null) {
-            BotManager.getInstance().botSay(bot, "busy rn, ask me again in a bit");
-            return;
-        }
-        List<BotEquipManager.EquipRecommendation> recs = BotEquipManager.findRecommendedEquips(bot, owner);
-        if (recs.isEmpty()) {
-            BotManager.getInstance().botSay(bot, "nothing i need from you rn, im good!");
-            return;
-        }
-        Item candidate = recs.get(0).candidate();
-        entry.requestedUpgradeItemIds.add(candidate.getItemId());
-        requestUpgradeFromOwner(entry, bot, owner, candidate);
-    }
-
-    private static void offerGearItem(BotEntry entry, Character bot, Character recipient, Item item) {
-        if (entry.pendingAction != null || entry.pendingTradeCategory != null
-                || !BotInventoryManager.hasItem(bot, item)) {
-            return;
-        }
-        entry.pendingAction = RECOMMENDED_TRADE_ACTION;
-        entry.pendingDropCategory = null;
-        entry.pendingLootOfferItem = item;
-        entry.pendingLootOfferRecipientId = recipient.getId();
-        entry.pendingLootOfferExpiresAt = System.currentTimeMillis() + 30_000L;
-        queueBotSay(entry, buildLootOfferPrompt(recipient, entry.owner, item));
-    }
-
-    static void scheduleLootOfferPrompt(BotEntry entry, Character bot, Item item, long delayMs) {
-        Character owner = entry.owner;
-        long now = System.currentTimeMillis();
-        if (owner == null || item == null || entry.pendingGearPromptAt > now || isOwnerIdle(entry)) {
-            return;
-        }
-
-        long scheduledAt = now + Math.max(0L, delayMs);
-        entry.pendingGearPromptAt = scheduledAt;
-        BotManager.after(delayMs, () -> promptLootOfferAfterLoot(entry, bot, item, scheduledAt));
-    }
-
-    static boolean handlePendingLootOfferResponse(BotEntry entry, Character speaker, String message) {
-        expirePendingLootOffer(entry);
-        if (!RECOMMENDED_TRADE_ACTION.equals(entry.pendingAction)
-                || speaker == null
-                || speaker.getId() != entry.pendingLootOfferRecipientId) {
-            return false;
-        }
-
-        if (LOGOUT_CONFIRM_PATTERN.matcher(message).find()) {
-            if (entry.pendingLootOfferBotRequesting) {
-                clearPendingLootOffer(entry);
-                BotManager.after(BotManager.randMs(400, 600), () ->
-                        BotManager.getInstance().botSay(entry.bot, "ty! inv me?"));
-            } else {
-                Item item = entry.pendingLootOfferItem;
-                // Clear the action/expiry but keep pendingLootOfferItem set so autoEquip
-                // won't equip it during the delay before the trade opens.
-                entry.pendingAction = null;
-                entry.pendingDropCategory = null;
-                entry.pendingLootOfferExpiresAt = 0L;
-                entry.pendingLootOfferBotRequesting = false;
-                entry.pendingLootOfferRecipientId = 0;
-                BotManager.after(BotManager.randMs(900, 1100), () -> {
-                    entry.pendingLootOfferItem = null;
-                    BotInventoryManager.startTradeTransfer(item, speaker, entry, entry.bot);
-                });
-            }
-            return true;
-        }
-        if (NEGATIVE_CONFIRM_PATTERN.matcher(message).find()) {
-            clearPendingLootOffer(entry);
-            BotManager.after(BotManager.randMs(400, 600), () ->
-                    BotManager.getInstance().botSay(entry.bot, "ok, keeping it for now"));
-            return true;
-        }
-
-        return false;
-    }
-
-    static void expirePendingLootOffer(BotEntry entry) {
-        if (RECOMMENDED_TRADE_ACTION.equals(entry.pendingAction)
-                && entry.pendingLootOfferExpiresAt > 0L
-                && System.currentTimeMillis() >= entry.pendingLootOfferExpiresAt) {
-            clearPendingLootOffer(entry);
-        }
-    }
-
-    private static void promptLootOfferAfterLoot(BotEntry entry, Character bot, Item item, long scheduledAt) {
-        if (entry.pendingGearPromptAt != scheduledAt) {
-            return;
-        }
-        entry.pendingGearPromptAt = 0L;
-
-        Character owner = entry.owner;
-        if (owner == null
-                || entry.pendingAction != null
-                || entry.pendingTradeCategory != null
-                || !BotInventoryManager.hasItem(bot, item)) {
-            return;
-        }
-
-        Character recipient = findLootOfferRecipient(entry, bot, item);
-        if (recipient == null) {
-            return;
-        }
-
-        entry.pendingAction = RECOMMENDED_TRADE_ACTION;
-        entry.pendingDropCategory = null;
-        entry.pendingLootOfferItem = item;
-        entry.pendingLootOfferRecipientId = recipient.getId();
-        entry.pendingLootOfferExpiresAt = System.currentTimeMillis() + 30_000L;
-        queueBotSay(entry, buildLootOfferPrompt(recipient, owner, item));
-
-        // If recipient is a same-owner bot, auto-accept after 2 s on their behalf
-        if (recipient.getClient() instanceof BotClient) {
-            BotManager.after(BotManager.randMs(1800, 2200), () -> autoAcceptLootOffer(entry, recipient));
-        }
-    }
-
-    private static final List<String> BOT_ACCEPT_MSGS = List.of(
-            "sure!", "ok!", "ty!", "yes pls", "thx!", "ooh nice, ty", "yes!");
-
-    private static void autoAcceptLootOffer(BotEntry entry, Character recipientBot) {
-        if (!RECOMMENDED_TRADE_ACTION.equals(entry.pendingAction)
-                || entry.pendingLootOfferRecipientId != recipientBot.getId()) {
-            return; // offer expired or was cancelled
-        }
-        BotManager.getInstance().botSay(recipientBot, BotManager.randomReply(BOT_ACCEPT_MSGS));
-        handlePendingLootOfferResponse(entry, recipientBot, "yes");
-    }
-
-    static String buildLootOfferPrompt(String recipientName, String itemName, boolean targetIsOwner) {
-        List<String> prompts = targetIsOwner
-                ? List.of(
-                        "I have %s, you want?",
-                        "picked up %s, want it?",
-                        "I got %s for you, want?")
-                : List.of(
-                        "%s, I have %s, you want?",
-                        "%s, picked up %s, want it?",
-                        "%s, I got %s if you want it");
-        String format = BotManager.randomReply(prompts);
-        return targetIsOwner ? String.format(format, itemName) : String.format(format, recipientName, itemName);
-    }
-
-    private static String buildLootOfferPrompt(Character recipient, Character owner, Item item) {
-        ItemInformationProvider ii = ItemInformationProvider.getInstance();
-        String itemName = ii.getName(item.getItemId());
-        if (itemName == null || itemName.isBlank()) {
-            itemName = String.valueOf(item.getItemId());
-        }
-        boolean targetIsOwner = owner != null && recipient.getId() == owner.getId();
-        return buildLootOfferPrompt(recipient.getName(), itemName, targetIsOwner);
-    }
-
-    private static Character findLootOfferRecipient(BotEntry entry, Character bot, Item item) {
-        Character owner = entry.owner;
-        if (owner == null) {
-            return null;
-        }
-        // Priority 1: owner
-        if (BotEquipManager.findRecommendationForItem(owner, bot, item) != null) {
-            return owner;
-        }
-        // Priority 2: other bots owned by the same owner in the party on the same map
-        BotOwnershipService ownership = BotOwnershipService.getInstance();
-        for (Character member : owner.getPartyMembersOnSameMap()) {
-            if (member == null
-                    || member.getId() == owner.getId()
-                    || member.getId() == bot.getId()
-                    || !(member.getClient() instanceof BotClient)
-                    || !ownership.isAuthorizedOwner(member.getId(), owner.getId())) {
-                continue;
-            }
-            if (BotEquipManager.findRecommendationForItem(member, bot, item) != null) {
-                return member;
-            }
-        }
-        return null;
-    }
-
-    private static void clearPendingLootOffer(BotEntry entry) {
-        if (RECOMMENDED_TRADE_ACTION.equals(entry.pendingAction)) {
-            entry.pendingAction = null;
-        }
-        entry.pendingDropCategory = null;
-        entry.pendingLootOfferItem = null;
-        entry.pendingLootOfferRecipientId = 0;
-        entry.pendingLootOfferExpiresAt = 0L;
-        entry.pendingLootOfferBotRequesting = false;
+        BotOfferManager.requestBestUpgradeFromOwner(entry, bot);
     }
 
     private static void handleSkillTreeChoice(BotEntry entry, Character bot, String message) {

@@ -560,7 +560,7 @@ public class BotManager {
     public void notifyOwnerGainedItem(Character owner, Item item) {
         if (ItemConstants.getInventoryType(item.getItemId()) != InventoryType.EQUIP) return;
         for (BotEntry entry : getBotEntries(owner.getId())) {
-            BotChatManager.notifyOwnerGainedEquip(entry, entry.bot, item);
+            BotOfferManager.notifyOwnerGainedEquip(entry, entry.bot, item);
         }
     }
 
@@ -801,7 +801,7 @@ public class BotManager {
         List<BotEntry> matches = new ArrayList<>();
         for (List<BotEntry> entries : bots.values()) {
             for (BotEntry entry : entries) {
-                BotChatManager.expirePendingLootOffer(entry);
+                BotOfferManager.expirePendingOffer(entry);
                 if (!isPendingLootOfferTarget(entry, speaker)) {
                     continue;
                 }
@@ -812,7 +812,7 @@ public class BotManager {
 
         TargetedBotMatch targetedBot = resolveTargetedBot(matches, message);
         if (targetedBot.entry != null) {
-            return BotChatManager.handlePendingLootOfferResponse(targetedBot.entry, speaker, targetedBot.commandText);
+            return BotOfferManager.handlePendingOfferResponse(targetedBot.entry, speaker, targetedBot.commandText);
         }
         if (targetedBot.feedbackMessage != null) {
             speaker.dropMessage(5, targetedBot.feedbackMessage);
@@ -820,7 +820,7 @@ public class BotManager {
         }
 
         if (matches.size() == 1) {
-            return BotChatManager.handlePendingLootOfferResponse(matches.get(0), speaker, message);
+            return BotOfferManager.handlePendingOfferResponse(matches.get(0), speaker, message);
         }
         if (matches.size() > 1 && looksLikeConfirmation(message)) {
             speaker.dropMessage(5, "More than one bot is waiting on you. Say '<botname> yes' or '<slot> yes'.");
@@ -1026,7 +1026,7 @@ public class BotManager {
             return;
         }
         Character bot = entry.bot;
-        BotChatManager.expirePendingLootOffer(entry);
+        BotOfferManager.expirePendingOffer(entry);
         boolean runAiTick = consumeAiTick(entry);
         entry.lastTickWasAi = runAiTick;
         entry.lastTickAtMs = System.currentTimeMillis();

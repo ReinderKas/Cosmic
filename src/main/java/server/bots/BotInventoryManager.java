@@ -117,7 +117,7 @@ class BotInventoryManager {
                     && hasItem(bot, pickedItem)) {
                 BotEquipManager.autoEquip(bot, entry.owner, entry.pendingLootOfferItem);
                 if (hasItem(bot, pickedItem)) {
-                    BotChatManager.scheduleLootOfferPrompt(entry, bot, pickedItem, 5_000L);
+                    BotOfferManager.scheduleLootOfferPrompt(entry, bot, pickedItem, 5_000L);
                 }
             }
         }

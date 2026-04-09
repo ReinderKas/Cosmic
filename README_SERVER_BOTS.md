@@ -4,7 +4,8 @@
 ## Features
 
 - follow, trade, loot
-- fight, use skill, auto assign ap/sp, buffs (Only warrior 1st job configured/tested)
+- fight, use skill, auto assign ap/sp, buffs (Only 1st jobs configured/tested)
+- auto buy/resupply potions/ammo if shop available within the same map
 - auto complete any quest the owner turn in (with rewards)
 - Party Quest Automation(currently only KPQ 1st stage + auto accept rewards 5th stage)
 - Each bot is a real character you can log in as, can spawn your alts as bots
@@ -122,9 +123,10 @@ Verbs: `trade [me] <type/name>`, `give [me] <type/name>`, `drop <type/name>`, `p
 
 ### Build & Job
 
-| Say | Effect |
-|---|---|
-| `respec` / `reset skills` / `reset sp` | Refund and re-assign SP |
+| Say                                       | Effect                  |
+|-------------------------------------------|-------------------------|
+| `respec sp` / `reset skills` / `reset sp` | Refund and re-assign SP |
+| `respec ap` / `reset ap`                  | Refund and re-assign AP |
 
 ## Notes
 - Bot characters can be logged into as normal accounts (user = bot name, password = `botbot`) to manually equip or manage inventory.
