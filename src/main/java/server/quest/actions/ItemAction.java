@@ -23,9 +23,11 @@ package server.quest.actions;
 
 import client.Character;
 import client.Client;
+import client.inventory.Equip;
 import client.inventory.InventoryType;
 import client.inventory.Item;
 import client.inventory.manipulator.InventoryManipulator;
+import config.YamlConfig;
 import constants.inventory.ItemConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -158,6 +160,18 @@ public class ItemAction extends AbstractQuestAction {
         for (ItemData iEntry : giveItem) {
             int itemid = iEntry.getId(), count = iEntry.getCount(), period = iEntry.getPeriod();    // thanks Vcoc for noticing quest milestone item not getting removed from inventory after a while
 
+            if (count == 1 && period <= 0
+                    && YamlConfig.config.server.GODLY_STATS_ENABLED
+                    && ItemConstants.getInventoryType(itemid) == InventoryType.EQUIP
+                    && ItemInformationProvider.rollSuccessChance(YamlConfig.config.server.GODLY_STATS_QUEST_CHANCE)) {
+                Item eqItem = ItemInformationProvider.getInstance().getEquipById(itemid);
+                if (eqItem instanceof Equip equip) {
+                    ItemInformationProvider.getInstance().randomizeGodlyStats(equip);
+                    InventoryManipulator.addFromDrop(chr.getClient(), eqItem, false, -1);
+                    chr.sendPacket(PacketCreator.getShowItemGain(itemid, (short) count, true));
+                    continue;
+                }
+            }
             InventoryManipulator.addById(chr.getClient(), itemid, (short) count, "", -1, period > 0 ? (System.currentTimeMillis() + MINUTES.toMillis(period)) : -1);
             chr.sendPacket(PacketCreator.getShowItemGain(itemid, (short) count, true));
         }

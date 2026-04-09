@@ -190,6 +190,22 @@ public class ServerConfig {
     public int CHSCROLL_STAT_RATE;
     public int CHSCROLL_STAT_RANGE;
 
+    // NuTNNuT's Custom Features
+    // Scroll Success Bonus
+    public boolean SCROLL_SUCCESS_BONUS_ENABLED;
+    public int SCROLL_SUCCESS_BONUS;
+    // Chaos Scroll - No Negative Stats (scrollOptionEquipWithChaos only)
+    public boolean CHAOS_SCROLL_NO_NEGATIVE;
+    // Godly Stats on Equip Drops/Rewards
+    public boolean GODLY_STATS_ENABLED;
+    public int GODLY_STATS_DROP_CHANCE;
+    public int GODLY_STATS_MAKER_CHANCE;
+    public int GODLY_STATS_QUEST_CHANCE;
+    public double GODLY_STATS_BONUS_SCALING;
+    public int GODLY_STATS_MIN_BONUS;
+    public double GODLY_STATS_HPMP_SCALING;
+    public int GODLY_STATS_MIN_HPMP_BONUS;
+
     //Beginner Skills Configuration
     public boolean USE_ULTRA_NIMBLE_FEET;
     public boolean USE_ULTRA_RECOVERY;

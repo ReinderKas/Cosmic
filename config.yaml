@@ -456,3 +456,22 @@ server:
     NPCS_SCRIPTABLE:
       #9200000: Talk to Cody # Cody
       9001105: Rescue Gaga!  # Grandpa moon bunny
+
+    # NuTNNuT's custom features
+
+    # Scroll Success Bonus: adds a flat bonus % to all scroll success chances
+    SCROLL_SUCCESS_BONUS_ENABLED: true
+    SCROLL_SUCCESS_BONUS: 10             # Flat % added to every scroll's success chance (capped at 100)
+
+    # Chaos Scroll No Negative: when true, black/dark crystal chaos stats only improve (never decrease)
+    CHAOS_SCROLL_NO_NEGATIVE: true
+
+    # Godly Stats: chance for equipment to receive bonus stats beyond base randomization
+    GODLY_STATS_ENABLED: true
+    GODLY_STATS_DROP_CHANCE: 20          # % chance for dropped equips (randomizeStats)
+    GODLY_STATS_MAKER_CHANCE: 20         # % chance for maker equips with stimulant (randomizeUpgradeStats)
+    GODLY_STATS_QUEST_CHANCE: 100        # % chance for quest reward equips (100 = always)
+    GODLY_STATS_BONUS_SCALING: 0.1       # Max stat bonus = reqLevel * scaling (e.g. 0.1 = reqLevel/10)
+    GODLY_STATS_MIN_BONUS: 5             # Minimum max stat bonus
+    GODLY_STATS_HPMP_SCALING: 1.0        # Max HP/MP bonus = reqLevel * scaling
+    GODLY_STATS_MIN_HPMP_BONUS: 30       # Minimum max HP/MP bonus

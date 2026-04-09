@@ -628,7 +628,6 @@ public class ItemInformationProvider {
     }
 
     public static boolean rollSuccessChance(double propPercent) {
-        propPercent = Math.min(propPercent + 10, 100);
         double actualChance = testYourLuck(propPercent / 100.0, YamlConfig.config.server.SCROLL_CHANCE_ROLLS);
         return Math.random() >= actualChance;
     }
@@ -649,22 +648,23 @@ public class ItemInformationProvider {
         // option: watk, matk, wdef, mdef, spd, jump, hp, mp - black crystal - 1/2/3
         //   stat: dex, luk, str, int, avoid, acc - dark crystal - 2/3/5
 
+        boolean noNeg = YamlConfig.config.server.CHAOS_SCROLL_NO_NEGATIVE;
         if (option) {
-            nEquip.setWatk(getMaximumShortMaxIfOverflow(0, getRandUpgradedStat(nEquip.getWatk(), range)));
-            nEquip.setWdef(getMaximumShortMaxIfOverflow(0, getRandUpgradedStat(nEquip.getWdef(), range)));
-            nEquip.setMatk(getMaximumShortMaxIfOverflow(0, getRandUpgradedStat(nEquip.getMatk(), range)));
-            nEquip.setMdef(getMaximumShortMaxIfOverflow(0, getRandUpgradedStat(nEquip.getMdef(), range)));
-            nEquip.setSpeed(getMaximumShortMaxIfOverflow(0, getRandUpgradedStat(nEquip.getSpeed(), range)));
-            nEquip.setJump(getMaximumShortMaxIfOverflow(0, getRandUpgradedStat(nEquip.getJump(), range)));
-            nEquip.setHp(getMaximumShortMaxIfOverflow(0, getRandUpgradedStat(nEquip.getHp(), range)));
-            nEquip.setMp(getMaximumShortMaxIfOverflow(0, getRandUpgradedStat(nEquip.getMp(), range)));
+            nEquip.setWatk(getMaximumShortMaxIfOverflow(0, noNeg ? getRandUpgradedStat(nEquip.getWatk(), range) : (short)(nEquip.getWatk() + chscrollRandomizedStat(range))));
+            nEquip.setWdef(getMaximumShortMaxIfOverflow(0, noNeg ? getRandUpgradedStat(nEquip.getWdef(), range) : (short)(nEquip.getWdef() + chscrollRandomizedStat(range))));
+            nEquip.setMatk(getMaximumShortMaxIfOverflow(0, noNeg ? getRandUpgradedStat(nEquip.getMatk(), range) : (short)(nEquip.getMatk() + chscrollRandomizedStat(range))));
+            nEquip.setMdef(getMaximumShortMaxIfOverflow(0, noNeg ? getRandUpgradedStat(nEquip.getMdef(), range) : (short)(nEquip.getMdef() + chscrollRandomizedStat(range))));
+            nEquip.setSpeed(getMaximumShortMaxIfOverflow(0, noNeg ? getRandUpgradedStat(nEquip.getSpeed(), range) : (short)(nEquip.getSpeed() + chscrollRandomizedStat(range))));
+            nEquip.setJump(getMaximumShortMaxIfOverflow(0, noNeg ? getRandUpgradedStat(nEquip.getJump(), range) : (short)(nEquip.getJump() + chscrollRandomizedStat(range))));
+            nEquip.setHp(getMaximumShortMaxIfOverflow(0, noNeg ? getRandUpgradedStat(nEquip.getHp(), range) : (short)(nEquip.getHp() + chscrollRandomizedStat(range))));
+            nEquip.setMp(getMaximumShortMaxIfOverflow(0, noNeg ? getRandUpgradedStat(nEquip.getMp(), range) : (short)(nEquip.getMp() + chscrollRandomizedStat(range))));
         } else {
-            nEquip.setStr(getMaximumShortMaxIfOverflow(0, getRandUpgradedStat(nEquip.getStr(), range)));
-            nEquip.setDex(getMaximumShortMaxIfOverflow(0, getRandUpgradedStat(nEquip.getDex(), range)));
-            nEquip.setInt(getMaximumShortMaxIfOverflow(0, getRandUpgradedStat(nEquip.getInt(), range)));
-            nEquip.setLuk(getMaximumShortMaxIfOverflow(0, getRandUpgradedStat(nEquip.getLuk(), range)));
-            nEquip.setAcc(getMaximumShortMaxIfOverflow(0, getRandUpgradedStat(nEquip.getAcc(), range)));
-            nEquip.setAvoid(getMaximumShortMaxIfOverflow(0, getRandUpgradedStat(nEquip.getAvoid(), range)));
+            nEquip.setStr(getMaximumShortMaxIfOverflow(0, noNeg ? getRandUpgradedStat(nEquip.getStr(), range) : (short)(nEquip.getStr() + chscrollRandomizedStat(range))));
+            nEquip.setDex(getMaximumShortMaxIfOverflow(0, noNeg ? getRandUpgradedStat(nEquip.getDex(), range) : (short)(nEquip.getDex() + chscrollRandomizedStat(range))));
+            nEquip.setInt(getMaximumShortMaxIfOverflow(0, noNeg ? getRandUpgradedStat(nEquip.getInt(), range) : (short)(nEquip.getInt() + chscrollRandomizedStat(range))));
+            nEquip.setLuk(getMaximumShortMaxIfOverflow(0, noNeg ? getRandUpgradedStat(nEquip.getLuk(), range) : (short)(nEquip.getLuk() + chscrollRandomizedStat(range))));
+            nEquip.setAcc(getMaximumShortMaxIfOverflow(0, noNeg ? getRandUpgradedStat(nEquip.getAcc(), range) : (short)(nEquip.getAcc() + chscrollRandomizedStat(range))));
+            nEquip.setAvoid(getMaximumShortMaxIfOverflow(0, noNeg ? getRandUpgradedStat(nEquip.getAvoid(), range) : (short)(nEquip.getAvoid() + chscrollRandomizedStat(range))));
         }
     }
 
@@ -987,6 +987,9 @@ public class ItemInformationProvider {
 
             if (((nEquip.getUpgradeSlots() > 0 || ItemConstants.isCleanSlate(scrollId))) || assertGM) {
                 double prop = (double) stats.get("success");
+                if (YamlConfig.config.server.SCROLL_SUCCESS_BONUS_ENABLED) {
+                    prop = Math.min(prop + YamlConfig.config.server.SCROLL_SUCCESS_BONUS, 100);
+                }
 
                 switch (vegaItemId) {
                     case ItemId.VEGAS_SPELL_10:
@@ -1182,17 +1185,17 @@ public class ItemInformationProvider {
         equip.setMdef(getRandStat(equip.getMdef(), 10));
         equip.setHp(getRandStat(equip.getHp(), 10));
         equip.setMp(getRandStat(equip.getMp(), 10));
-        if (ItemInformationProvider.rollSuccessChance(20f)) {
+        if (YamlConfig.config.server.GODLY_STATS_ENABLED && ItemInformationProvider.rollSuccessChance(YamlConfig.config.server.GODLY_STATS_DROP_CHANCE)) {
             randomizeGodlyStats(equip);
         }
         return equip;
     }
 
-    private void randomizeGodlyStats(Equip equip) {
+    public void randomizeGodlyStats(Equip equip) {
         Map<String, Integer> stats = getEquipStats(equip.getItemId());
         short reqLevel = (short) ((stats == null || stats.get("reqLevel") == null) ? 0 : stats.get("reqLevel"));
-        int maxBonus = Math.max(Math.round(reqLevel / 10f), 5);
-        int maxHPMPBonus = (short) Math.max(reqLevel, 30);
+        int maxBonus = Math.max(Math.round((float)(reqLevel * YamlConfig.config.server.GODLY_STATS_BONUS_SCALING)), YamlConfig.config.server.GODLY_STATS_MIN_BONUS);
+        int maxHPMPBonus = (short) Math.max((int)(reqLevel * YamlConfig.config.server.GODLY_STATS_HPMP_SCALING), YamlConfig.config.server.GODLY_STATS_MIN_HPMP_BONUS);
         equip.setStr(getRandUpgradedStat(equip.getStr(), maxBonus));
         equip.setDex(getRandUpgradedStat(equip.getDex(), maxBonus));
         equip.setInt(getRandUpgradedStat(equip.getInt(), maxBonus));
@@ -1232,7 +1235,7 @@ public class ItemInformationProvider {
         equip.setHp(getRandUpgradedStat(equip.getHp(), 5));
         equip.setMp(getRandUpgradedStat(equip.getMp(), 5));
 
-        if (ItemInformationProvider.rollSuccessChance(20f)) {
+        if (YamlConfig.config.server.GODLY_STATS_ENABLED && ItemInformationProvider.rollSuccessChance(YamlConfig.config.server.GODLY_STATS_MAKER_CHANCE)) {
             randomizeGodlyStats(equip);
         }
         return equip;
