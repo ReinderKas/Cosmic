@@ -553,7 +553,7 @@ public class InventoryManipulator {
             return;
         }
         boolean itemChanged = false;
-        if (ii.isUntradeableOnEquip(source.getItemId())) {
+        if (ii.isUntradeableOnEquip(source.getItemId()) && !YamlConfig.config.server.UNTRADEABLE_ITEMS_TRADEABLE) {
             short flag = source.getFlag();      // thanks BHB for noticing flags missing after equipping these
             flag |= ItemConstants.UNTRADEABLE;
             source.setFlag(flag);
@@ -845,7 +845,8 @@ public class InventoryManipulator {
     }
 
     private static boolean isDroppedItemRestricted(Item it) {
-        return YamlConfig.config.server.USE_ERASE_UNTRADEABLE_DROP && it.isUntradeable();
+        return YamlConfig.config.server.USE_ERASE_UNTRADEABLE_DROP && it.isUntradeable()
+                && !YamlConfig.config.server.UNTRADEABLE_ITEMS_TRADEABLE;
     }
 
     public static boolean isSandboxItem(Item it) {

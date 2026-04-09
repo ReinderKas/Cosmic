@@ -475,3 +475,4 @@ server:
     GODLY_STATS_MIN_BONUS: 5             # Minimum max stat bonus
     GODLY_STATS_HPMP_SCALING: 1.0        # 1 -> lv 100 gear gain up to 100 bonus max HP/MP (even if equip had no hp/mp bonus)
     GODLY_STATS_MIN_HPMP_BONUS: 30       # Minimum max HP/MP bonus
+    UNTRADEABLE_ITEMS_TRADEABLE: true    # Allow untradeable items to be traded, dropped, and included in bot recommendations

@@ -206,6 +206,8 @@ public class ServerConfig {
     public int GODLY_STATS_MIN_BONUS;
     public double GODLY_STATS_HPMP_SCALING;
     public int GODLY_STATS_MIN_HPMP_BONUS;
+    // Allow Untradeable Items to be Traded
+    public boolean UNTRADEABLE_ITEMS_TRADEABLE;
 
     //Beginner Skills Configuration
     public boolean USE_ULTRA_NIMBLE_FEET;
