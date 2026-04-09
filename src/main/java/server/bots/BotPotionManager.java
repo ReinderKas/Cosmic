@@ -167,6 +167,7 @@ final class BotPotionManager {
         entry.potCheckTimerMs = BotMovementManager.delayAfterCurrentTick(BotManager.cfg.POT_CHECK_INTERVAL_MS);
 
         setupAutopotForBot(bot);
+        BotCombatManager.tickAmmoCheck(entry, bot);
 
         if (!entry.grinding && !entry.following) {
             return;

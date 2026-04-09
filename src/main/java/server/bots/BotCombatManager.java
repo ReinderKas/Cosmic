@@ -4,8 +4,11 @@ import client.BuffStat;
 import client.Character;
 import client.Skill;
 import client.SkillFactory;
+import client.inventory.InventoryType;
+import client.inventory.Item;
 import client.inventory.WeaponType;
 import constants.game.GameConstants;
+import constants.inventory.ItemConstants;
 import constants.skills.Archer;
 import constants.skills.Assassin;
 import constants.skills.Bandit;
@@ -111,7 +114,11 @@ class BotCombatManager {
         public int   ATTACK_JUMP_X_EXTRA = 60;
         public int   RANGED_DEGENERATE_RANGE_X = 140;
         public int   RANGED_DEGENERATE_RANGE_Y = 70;
+        public int   RANGED_RETREAT_THRESHOLD_X = 100;
         public int   RANGED_RETREAT_DISTANCE_X = 120;
+
+        // Ammo
+        public int   AMMO_LOW_WARN = 200;
 
         // Grind / AoE
         public int   GRIND_SEEK_RANGE  = 800;
@@ -170,6 +177,16 @@ class BotCombatManager {
     private static final List<String> DEATH_REPLIES = List.of(
             "oops im dead", "gg", "rip me", "oww", "i died lol",
             "welp", "ouchh", "nooo", "ok i died", "i'll be right back");
+    private static final List<String> AMMO_LOW_MSGS = List.of(
+            "running low on ammo",
+            "ammo getting low",
+            "not much ammo left",
+            "gonna need more ammo soon");
+    private static final List<String> AMMO_OUT_MSGS = List.of(
+            "out of ammo! heading back",
+            "no ammo left, coming to you",
+            "need ammo!! walking back",
+            "im out of ammo, heading to you");
 
     /** Check every alive monster on the map; if bot is inside its bounding box, apply a hit. */
     static void tickMobDamage(BotEntry entry, Character bot) {
@@ -504,6 +521,9 @@ class BotCombatManager {
 
     static void attackMonster(BotEntry entry, Character bot, AttackPlan attackPlan) {
         if (entry.attackCooldownMs > 0) {
+            return;
+        }
+        if (entry.noAmmo && attackPlan.route == AttackRoute.RANGED) {
             return;
         }
         if (attackPlan.skillId != 0 && !canUseSkill(bot, attackPlan.skillId, attackPlan.skillLevel)) {
@@ -957,6 +977,74 @@ class BotCombatManager {
         }
 
         return skill.getEffect(skillLevel).canPaySkillCost(bot);
+    }
+
+    /** Returns true if the bot's weapon type requires projectile ammo. */
+    static boolean isRangedAmmoWeapon(WeaponType weaponType) {
+        return weaponType == WeaponType.BOW || weaponType == WeaponType.CROSSBOW
+                || weaponType == WeaponType.CLAW || weaponType == WeaponType.GUN;
+    }
+
+    /**
+     * Periodically checks ammo for ranged bots. Piggybacks on the pot-check timer.
+     * Warns at AMMO_LOW_WARN, stops grinding and follows owner at 0.
+     */
+    static void tickAmmoCheck(BotEntry entry, Character bot) {
+        WeaponType weaponType = BotAttackExecutionProvider.getEquippedWeaponType(bot);
+        if (!isRangedAmmoWeapon(weaponType)) {
+            entry.noAmmo = false;
+            entry.ammoWarnSent = false;
+            return;
+        }
+
+        int ammo = countAmmo(bot, weaponType);
+        if (ammo >= cfg.AMMO_LOW_WARN) {
+            entry.noAmmo = false;
+            entry.ammoWarnSent = false;
+            return;
+        }
+
+        if (ammo > 0 && !entry.ammoWarnSent) {
+            entry.ammoWarnSent = true;
+            BotManager.getInstance().botSay(bot, BotManager.randomReply(AMMO_LOW_MSGS));
+            return;
+        }
+
+        if (ammo <= 0 && !entry.noAmmo) {
+            entry.noAmmo = true;
+            if (entry.grinding) {
+                entry.grinding = false;
+                entry.following = true;
+                BotManager.getInstance().botSay(bot, BotManager.randomReply(AMMO_OUT_MSGS));
+            }
+        }
+    }
+
+    /** Counts total ammo in USE inventory matching the bot's equipped weapon type. */
+    static int countAmmo(Character bot, WeaponType weaponType) {
+        if (weaponType == null || !isRangedAmmoWeapon(weaponType)) {
+            return Integer.MAX_VALUE;
+        }
+        boolean soulArrow = bot.getBuffedValue(BuffStat.SOULARROW) != null;
+        boolean shadowClaw = bot.getBuffedValue(BuffStat.SHADOW_CLAW) != null;
+        if (soulArrow || shadowClaw) {
+            return Integer.MAX_VALUE;
+        }
+        int total = 0;
+        for (Item item : bot.getInventory(InventoryType.USE).list()) {
+            int id = item.getItemId();
+            boolean match = switch (weaponType) {
+                case BOW -> ItemConstants.isArrowForBow(id);
+                case CROSSBOW -> ItemConstants.isArrowForCrossBow(id);
+                case CLAW -> ItemConstants.isThrowingStar(id);
+                case GUN -> ItemConstants.isBullet(id);
+                default -> false;
+            };
+            if (match) {
+                total += item.getQuantity();
+            }
+        }
+        return total;
     }
 
     private static boolean hasNearbyPartyMemberMissingBuff(Character bot, StatEffect fx) {

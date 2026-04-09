@@ -5,6 +5,7 @@ import client.Character;
 import client.QuestStatus;
 import client.inventory.InventoryType;
 import client.inventory.Item;
+import client.inventory.WeaponType;
 import constants.inventory.ItemConstants;
 import net.server.Server;
 import net.server.world.Party;
@@ -1083,18 +1084,25 @@ public class BotManager {
         }
 
         // Follow mode: attack monsters already in attack range without chasing
-        if (entry.following && runAiTick && !entry.climbing
+        if (entry.following && !entry.noAmmo && runAiTick && !entry.climbing
                 && Math.abs(botPos.x - owner.getPosition().x) <= BotMovementManager.cfg.FOLLOW_DIST * 5) {
             Monster followTarget = BotCombatManager.findGrindTarget(bot);
             if (followTarget != null) {
                 Point followTargetPos = followTarget.getPosition();
-                if (BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(
-                        BotAttackExecutionProvider.getEquippedWeaponType(bot), botPos, followTargetPos)) {
+                WeaponType followWeaponType = BotAttackExecutionProvider.getEquippedWeaponType(bot);
+                boolean followRetreat = entry.degenAttackDone
+                        || BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(followWeaponType, botPos, followTargetPos);
+                if (followRetreat) {
                     targetPos = selectGrindNavigationTarget(entry, botPos, followTargetPos);
+                    entry.degenAttackDone = false;
                 } else {
                     BotCombatManager.AttackPlan ap = BotCombatManager.planAttack(entry, bot, followTarget);
                     if (BotCombatManager.isTargetInAttackRange(ap, bot, followTarget)) {
                         BotCombatManager.attackMonster(entry, bot, ap);
+                        if (ap.isCloseRangeRoute()
+                                && BotCombatManager.isRangedAmmoWeapon(followWeaponType)) {
+                            entry.degenAttackDone = true;
+                        }
                         if (!entry.inAir) return;
                     }
                 }
@@ -1137,13 +1145,19 @@ public class BotManager {
             entry.grindTarget = target;
             Point tp = target.getPosition();
             BotCombatManager.AttackPlan attackPlan = BotCombatManager.planAttack(entry, bot, target);
-            boolean shouldRetreatForRangedSpacing = BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(
-                    BotAttackExecutionProvider.getEquippedWeaponType(bot), botPos, tp);
+            WeaponType grindWeaponType = BotAttackExecutionProvider.getEquippedWeaponType(bot);
+            boolean shouldRetreatForRangedSpacing = entry.degenAttackDone
+                    || BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(grindWeaponType, botPos, tp);
 
             if (!entry.climbing) {
                 if (!shouldRetreatForRangedSpacing && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)) {
                     // In range — attack if grounded, or during ascent of a jump
                     BotCombatManager.attackMonster(entry, bot, attackPlan);
+                    // If a ranged bot just did a degenerate close-range hit, force retreat next tick
+                    if (attackPlan.isCloseRangeRoute()
+                            && BotCombatManager.isRangedAmmoWeapon(grindWeaponType)) {
+                        entry.degenAttackDone = true;
+                    }
                     if (!entry.inAir) return;
                 } else if (!entry.inAir
                         && BotCombatManager.isTargetJumpable(attackPlan.isCloseRangeRoute(), botPos, tp)) {
@@ -1157,6 +1171,9 @@ public class BotManager {
             // can make rope/ladder bots path back onto the nearby foothold instead of toward
             // the monster's actual region.
             targetPos = selectGrindNavigationTarget(entry, botPos, tp);
+            if (entry.degenAttackDone && shouldRetreatForRangedSpacing) {
+                entry.degenAttackDone = false;
+            }
         }
 
         stepMovementCore(entry, targetPos, runAiTick, entry.grinding);

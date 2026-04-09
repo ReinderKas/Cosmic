@@ -270,7 +270,14 @@ final class BotAttackExecutionProvider {
     }
 
     static boolean shouldRetreatFromNearbyTarget(WeaponType weaponType, Point botPos, Point targetPos) {
-        return shouldDegenerateRangedAttack(weaponType, botPos, targetPos);
+        if (!isDegenerateCapableRangedWeapon(weaponType) || botPos == null || targetPos == null) {
+            return false;
+        }
+
+        int dx = Math.abs(targetPos.x - botPos.x);
+        int dy = Math.abs(targetPos.y - botPos.y);
+        return dx <= BotCombatManager.cfg.RANGED_RETREAT_THRESHOLD_X
+                && dy <= BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_Y;
     }
 
     static Point retreatTargetPosition(Point botPos, Point targetPos) {

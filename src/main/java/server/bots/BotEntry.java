@@ -77,6 +77,11 @@ public class BotEntry {
     long nextSupportHealAt = 0L;
     boolean supportHealsEnabled = true;
 
+    // Ammo
+    boolean noAmmo = false;
+    boolean ammoWarnSent = false;
+    boolean degenAttackDone = false; // force retreat after an accidental close-range hit
+
     // Damage taken
     long deadUntil = 0;
     int mobHitCooldownMs = 0;
