@@ -35,7 +35,7 @@ With multiple bots: target one specifically with a unique name-start prefix, ful
 ```
 stop - party wide stop
 jason follow - only Jason will follow
-bo come - only the unique bot whose name starts with "bo" will follow
+jas come - only the unique bot whose name starts with "jas" will follow
 1 stop - only bot slot 1 will stop
 grind - party wide auto grind
 jason stop - only jason will stop
