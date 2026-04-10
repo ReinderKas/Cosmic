@@ -155,7 +155,8 @@ final class BotShopManager {
             actions.add((sequence, shop) -> {
                 int recharged = doRecharge(bot, shop);
                 if (recharged > 0) {
-                    sequence.bought().add("recharged " + recharged + " stack" + (recharged > 1 ? "s" : ""));
+                    String ammoName = wt == WeaponType.GUN ? "bullets" : "throwing stars";
+                    sequence.bought().add("refilled " + recharged + " set" + (recharged > 1 ? "s" : "") + " of my " + ammoName);
                 }
                 return sequence;
             });
@@ -288,7 +289,7 @@ final class BotShopManager {
         for (Item item : bot.getInventory(InventoryType.USE).list()) {
             if (ItemConstants.isRechargeable(item.getItemId())) {
                 short slotMax = ItemInformationProvider.getInstance().getSlotMax(bot.getClient(), item.getItemId());
-                if (item.getQuantity() < slotMax) {
+                if (item.getQuantity() < slotMax * 4 / 5) {
                     return true;
                 }
             }
