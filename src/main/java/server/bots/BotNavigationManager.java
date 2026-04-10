@@ -470,7 +470,8 @@ final class BotNavigationManager {
                     && !canExecuteDropFromCurrentPosition(BotNavigationGraphProvider.getGraph(entry.bot.getMap(), entry.movementProfile),
                     entry.bot.getMap(), botPos, edge);
             case CLIMB -> entry.climbing
-                    ? !canExecuteClimbExitFromCurrentPosition(BotNavigationGraphProvider.getGraph(entry.bot.getMap(), entry.movementProfile),
+                    ? edge.launchStepX != 0
+                    && !canExecuteClimbExitFromCurrentPosition(BotNavigationGraphProvider.getGraph(entry.bot.getMap(), entry.movementProfile),
                     entry.bot.getMap(), botPos, edge)
                     : !canExecuteClimbEntryFromCurrentPosition(entry.bot.getMap(), botPos, edge,
                     findRopeForRegion(entry.bot.getMap(),
@@ -518,10 +519,12 @@ final class BotNavigationManager {
             return new Point(edge.startPoint);
         }
         if (entry.climbing) {
-            // launchStepX==0: target endPoint — physics lands the bot via resolveClimbBoundary
-            // when it reaches topY. Targeting startPoint causes oscillation because the bot
-            // repeatedly overshoots the entry anchor Y and re-approaches from above/below.
-            return new Point(edge.endPoint);
+            // launchStepX==0: keep holding climb direction on the rope and let physics dismount
+            // the bot at the boundary. The on-rope steering target should stay on the rope X;
+            // trying to snap to an off-rope landing point is a runtime-only constraint and can
+            // re-clamp the bot back onto the rope top/bottom.
+            int ropeX = entry.climbRope != null ? entry.climbRope.x() : edge.startPoint.x;
+            return new Point(ropeX, edge.endPoint.y);
         }
         return new Point(edge.startPoint);
     }

@@ -217,6 +217,52 @@ class BotMovementManagerTest {
     }
 
     @Test
+    void shouldNotSnapPreciseClimbTargetOutsideRopeSpan() {
+        BotEntry entry = new BotEntry(null, null, null);
+        entry.climbing = true;
+        entry.climbRope = new Rope(3398, 126, 332, false);
+        entry.navPreciseTarget = true;
+
+        assertFalse(BotMovementManager.shouldSnapToClimbTarget(entry, new Point(3398, 124), -2));
+        assertFalse(BotMovementManager.shouldSnapToClimbTarget(entry, new Point(3398, 332), 2));
+    }
+
+    @Test
+    void shouldKeepClimbingUntilPhysicsDismountsTopStepOffExit() {
+        Character bot = mock(Character.class);
+        MapleMap map = mock(MapleMap.class);
+        AtomicReference<Point> position = new AtomicReference<>(new Point(3398, 126));
+        when(bot.getPosition()).thenAnswer(invocation -> new Point(position.get()));
+        doAnswer(invocation -> {
+            position.set(new Point(invocation.getArgument(0)));
+            return null;
+        }).when(bot).setPosition(any(Point.class));
+        when(bot.getMap()).thenReturn(map);
+        when(bot.getId()).thenReturn(1);
+        when(bot.getHp()).thenReturn(100);
+        when(map.getPointBelow(any(Point.class))).thenAnswer(invocation -> {
+            Point probe = invocation.getArgument(0);
+            return new Point(probe.x, 124);
+        });
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.climbing = true;
+        entry.climbRope = new Rope(3398, 126, 332, false);
+        entry.navEdge = new BotNavigationGraph.Edge(
+                53, 25, BotNavigationGraph.EdgeType.CLIMB,
+                new Point(3398, 156), new Point(3443, 124),
+                0, 0, 3398, 126, 332, 400
+        );
+        entry.navPreciseTarget = true;
+
+        BotMovementManager.tickClimbing(entry, new Point(3398, 124), true);
+
+        assertEquals(new Point(3398, 124), bot.getPosition());
+        assertFalse(entry.climbing);
+        assertFalse(entry.inAir);
+    }
+
+    @Test
     void shouldUseEdgeSpecificPreciseStopDist() {
         // Regression: pathlog-CRASH-2026-04-02 — bot 2px from CLIMB entry (969 vs 967),
         // stopDist=4 caused it to idle short of the entry, blocking canExecuteClimbEntry forever.

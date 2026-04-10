@@ -277,6 +277,9 @@ class BotMovementManager {
         if (targetPos.x != entry.climbRope.x()) {
             return false;
         }
+        if (targetPos.y <= entry.climbRope.topY() || targetPos.y >= entry.climbRope.bottomY()) {
+            return false;
+        }
         return Math.abs(dy) < BotPhysicsEngine.climbStepPerTick();
     }
 
@@ -390,10 +393,10 @@ class BotMovementManager {
 
             targetPos = adjustGrindingTargetPosition(entry, currentFh, targetPos);
             if (entry.graphWarmupFallback && targetPos != null) {
-                if (tryGraphWarmupImmediateAction(entry, botPos, targetPos)) {
+                if (BotFallbackMovementManager.tryImmediateAction(entry, botPos, targetPos)) {
                     return;
                 }
-                targetPos = resolveGraphWarmupSteeringTarget(entry, botPos, targetPos);
+                targetPos = BotFallbackMovementManager.resolveSteeringTarget(entry, botPos, targetPos);
             }
 
             MoveAction action = planGroundAction(entry, botPos, targetPos);
@@ -467,7 +470,7 @@ class BotMovementManager {
         boolean canWalkStep = BotPhysicsEngine.canWalkGroundStep(entry.bot.getMap(), botPos, stepX);
         if (!canWalkStep) {
             if ((directionalDrop && Integer.signum(stepX) == Integer.signum(entry.navEdge.launchStepX))
-                    || shouldWalkOffDuringGraphWarmup(entry, botPos, targetPos, stepX)) {
+                    || BotFallbackMovementManager.shouldWalkOffLedge(entry, botPos, targetPos, stepX)) {
                 // Walk-off drops should keep walking in the authored direction until physics
                 // detects lost ground and transitions into a fall with preserved momentum.
                 return MoveAction.walk(stepX);
@@ -556,158 +559,6 @@ class BotMovementManager {
 
         entry.wasMovingX = true;
         return dx >= 0 ? stepMagnitude : -stepMagnitude;
-    }
-
-    private static boolean shouldWalkOffDuringGraphWarmup(BotEntry entry, Point botPos, Point targetPos, int stepX) {
-        if (entry == null || !entry.graphWarmupFallback || botPos == null || targetPos == null || stepX == 0) {
-            return false;
-        }
-        if (targetPos.y <= botPos.y + BotPhysicsEngine.cfg.MAX_SNAP_DROP) {
-            return false;
-        }
-        Point ahead = new Point(botPos.x + stepX, botPos.y);
-        return BotPhysicsEngine.isGroundFarBelow(entry.bot.getMap(), ahead);
-    }
-
-    private static Point resolveGraphWarmupSteeringTarget(BotEntry entry, Point botPos, Point targetPos) {
-        Rope rope = selectGraphWarmupRope(entry, botPos, targetPos);
-        if (rope == null) {
-            return targetPos;
-        }
-        return new Point(rope.x(), botPos.y);
-    }
-
-    private static boolean tryGraphWarmupImmediateAction(BotEntry entry, Point botPos, Point targetPos) {
-        Character bot = entry.bot;
-        MapleMap map = bot.getMap();
-        Rope rope = selectGraphWarmupRope(entry, botPos, targetPos);
-        if (rope != null) {
-            if (canDirectlyAttachToWarmupRope(botPos, rope)) {
-                int attachY = Math.max(rope.topY(), Math.min(botPos.y, rope.bottomY()));
-                BotPhysicsEngine.attachToRope(entry, bot, rope, attachY);
-                broadcastMovement(entry);
-                return true;
-            }
-
-            int ropeDx = rope.x() - botPos.x;
-            int ropeJumpRange = Math.max(BotPhysicsEngine.cfg.ROPE_GRAB_X * 2,
-                    BotPhysicsEngine.walkStep(map, entry.movementProfile) * 2);
-            if (Math.abs(ropeDx) <= ropeJumpRange
-                    && BotPhysicsEngine.canReachRopeFromGround(map, botPos, rope, entry.movementProfile)) {
-                initiateRopeJump(entry, bot, ropeDx);
-                return true;
-            }
-        }
-
-        Point steeringTarget = rope == null ? targetPos : new Point(rope.x(), targetPos.y);
-        int stepX = resolveGroundStepX(entry, botPos, steeringTarget, cfg.STOP_DIST, cfg.FOLLOW_DIST);
-        if (stepX == 0 || BotPhysicsEngine.canWalkGroundStep(map, botPos, stepX)) {
-            return false;
-        }
-
-        if (shouldUseGraphWarmupDownJump(entry, botPos, targetPos, rope)) {
-            BotPhysicsEngine.queueDownJump(entry, bot);
-            broadcastMovement(entry);
-            return true;
-        }
-
-        if (shouldUseGraphWarmupJump(entry, botPos, steeringTarget, stepX)) {
-            initiateJump(entry, bot, steeringTarget.x - botPos.x);
-            return true;
-        }
-
-        return false;
-    }
-
-    private static Rope selectGraphWarmupRope(BotEntry entry, Point botPos, Point targetPos) {
-        if (entry == null || entry.bot == null || botPos == null || targetPos == null) {
-            return null;
-        }
-
-        int dy = targetPos.y - botPos.y;
-        if (Math.abs(dy) < Math.max(cfg.JUMP_Y_THRESH * 2, 60)) {
-            return null;
-        }
-
-        MapleMap map = entry.bot.getMap();
-        int walkStep = BotPhysicsEngine.walkStep(map, entry.movementProfile);
-        int searchX = Math.max(walkStep * 4, 90);
-        Rope best = null;
-        int bestScore = Integer.MAX_VALUE;
-        for (Rope rope : map.getRopes()) {
-            int dx = Math.abs(rope.x() - botPos.x);
-            if (dx > searchX) {
-                continue;
-            }
-
-            if (dy < 0) {
-                if (rope.topY() >= botPos.y - BotPhysicsEngine.cfg.MAX_SNAP_DROP) {
-                    continue;
-                }
-                if (rope.bottomY() < botPos.y - BotPhysicsEngine.cfg.MAX_SNAP_DROP) {
-                    continue;
-                }
-                if (rope.topY() > targetPos.y + cfg.FOLLOW_Y_CAP) {
-                    continue;
-                }
-            } else {
-                if (rope.bottomY() <= botPos.y + BotPhysicsEngine.cfg.MAX_SNAP_DROP) {
-                    continue;
-                }
-                if (rope.topY() > botPos.y + BotPhysicsEngine.cfg.MAX_SLOPE_UP) {
-                    continue;
-                }
-                if (rope.bottomY() < targetPos.y - cfg.FOLLOW_Y_CAP) {
-                    continue;
-                }
-            }
-
-            int verticalPenalty = dy < 0
-                    ? Math.max(0, rope.topY() - targetPos.y)
-                    : Math.max(0, targetPos.y - rope.bottomY());
-            int score = dx * 4 + verticalPenalty;
-            if (score < bestScore) {
-                best = rope;
-                bestScore = score;
-            }
-        }
-        return best;
-    }
-
-    private static boolean canDirectlyAttachToWarmupRope(Point botPos, Rope rope) {
-        return botPos != null
-                && rope != null
-                && Math.abs(botPos.x - rope.x()) <= BotPhysicsEngine.cfg.ROPE_GRAB_X
-                && botPos.y >= rope.topY()
-                && botPos.y <= rope.bottomY() + BotPhysicsEngine.cfg.MAX_SNAP_DROP;
-    }
-
-    private static boolean shouldUseGraphWarmupDownJump(BotEntry entry, Point botPos, Point targetPos, Rope rope) {
-        if (entry == null || botPos == null || targetPos == null || rope != null) {
-            return false;
-        }
-        int dy = targetPos.y - botPos.y;
-        if (dy < Math.max(BotPhysicsEngine.cfg.MAX_SNAP_DROP * 2, 60)) {
-            return false;
-        }
-        return Math.abs(targetPos.x - botPos.x) <= Math.max(cfg.FOLLOW_DIST, BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile) * 4);
-    }
-
-    private static boolean shouldUseGraphWarmupJump(BotEntry entry, Point botPos, Point steeringTarget, int stepX) {
-        if (entry == null || botPos == null || steeringTarget == null || stepX == 0) {
-            return false;
-        }
-        if (shouldWalkOffDuringGraphWarmup(entry, botPos, steeringTarget, stepX)) {
-            return false;
-        }
-
-        MapleMap map = entry.bot.getMap();
-        int dx = steeringTarget.x - botPos.x;
-        int dy = steeringTarget.y - botPos.y;
-        int maxJumpTravel = BotPhysicsEngine.maxJumpHorizontalTravel(map, entry.movementProfile);
-        float maxJumpHeight = BotPhysicsEngine.calculateMaxJumpHeight(entry.movementProfile);
-        return Math.abs(dx) <= maxJumpTravel + cfg.FOLLOW_DIST
-                && dy >= -(maxJumpHeight + BotPhysicsEngine.cfg.MAX_SNAP_DROP);
     }
 
     private static void applyGroundAction(BotEntry entry, Foothold currentFh, MoveAction action) {
