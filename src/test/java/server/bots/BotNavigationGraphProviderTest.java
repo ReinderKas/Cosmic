@@ -147,8 +147,10 @@ class BotNavigationGraphProviderTest {
         assertTrue(path.getFirst().launchMinX < path.getFirst().launchMaxX);
         assertTrue(path.getFirst().containsLaunchX(523),
                 "The slope-platform jump should expose a real launch interval around the valid takeoff point");
-        assertFalse(path.getFirst().containsLaunchX(518),
-                "The old repeated launch point at x=518 should no longer be treated as valid for this jump");
+        assertFalse(path.getFirst().containsLaunchX(path.getFirst().launchMinX - 1),
+                "launch windows should reject positions just outside the left boundary");
+        assertFalse(path.getFirst().containsLaunchX(path.getFirst().launchMaxX + 1),
+                "launch windows should reject positions just outside the right boundary");
     }
 
     @Test

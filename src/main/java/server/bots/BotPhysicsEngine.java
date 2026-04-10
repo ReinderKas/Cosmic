@@ -1235,14 +1235,41 @@ final class BotPhysicsEngine {
                                            Point nextPos,
                                            int x,
                                            double progress) {
-        Point probe = new Point(x, previousPos.y + 1);
+        int yAtX = (int) Math.round(previousPos.y + (nextPos.y - previousPos.y) * progress);
+        AirCollision landing = landingAtProbeY(map, previousPos, x, yAtX, progress, previousPos.y + 1, false);
+        if (landing.type() == AirCollisionType.LAND) {
+            return landing;
+        }
+
+        // Catch tangential landings at the jump apex when the next platform sits exactly at the
+        // previous Y. Keep this forward-only so drops and down-jumps do not instantly re-land on
+        // the takeoff foothold they just left.
+        if (x != previousPos.x) {
+            return landingAtProbeY(map, previousPos, x, yAtX, progress, previousPos.y, true);
+        }
+
+        return AirCollision.none();
+    }
+
+    private static AirCollision landingAtProbeY(MapleMap map,
+                                                Point previousPos,
+                                                int x,
+                                                int yAtX,
+                                                double progress,
+                                                int probeY,
+                                                boolean requireTangentFloor) {
+        Point probe = new Point(x, probeY);
         Point floor = map.getPointBelow(probe);
         if (floor == null) {
             return AirCollision.none();
         }
 
-        int yAtX = (int) Math.round(previousPos.y + (nextPos.y - previousPos.y) * progress);
-        if (floor.y < previousPos.y || floor.y > yAtX) {
+        int minY = Math.min(previousPos.y, yAtX);
+        int maxY = Math.max(previousPos.y, yAtX);
+        if (floor.y < minY || floor.y > maxY) {
+            return AirCollision.none();
+        }
+        if (requireTangentFloor && floor.y != previousPos.y) {
             return AirCollision.none();
         }
 

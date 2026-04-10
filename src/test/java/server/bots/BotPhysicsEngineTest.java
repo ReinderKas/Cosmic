@@ -31,6 +31,7 @@ class BotPhysicsEngineTest {
     private static MapleMap ellinia;
     private static MapleMap kerning;
     private static MapleMap kpqS1;
+    private static MapleMap sleepyForest;
 
     @BeforeAll
     static void loadMaps() {
@@ -39,6 +40,7 @@ class BotPhysicsEngineTest {
         ellinia = BotNavigationMapLoader.loadMapGeometry(101000000);
         kerning = BotNavigationMapLoader.loadMapGeometry(103000000);
         kpqS1 = BotNavigationMapLoader.loadMapGeometry(103000800);
+        sleepyForest = BotNavigationMapLoader.loadMapGeometry(105040400);
     }
 
     @Test
@@ -326,6 +328,16 @@ class BotPhysicsEngineTest {
         assertNotNull(landing);
         assertEquals(new Point(4, 102), landing.point());
         assertEquals(2, landing.foothold().getId());
+    }
+
+    @Test
+    void shouldLandApexJumpOnSleepyForestUpperPlatform() {
+        BotPhysicsEngine.JumpLanding landing =
+                BotPhysicsEngine.simulateJumpLanding(sleepyForest, new Point(197, -14), 8);
+
+        assertNotNull(landing);
+        assertTrue(landing.point().y < 0,
+                "the logged r9->r5 jump should land on the upper platform instead of falling back to the ground below");
     }
 
     @Test

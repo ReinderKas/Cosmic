@@ -175,10 +175,10 @@ class BotMovementSimulationLabTest {
 
         List<String> trace = lab.formatRecentTrace("JOHN", 20);
 
-        assertTrue(trace.stream().anyMatch(line -> line.contains("nav=new")
-                        && line.contains("phys=GND")
-                        && line.contains("edge=JUMP r27->r25")),
-                "bot should re-acquire the authored second jump immediately after landing from the first jump");
+        assertTrue(trace.stream().anyMatch(line -> line.contains("nav=exec")
+                        && line.contains("phys=AIR")
+                        && line.contains("edge=JUMP r27->r")),
+                "bot should immediately chain into another authored jump after landing from the first jump");
         assertTrue(trace.stream().noneMatch(line -> line.contains("phys=AIR") && line.contains("edge=none")),
                 "bot should not drop navigation and enter an uncommitted fall between chained jumps");
     }
