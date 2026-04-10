@@ -726,7 +726,10 @@ public class InventoryManipulator {
     private static boolean isDisappearingItemDrop(Item it) {
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
         if (ii.isDropRestricted(it.getItemId())) {
-            return true;
+            // Quest items always disappear; loot-restricted (tradeBlock) items respect the flag
+            if (ii.isQuestItem(it.getItemId()) || !YamlConfig.config.server.UNTRADEABLE_ITEMS_TRADEABLE) {
+                return true;
+            }
         } else if (ii.isCash(it.getItemId())) {
             if (YamlConfig.config.server.USE_ENFORCE_UNMERCHABLE_CASH) {     // thanks Ari for noticing cash drops not available server-side
                 return true;

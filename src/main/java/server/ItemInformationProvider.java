@@ -1381,6 +1381,9 @@ public class ItemInformationProvider {
     }
 
     public boolean isPickupRestricted(int itemId) {
+        if (YamlConfig.config.server.DISABLE_ONE_OF_A_KIND_CHECK) {
+            return false;
+        }
         if (pickupRestrictionCache.containsKey(itemId)) {
             return pickupRestrictionCache.get(itemId);
         }
