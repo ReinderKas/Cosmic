@@ -270,6 +270,14 @@ final class BotNavigationGraphProvider {
         int cacheMisses;
     }
 
+    private record JumpLandingKey(int x, int y, int launchStepX) {
+    }
+
+    private static final class JumpLandingCache {
+        private final Map<JumpLandingKey, BotPhysicsEngine.JumpLanding> hits = new HashMap<>();
+        private final Set<JumpLandingKey> misses = new HashSet<>();
+    }
+
     static BotNavigationGraph getGraph(MapleMap map) {
         return getGraph(map, BotMovementProfile.base());
     }
@@ -517,6 +525,9 @@ final class BotNavigationGraphProvider {
             Map<Integer, Rope> ropeByRegionId = buildRopeByRegionId(map, ropeRegions);
             Map<Integer, List<BotNavigationGraph.Edge>> outgoing = new HashMap<>();
             Set<String> edgeKeys = new HashSet<>();
+            JumpLandingCache jumpLandingCache = new JumpLandingCache();
+
+            BotPhysicsEngine.setBuildWalkRegionLookup(map, regionsById, regionIdByFootholdId, footholdsById);
 
             phaseStartedAt = System.nanoTime();
             for (Foothold foothold : walkableFootholds) {
@@ -534,7 +545,7 @@ final class BotNavigationGraphProvider {
             phaseStartedAt = System.nanoTime();
             for (BotNavigationGraph.Region region : groundRegions) {
                 addJumpEdges(region, map, regionsById, regionIdByFootholdId,
-                        anchorsByRegionId.getOrDefault(region.id, List.of()), outgoing, edgeKeys, movementProfile);
+                        anchorsByRegionId.getOrDefault(region.id, List.of()), outgoing, edgeKeys, jumpLandingCache, movementProfile);
             }
             buildProfile.buildJumpEdgesNs = System.nanoTime() - phaseStartedAt;
 
@@ -573,6 +584,7 @@ final class BotNavigationGraphProvider {
                     report.jumpCacheHitCount);
             return graph;
         } finally {
+            BotPhysicsEngine.clearBuildWalkRegionLookup();
             ACTIVE_BUILD_PROFILE.remove();
         }
     }
@@ -802,20 +814,15 @@ final class BotNavigationGraphProvider {
                                      List<Point> anchors,
                                      Map<Integer, List<BotNavigationGraph.Edge>> outgoing,
                                      Set<String> edgeKeys,
+                                     JumpLandingCache jumpLandingCache,
                                      BotMovementProfile movementProfile) {
         long startedAt = System.nanoTime();
         int jumpStep = BotPhysicsEngine.walkStep(map, movementProfile);
         JumpBuildStats stats = new JumpBuildStats();
         for (Point anchor : anchors) {
             for (int launchStepX : new int[]{-jumpStep, 0, jumpStep}) {
-                BuildProfileBuilder profile = ACTIVE_BUILD_PROFILE.get();
-                if (profile != null) {
-                    profile.recordJumpSample(false);
-                }
-                stats.sampleCount++;
-                stats.cacheMisses++;
-
-                BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateJumpLanding(map, anchor, launchStepX, movementProfile);
+                BotPhysicsEngine.JumpLanding landing = simulateJumpLandingCached(
+                        map, anchor, launchStepX, jumpLandingCache, stats, movementProfile);
                 if (landing == null) {
                     continue;
                 }
@@ -830,7 +837,7 @@ final class BotNavigationGraphProvider {
                 }
 
                 JumpLaunchWindow launchWindow = expandJumpLaunchWindow(from, map, regionIdByFootholdId,
-                        anchor.x, launchStepX, to.id, stats, movementProfile);
+                        anchor.x, launchStepX, to.id, stats, jumpLandingCache, movementProfile);
                 if (launchWindow == null) {
                     continue;
                 }
@@ -857,6 +864,46 @@ final class BotNavigationGraphProvider {
         }
     }
 
+    private static BotPhysicsEngine.JumpLanding simulateJumpLandingCached(MapleMap map,
+                                                                          Point start,
+                                                                          int launchStepX,
+                                                                          JumpLandingCache jumpLandingCache,
+                                                                          JumpBuildStats stats,
+                                                                          BotMovementProfile movementProfile) {
+        JumpLandingKey key = new JumpLandingKey(start.x, start.y, launchStepX);
+        BotPhysicsEngine.JumpLanding cachedLanding = jumpLandingCache.hits.get(key);
+        if (cachedLanding != null) {
+            recordJumpSample(stats, true);
+            return cachedLanding;
+        }
+        if (jumpLandingCache.misses.contains(key)) {
+            recordJumpSample(stats, true);
+            return null;
+        }
+
+        BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateJumpLanding(map, start, launchStepX, movementProfile);
+        if (landing == null) {
+            jumpLandingCache.misses.add(key);
+        } else {
+            jumpLandingCache.hits.put(key, landing);
+        }
+        recordJumpSample(stats, false);
+        return landing;
+    }
+
+    private static void recordJumpSample(JumpBuildStats stats, boolean cacheHit) {
+        BuildProfileBuilder profile = ACTIVE_BUILD_PROFILE.get();
+        if (profile != null) {
+            profile.recordJumpSample(cacheHit);
+        }
+        stats.sampleCount++;
+        if (cacheHit) {
+            stats.cacheHits++;
+        } else {
+            stats.cacheMisses++;
+        }
+    }
+
     private static Map<Integer, List<Point>> buildAnchorsByRegionId(List<BotNavigationGraph.Region> regions,
                                                                     Map<Integer, List<Integer>> featureXsByRegionId,
                                                                     BotMovementProfile movementProfile) {
@@ -877,20 +924,17 @@ final class BotNavigationGraphProvider {
                                                            int launchStepX,
                                                            int targetRegionId,
                                                            JumpBuildStats stats,
+                                                           JumpLandingCache jumpLandingCache,
                                                            BotMovementProfile movementProfile) {
-        int minX = findJumpLaunchBoundary(from, map, regionIdByFootholdId, anchorX, launchStepX, targetRegionId, true, stats, movementProfile);
-        int maxX = findJumpLaunchBoundary(from, map, regionIdByFootholdId, anchorX, launchStepX, targetRegionId, false, stats, movementProfile);
+        int minX = findJumpLaunchBoundary(from, map, regionIdByFootholdId, anchorX, launchStepX, targetRegionId,
+                true, stats, jumpLandingCache, movementProfile);
+        int maxX = findJumpLaunchBoundary(from, map, regionIdByFootholdId, anchorX, launchStepX, targetRegionId,
+                false, stats, jumpLandingCache, movementProfile);
 
         int representativeX = (minX + maxX) / 2;
         Point representativeStart = from.pointAt(representativeX);
-        BuildProfileBuilder profile = ACTIVE_BUILD_PROFILE.get();
-        if (profile != null) {
-            profile.recordJumpSample(false);
-        }
-        stats.sampleCount++;
-        stats.cacheMisses++;
         BotPhysicsEngine.JumpLanding representativeLanding =
-                BotPhysicsEngine.simulateJumpLanding(map, representativeStart, launchStepX, movementProfile);
+                simulateJumpLandingCached(map, representativeStart, launchStepX, jumpLandingCache, stats, movementProfile);
         if (representativeLanding == null) {
             return null;
         }
@@ -911,6 +955,7 @@ final class BotNavigationGraphProvider {
                                               int targetRegionId,
                                               boolean searchLeft,
                                               JumpBuildStats stats,
+                                              JumpLandingCache jumpLandingCache,
                                               BotMovementProfile movementProfile) {
         int validX = anchorX;
         int invalidX = anchorX;
@@ -924,7 +969,8 @@ final class BotNavigationGraphProvider {
                 break;
             }
 
-            if (!landsJumpInRegion(map, regionIdByFootholdId, from.pointAt(probeX), launchStepX, targetRegionId, stats, movementProfile)) {
+            if (!landsJumpInRegion(map, regionIdByFootholdId, from.pointAt(probeX), launchStepX, targetRegionId,
+                    stats, jumpLandingCache, movementProfile)) {
                 invalidX = probeX;
                 break;
             }
@@ -942,7 +988,8 @@ final class BotNavigationGraphProvider {
             if (profile != null) {
                 profile.recordJumpBoundaryRefineProbe();
             }
-            boolean valid = landsJumpInRegion(map, regionIdByFootholdId, from.pointAt(probeX), launchStepX, targetRegionId, stats, movementProfile);
+            boolean valid = landsJumpInRegion(map, regionIdByFootholdId, from.pointAt(probeX), launchStepX, targetRegionId,
+                    stats, jumpLandingCache, movementProfile);
             if (valid) {
                 validX = probeX;
             } else {
@@ -958,14 +1005,10 @@ final class BotNavigationGraphProvider {
                                              int launchStepX,
                                              int targetRegionId,
                                              JumpBuildStats stats,
+                                             JumpLandingCache jumpLandingCache,
                                              BotMovementProfile movementProfile) {
-        BuildProfileBuilder profile = ACTIVE_BUILD_PROFILE.get();
-        if (profile != null) {
-            profile.recordJumpSample(false);
-        }
-        stats.sampleCount++;
-        stats.cacheMisses++;
-        BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateJumpLanding(map, start, launchStepX, movementProfile);
+        BotPhysicsEngine.JumpLanding landing = simulateJumpLandingCached(
+                map, start, launchStepX, jumpLandingCache, stats, movementProfile);
         if (landing == null) {
             return false;
         }

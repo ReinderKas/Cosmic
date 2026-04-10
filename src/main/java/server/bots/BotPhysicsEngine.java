@@ -7,6 +7,9 @@ import server.maps.MapleMap;
 import server.maps.Rope;
 
 import java.awt.*;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 final class BotPhysicsEngine {
     private static final double CLIENT_GROUND_STEP_MS = 8.0;
@@ -63,6 +66,12 @@ final class BotPhysicsEngine {
     private record GroundStepPreview(int baseY, Point point, Foothold foothold, boolean lostGround) {
     }
 
+    private record WalkRegionLookup(int mapId,
+                                    Map<Integer, BotNavigationGraph.Region> regionsById,
+                                    Map<Integer, Integer> regionIdByFootholdId,
+                                    Map<Integer, Foothold> footholdsById) {
+    }
+
     record MovementSnapshot(int velX, int velY, int stance) {
     }
 
@@ -109,6 +118,8 @@ final class BotPhysicsEngine {
     }
 
     static Config cfg = new Config();
+    private static final ThreadLocal<WalkRegionLookup> ACTIVE_BUILD_WALK_REGION_LOOKUP = new ThreadLocal<>();
+    private static final Map<Integer, Map<Integer, Foothold>> FOOTHOLDS_BY_ID_BY_MAP_ID = new ConcurrentHashMap<>();
 
     private BotPhysicsEngine() {
     }
@@ -304,12 +315,12 @@ final class BotPhysicsEngine {
             return false;
         }
 
-        BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(map);
-        if (graph == null) {
+        WalkRegionLookup lookup = resolveWalkRegionLookup(map);
+        if (lookup == null) {
             return false;
         }
-        int firstRegionId = graph.regionIdByFootholdId.getOrDefault(first.getId(), -1);
-        int secondRegionId = graph.regionIdByFootholdId.getOrDefault(second.getId(), -1);
+        int firstRegionId = lookup.regionIdByFootholdId().getOrDefault(first.getId(), -1);
+        int secondRegionId = lookup.regionIdByFootholdId().getOrDefault(second.getId(), -1);
         return firstRegionId >= 0 && firstRegionId == secondRegionId;
     }
 
@@ -339,11 +350,11 @@ final class BotPhysicsEngine {
         if (map == null || foothold == null) {
             return false;
         }
-        BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(map);
-        if (graph == null) {
+        WalkRegionLookup lookup = resolveWalkRegionLookup(map);
+        if (lookup == null) {
             return false;
         }
-        return graph.regionIdByFootholdId.getOrDefault(foothold.getId(), -1) >= 0;
+        return lookup.regionIdByFootholdId().getOrDefault(foothold.getId(), -1) >= 0;
     }
 
     private static GroundRegionSample findWalkRegionGroundSample(MapleMap map, Foothold foothold, int x, int referenceY) {
@@ -351,12 +362,12 @@ final class BotPhysicsEngine {
             return null;
         }
 
-        BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(map);
-        if (graph == null) {
+        WalkRegionLookup lookup = resolveWalkRegionLookup(map);
+        if (lookup == null) {
             return null;
         }
-        int regionId = graph.regionIdByFootholdId.getOrDefault(foothold.getId(), -1);
-        BotNavigationGraph.Region region = graph.getRegion(regionId);
+        int regionId = lookup.regionIdByFootholdId().getOrDefault(foothold.getId(), -1);
+        BotNavigationGraph.Region region = lookup.regionsById().get(regionId);
         if (region == null || region.isRopeRegion) {
             return null;
         }
@@ -399,19 +410,62 @@ final class BotPhysicsEngine {
             }
         }
 
-        if (bestSegment == null || bestPoint == null || map.getFootholds() == null) {
+        if (bestSegment == null || bestPoint == null) {
             return null;
         }
 
-        int bestFootholdId = bestSegment.footholdId;
-        Foothold bestFoothold = map.getFootholds().getAllFootholds().stream()
-                .filter(candidate -> candidate.getId() == bestFootholdId)
-                .findFirst()
-                .orElse(null);
+        Foothold bestFoothold = lookup.footholdsById().get(bestSegment.footholdId);
         if (bestFoothold == null) {
             return null;
         }
         return new GroundRegionSample(bestPoint, bestFoothold);
+    }
+
+    static void setBuildWalkRegionLookup(MapleMap map,
+                                         Map<Integer, BotNavigationGraph.Region> regionsById,
+                                         Map<Integer, Integer> regionIdByFootholdId,
+                                         Map<Integer, Foothold> footholdsById) {
+        if (map == null || regionsById == null || regionIdByFootholdId == null || footholdsById == null) {
+            ACTIVE_BUILD_WALK_REGION_LOOKUP.remove();
+            return;
+        }
+        ACTIVE_BUILD_WALK_REGION_LOOKUP.set(new WalkRegionLookup(map.getId(), regionsById, regionIdByFootholdId, footholdsById));
+    }
+
+    static void clearBuildWalkRegionLookup() {
+        ACTIVE_BUILD_WALK_REGION_LOOKUP.remove();
+    }
+
+    private static WalkRegionLookup resolveWalkRegionLookup(MapleMap map) {
+        if (map == null) {
+            return null;
+        }
+
+        WalkRegionLookup activeLookup = ACTIVE_BUILD_WALK_REGION_LOOKUP.get();
+        if (activeLookup != null && activeLookup.mapId() == map.getId()) {
+            return activeLookup;
+        }
+
+        BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(map);
+        if (graph == null) {
+            return null;
+        }
+
+        return new WalkRegionLookup(map.getId(), graph.regionsById, graph.regionIdByFootholdId, footholdsById(map));
+    }
+
+    private static Map<Integer, Foothold> footholdsById(MapleMap map) {
+        if (map == null || map.getFootholds() == null) {
+            return Map.of();
+        }
+
+        return FOOTHOLDS_BY_ID_BY_MAP_ID.computeIfAbsent(map.getId(), ignored -> {
+            Map<Integer, Foothold> footholdsById = new HashMap<>();
+            for (Foothold foothold : map.getFootholds().getAllFootholds()) {
+                footholdsById.put(foothold.getId(), foothold);
+            }
+            return footholdsById;
+        });
     }
 
     private static GroundStepPreview previewGroundStep(MapleMap map, Point currentPos, Foothold foothold, int nextX) {
