@@ -730,6 +730,7 @@ public class InventoryManipulator {
             if (ii.isQuestItem(it.getItemId()) || !YamlConfig.config.server.UNTRADEABLE_ITEMS_TRADEABLE) {
                 return true;
             }
+            return false;
         } else if (ii.isCash(it.getItemId())) {
             if (YamlConfig.config.server.USE_ENFORCE_UNMERCHABLE_CASH) {     // thanks Ari for noticing cash drops not available server-side
                 return true;
