@@ -84,6 +84,12 @@ final class BotPhysicsEngine {
         }
     }
 
+    record WalkOffLanding(Point launchPoint,
+                          int launchStepX,
+                          JumpLanding landing,
+                          int travelTimeMs) {
+    }
+
     private enum AirCollisionType {
         NONE,
         WALL,
@@ -712,6 +718,53 @@ final class BotPhysicsEngine {
 
         return new GroundStepResult(preview.point(), preview.foothold() != null ? preview.foothold() : foothold, displaced,
                 stepX, velocityFromDeltaX(displaced.physX() - currentPos.x), false);
+    }
+
+    static WalkOffLanding simulateWalkOffLanding(MapleMap map,
+                                                 Point from,
+                                                 int desiredDir,
+                                                 BotMovementProfile profile) {
+        return simulateWalkOffLanding(map, from, desiredDir, initialGroundTravelState(from), profile);
+    }
+
+    static WalkOffLanding simulateWalkOffLanding(MapleMap map,
+                                                 Point from,
+                                                 int desiredDir,
+                                                 GroundTravelState initialState,
+                                                 BotMovementProfile profile) {
+        if (map == null || from == null || desiredDir == 0 || initialState == null) {
+            return null;
+        }
+
+        Foothold foothold = findGroundFoothold(map, from);
+        if (foothold == null) {
+            return null;
+        }
+
+        Point cursor = new Point(from);
+        Foothold currentFoothold = foothold;
+        GroundTravelState state = initialState;
+        int elapsedMs = 0;
+        for (int i = 0; i < 256; i++) {
+            GroundStepResult step = simulateGroundMotion(map, cursor, currentFoothold, desiredDir, state, profile);
+            if (step.lostGround()) {
+                if (step.stepX() == 0) {
+                    return null;
+                }
+                JumpLanding landing = simulateFallLanding(map, cursor, step.stepX());
+                if (landing == null) {
+                    return null;
+                }
+                return new WalkOffLanding(new Point(cursor), step.stepX(), landing,
+                        elapsedMs + estimateFallLandingTimeMs(map, cursor, step.stepX()));
+            }
+
+            cursor = step.point();
+            currentFoothold = step.foothold();
+            state = step.state();
+            elapsedMs += cfg.TICK_MS;
+        }
+        return null;
     }
 
     private static Point roundedAirPosition(BotEntry entry) {

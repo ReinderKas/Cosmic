@@ -3,6 +3,7 @@ package server.bots;
 import client.Character;
 import constants.game.CharacterStance;
 import server.maps.MapleMap;
+import server.maps.Foothold;
 import server.maps.Portal;
 import server.maps.Rope;
 
@@ -112,7 +113,7 @@ final class BotNavigationManager {
 
             entry.lastNavDecision = edgeReused ? "reuse" : "new";
             entry.navPreciseTarget = shouldUsePreciseTarget(entry, botPos, edge);
-            entry.navTargetPos = selectWaypoint(entry, botPos, edge);
+            entry.navTargetPos = selectWaypoint(entry, graph, botPos, edge);
             if (entry.pathLogger != null) {
                 entry.pathLogger.record(entry, BotManager.getInstance().captureTargetSnapshot(entry), startRegionId, false, runAiTick);
             }
@@ -480,18 +481,22 @@ final class BotNavigationManager {
         };
     }
 
-    private static Point selectWaypoint(BotEntry entry, Point botPos, BotNavigationGraph.Edge edge) {
+    private static Point selectWaypoint(BotEntry entry, BotNavigationGraph graph, Point botPos, BotNavigationGraph.Edge edge) {
         return switch (edge.type) {
             case WALK -> new Point(edge.endPoint);
             case CLIMB -> selectClimbWaypoint(entry, botPos, edge);
-            case JUMP -> entry.inAir ? new Point(edge.endPoint) : selectJumpWaypoint(entry, botPos, edge);
-            case DROP -> entry.inAir || edge.launchStepX != 0 ? new Point(edge.endPoint) : new Point(edge.startPoint);
+            case JUMP -> entry.inAir ? new Point(edge.endPoint) : selectJumpWaypoint(graph, botPos, edge);
+            case DROP -> selectDropWaypoint(entry, graph, botPos, edge);
             case PORTAL -> entry.inAir ? new Point(edge.endPoint) : new Point(edge.startPoint);
         };
     }
 
     static Point selectJumpWaypoint(BotEntry entry, Point botPos, BotNavigationGraph.Edge edge) {
         BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(entry.bot.getMap(), entry.movementProfile);
+        return selectJumpWaypoint(graph, botPos, edge);
+    }
+
+    static Point selectJumpWaypoint(BotNavigationGraph graph, Point botPos, BotNavigationGraph.Edge edge) {
         BotNavigationGraph.Region fromRegion = graph.getRegion(edge.fromRegionId);
         if (fromRegion == null || fromRegion.isRopeRegion) {
             return new Point(edge.startPoint);
@@ -527,6 +532,51 @@ final class BotNavigationManager {
             return new Point(ropeX, edge.endPoint.y);
         }
         return new Point(edge.startPoint);
+    }
+
+    static Point selectDropWaypoint(BotEntry entry,
+                                    BotNavigationGraph graph,
+                                    Point botPos,
+                                    BotNavigationGraph.Edge edge) {
+        if (entry.inAir || edge.launchStepX == 0) {
+            return entry.inAir ? new Point(edge.endPoint) : new Point(edge.startPoint);
+        }
+
+        BotNavigationGraph.Region fromRegion = graph.getRegion(edge.fromRegionId);
+        if (fromRegion == null || fromRegion.isRopeRegion) {
+            return new Point(edge.endPoint);
+        }
+
+        BotPhysicsEngine.WalkOffLanding liveOutcome = BotPhysicsEngine.simulateWalkOffLanding(
+                entry.bot.getMap(), botPos, Integer.signum(edge.launchStepX),
+                new BotPhysicsEngine.GroundTravelState(entry.physX, entry.hspeed, entry.groundPhysicsCarryMs),
+                entry.movementProfile);
+        if (matchesDirectionalDrop(edge, graph, liveOutcome)) {
+            // Like rope top step-offs, once the continuous-control exit is naturally executable
+            // we stop targeting an intermediate anchor and just keep feeding the authored
+            // direction until physics performs the dismount.
+            return new Point(edge.endPoint);
+        }
+        return new Point(edge.startPoint);
+    }
+
+    private static boolean matchesDirectionalDrop(BotNavigationGraph.Edge edge,
+                                                  BotNavigationGraph graph,
+                                                  BotPhysicsEngine.WalkOffLanding outcome) {
+        if (outcome == null || outcome.landing() == null) {
+            return false;
+        }
+        Foothold landingFoothold = outcome.landing().foothold();
+        if (landingFoothold == null) {
+            return false;
+        }
+        if (graph.regionIdByFootholdId.getOrDefault(landingFoothold.getId(), -1) != edge.toRegionId) {
+            return false;
+        }
+        int xTolerance = Math.max(6, Math.abs(edge.launchStepX) + 2);
+        int yTolerance = BotMovementManager.cfg.JUMP_Y_THRESH * 2;
+        return Math.abs(outcome.landing().point().x - edge.endPoint.x) <= xTolerance
+                && Math.abs(outcome.landing().point().y - edge.endPoint.y) <= yTolerance;
     }
 
     private static BotNavigationGraph.Edge findNextEdge(BotNavigationGraph graph,

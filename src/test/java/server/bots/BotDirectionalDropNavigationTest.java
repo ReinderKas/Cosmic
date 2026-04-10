@@ -1,0 +1,87 @@
+package server.bots;
+
+import client.Character;
+import org.junit.jupiter.api.Test;
+import server.maps.Foothold;
+import server.maps.MapleMap;
+
+import java.awt.*;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+class BotDirectionalDropNavigationTest {
+    @Test
+    void shouldBacktrackToDirectionalDropRunwayWhenCommittedTooCloseToLip() {
+        DropTestFixture fixture = createDirectionalDropFixture(910000040);
+        Character bot = mockBot(new Point(fixture.edge.startPoint.x + 2, fixture.edge.startPoint.y), fixture.map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.physX = bot.getPosition().x;
+        entry.physY = bot.getPosition().y;
+
+        Point waypoint = BotNavigationManager.selectDropWaypoint(entry, fixture.graph, bot.getPosition(), fixture.edge);
+
+        assertEquals(fixture.edge.startPoint, waypoint,
+                "bot should backtrack to the graph-authored drop control anchor instead of half-stepping off the lip");
+    }
+
+    @Test
+    void shouldKeepDirectionalDropLandingTargetWhenNaturalWalkOffAlreadyMatchesEdge() {
+        DropTestFixture fixture = createDirectionalDropFixture(910000041);
+        Character bot = mockBot(new Point(fixture.edge.startPoint), fixture.map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.physX = bot.getPosition().x;
+        entry.physY = bot.getPosition().y;
+
+        Point waypoint = BotNavigationManager.selectDropWaypoint(entry, fixture.graph, bot.getPosition(), fixture.edge);
+
+        assertEquals(fixture.edge.endPoint, waypoint,
+                "once the walk-off already has enough runway, nav should keep feeding the landing-side direction");
+    }
+
+    private static DropTestFixture createDirectionalDropFixture(int mapId) {
+        MapleMap map = new MapleMap(mapId, 0, 0, mapId, 1.0f);
+        Foothold upper = new Foothold(new Point(0, 100), new Point(100, 100), 1);
+        Foothold lower = new Foothold(new Point(106, 160), new Point(280, 160), 2);
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        footholds.insert(upper);
+        footholds.insert(lower);
+        map.setFootholds(footholds);
+
+        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(map);
+        BotNavigationGraph.Edge edge = graph.regions.stream()
+                .flatMap(region -> graph.getOutgoing(region.id).stream())
+                .filter(candidate -> candidate.type == BotNavigationGraph.EdgeType.DROP && candidate.launchStepX > 0)
+                .filter(candidate -> candidate.endPoint.y > candidate.startPoint.y)
+                .findFirst()
+                .orElse(null);
+        assertNotNull(edge, "fixture should produce a directional walk-off drop edge");
+        return new DropTestFixture(map, graph, edge);
+    }
+
+    private static Character mockBot(Point startPosition, MapleMap map) {
+        Character bot = mock(Character.class);
+        AtomicReference<Point> position = new AtomicReference<>(new Point(startPosition));
+        when(bot.getPosition()).thenAnswer(invocation -> new Point(position.get()));
+        doAnswer(invocation -> {
+            position.set(new Point(invocation.getArgument(0)));
+            return null;
+        }).when(bot).setPosition(any(Point.class));
+        when(bot.getMap()).thenReturn(map);
+        when(bot.getId()).thenReturn(1);
+        when(bot.getHp()).thenReturn(100);
+        when(bot.getTotalMoveSpeedStat()).thenReturn(100);
+        when(bot.getTotalJumpStat()).thenReturn(100);
+        return bot;
+    }
+
+    private record DropTestFixture(MapleMap map,
+                                   BotNavigationGraph graph,
+                                   BotNavigationGraph.Edge edge) {
+    }
+}
