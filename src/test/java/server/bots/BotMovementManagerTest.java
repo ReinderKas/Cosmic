@@ -373,6 +373,63 @@ class BotMovementManagerTest {
     }
 
     @Test
+    void shouldJumpAcrossSmallGapDuringGraphWarmupFallback() {
+        MapleMap map = new MapleMap(910000031, 0, 0, 910000031, 1.0f);
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        footholds.insert(new Foothold(new Point(0, 100), new Point(40, 100), 1));
+        footholds.insert(new Foothold(new Point(80, 100), new Point(140, 100), 2));
+        map.setFootholds(footholds);
+
+        Character bot = mockBot(new Point(36, 100), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.graphWarmupFallback = true;
+
+        BotMovementManager.tickGrounded(entry, new Point(110, 100));
+
+        assertTrue(entry.inAir, "graph warmup fallback should jump small same-level gaps instead of freezing");
+        assertEquals(BotPhysicsEngine.walkStep(map, entry.movementProfile), entry.airVelX);
+    }
+
+    @Test
+    void shouldAttachNearbyRopeDuringGraphWarmupFallbackWhenTargetIsAbove() {
+        MapleMap map = new MapleMap(910000032, 0, 0, 910000032, 1.0f);
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        footholds.insert(new Foothold(new Point(0, 120), new Point(200, 120), 1));
+        map.setFootholds(footholds);
+        map.addRope(new Rope(100, 40, 120, false));
+
+        Character bot = mockBot(new Point(100, 120), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.graphWarmupFallback = true;
+
+        BotMovementManager.tickGrounded(entry, new Point(100, 40));
+
+        assertTrue(entry.climbing, "graph warmup fallback should use a nearby rope for vertical travel");
+        assertEquals(new Point(100, 120), bot.getPosition());
+    }
+
+    @Test
+    void shouldPaceSameRegionFollowMovementNearOwnerInsteadOfUsingFullWalkStep() {
+        MapleMap map = new MapleMap(910000033, 0, 0, 910000033, 1.0f);
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        footholds.insert(new Foothold(new Point(0, 100), new Point(200, 100), 1));
+        map.setFootholds(footholds);
+
+        Character bot = mockBot(new Point(0, 100), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.following = true;
+        entry.observedOwnerStepX = 4;
+
+        int walkStep = BotPhysicsEngine.walkStep(map, entry.movementProfile);
+        int pacedStep = BotMovementManager.resolveGroundStepX(
+                entry, new Point(0, 100), new Point(20, 100), BotMovementManager.cfg.STOP_DIST, BotMovementManager.cfg.FOLLOW_DIST);
+
+        assertTrue(pacedStep > 0);
+        assertTrue(pacedStep < walkStep,
+                "same-region follow should slow down near the owner instead of always using full bot walk speed");
+    }
+
+    @Test
     void shouldNotApplyAirSteeringDuringCommittedNavJump() {
         MapleMap map = new MapleMap(910000009, 0, 0, 910000009, 1.0f);
         server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));

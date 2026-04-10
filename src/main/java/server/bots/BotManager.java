@@ -883,14 +883,16 @@ public class BotManager {
      */
     private static Point clampedOnOwnerRegion(int targetX, Character owner, Point ownerPos, MapleMap map) {
         if (map != null) {
-            BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(map, BotMovementProfile.base());
-            int ownerRegionId = owner != null
-                    ? BotNavigationManager.resolveCharacterRegionId(graph, map, owner)
-                    : graph.findRegionId(map, ownerPos);
-            BotNavigationGraph.Region ownerRegion = graph.getRegion(ownerRegionId);
-            if (ownerRegion != null && !ownerRegion.isRopeRegion) {
-                int clampedX = Math.max(ownerRegion.minX, Math.min(ownerRegion.maxX, targetX));
-                return ownerRegion.pointAt(clampedX);
+            BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(map);
+            if (graph != null) {
+                int ownerRegionId = owner != null
+                        ? BotNavigationManager.resolveCharacterRegionId(graph, map, owner)
+                        : graph.findRegionId(map, ownerPos);
+                BotNavigationGraph.Region ownerRegion = graph.getRegion(ownerRegionId);
+                if (ownerRegion != null && !ownerRegion.isRopeRegion) {
+                    int clampedX = Math.max(ownerRegion.minX, Math.min(ownerRegion.maxX, targetX));
+                    return ownerRegion.pointAt(clampedX);
+                }
             }
         }
 
@@ -1055,6 +1057,7 @@ public class BotManager {
         Point botPos = bot.getPosition();
         TargetSnapshot targetSnapshot = captureTargetSnapshot(entry);
         Point ownerPos = targetSnapshot.rawOwnerPos();
+        updateObservedOwnerMotion(entry, ownerPos);
         entry.lastOwnerPos = new Point(ownerPos); // raw owner pos before formation offset/snap — used by path logger
         Point targetPos = targetSnapshot.primaryTargetPos();
 
@@ -1309,6 +1312,7 @@ public class BotManager {
 
         TargetSnapshot targetSnapshot = captureTargetSnapshot(entry);
         Point ownerPos = targetSnapshot.rawOwnerPos();
+        updateObservedOwnerMotion(entry, ownerPos);
         entry.lastOwnerPos = new Point(ownerPos);
         stepMovementOnly(entry, targetSnapshot.primaryTargetPos(), ownerPos, runAiTick, false);
         return runAiTick;
@@ -1406,11 +1410,19 @@ public class BotManager {
         }
     }
 
+    private static void updateObservedOwnerMotion(BotEntry entry, Point ownerPos) {
+        if (entry == null || ownerPos == null) {
+            return;
+        }
+        entry.observedOwnerStepX = entry.lastOwnerPos == null ? 0 : ownerPos.x - entry.lastOwnerPos.x;
+    }
+
     private static void tickStuckDetection(BotEntry entry) {
         entry.unstuckCooldownMs = BotMovementManager.tickDown(entry.unstuckCooldownMs);
 
         // Only detect/act while actively navigating — idling near owner is not stuck.
-        if (entry.inAir || entry.climbing || (entry.navEdge == null && entry.moveTarget == null)) {
+        if (entry.inAir || entry.climbing
+                || (entry.navEdge == null && entry.moveTarget == null && !entry.graphWarmupFallback)) {
             entry.stuckMs = 0;
             entry.stuckCheckX = Integer.MIN_VALUE;
             return;

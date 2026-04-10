@@ -49,6 +49,7 @@ final class BotNavigationManager {
         try {
             Character bot = entry.bot;
             if (bot.getMap().getFootholds() == null) {
+                entry.graphWarmupFallback = false;
                 clearNavigation(entry);
                 return new NavigationDirective(rawTargetPos, false);
             }
@@ -56,14 +57,16 @@ final class BotNavigationManager {
             BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(bot.getMap(), entry.movementProfile);
             if (graph == null) {
                 BotNavigationGraphProvider.warmGraphAsync(bot.getMap(), entry.movementProfile);
+                entry.graphWarmupFallback = true;
                 entry.lastNavDecision = "graph-warmup";
                 clearNavigation(entry);
-                Point holdPos = bot.getPosition();
+                Point fallbackTarget = rawTargetPos != null ? new Point(rawTargetPos) : bot.getPosition();
                 if (entry.pathLogger != null) {
                     entry.pathLogger.record(entry, BotManager.getInstance().captureTargetSnapshot(entry), -1, false, runAiTick);
                 }
-                return new NavigationDirective(new Point(holdPos), false);
+                return new NavigationDirective(fallbackTarget, false);
             }
+            entry.graphWarmupFallback = false;
             Point botPos = bot.getPosition();
             int startRegionId = resolveCurrentRegionId(graph, entry, bot.getMap(), botPos);
             int targetRegionId = resolveTargetRegionId(graph, entry, bot.getMap(), rawTargetPos);

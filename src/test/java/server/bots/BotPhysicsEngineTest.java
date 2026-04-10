@@ -296,6 +296,7 @@ class BotPhysicsEngineTest {
         footholds.insert(lowerLeft);
         footholds.insert(lowerRight);
         footholds.insert(upper);
+        BotNavigationGraphProvider.rebuildGraph(map);
 
         Point ground = BotPhysicsEngine.findWalkRegionGroundPoint(map, lowerLeft, 24, 100);
 

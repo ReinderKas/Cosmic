@@ -298,7 +298,10 @@ final class BotPhysicsEngine {
             return false;
         }
 
-        BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(map);
+        BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(map);
+        if (graph == null) {
+            return false;
+        }
         int firstRegionId = graph.regionIdByFootholdId.getOrDefault(first.getId(), -1);
         int secondRegionId = graph.regionIdByFootholdId.getOrDefault(second.getId(), -1);
         return firstRegionId >= 0 && firstRegionId == secondRegionId;
@@ -330,7 +333,10 @@ final class BotPhysicsEngine {
         if (map == null || foothold == null) {
             return false;
         }
-        BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(map);
+        BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(map);
+        if (graph == null) {
+            return false;
+        }
         return graph.regionIdByFootholdId.getOrDefault(foothold.getId(), -1) >= 0;
     }
 
@@ -339,7 +345,10 @@ final class BotPhysicsEngine {
             return null;
         }
 
-        BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(map);
+        BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(map);
+        if (graph == null) {
+            return null;
+        }
         int regionId = graph.regionIdByFootholdId.getOrDefault(foothold.getId(), -1);
         BotNavigationGraph.Region region = graph.getRegion(regionId);
         if (region == null || region.isRopeRegion) {

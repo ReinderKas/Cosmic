@@ -258,7 +258,7 @@ class BotNavigationManagerTest {
     }
 
     @Test
-    void shouldHoldPositionWhileMovementGraphWarmsInBackground() {
+    void shouldUseRawTargetWhileMovementGraphWarmsInBackground() {
         MapleMap map = new MapleMap(910000030, 0, 0, 910000030, 1.0f);
         server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
         footholds.insert(new Foothold(new Point(0, 100), new Point(200, 100), 1));
@@ -272,8 +272,9 @@ class BotNavigationManagerTest {
                 BotNavigationManager.resolveTarget(entry, new Point(180, 100), true);
 
         assertFalse(directive.consumedTick);
-        assertEquals(new Point(20, 100), directive.targetPos);
+        assertEquals(new Point(180, 100), directive.targetPos);
         assertEquals("graph-warmup", entry.lastNavDecision);
+        assertTrue(entry.graphWarmupFallback);
         assertNull(entry.navEdge);
 
         BotNavigationGraphProvider.getGraph(map, entry.movementProfile);
