@@ -13,6 +13,12 @@ enum BotFollowAnticMode {
     SPAM_PRONE
 }
 
+enum BotFollowAnticTrigger {
+    NONE,
+    AUTO_FOLLOW,
+    SOCIAL
+}
+
 final class BotFollowAnticsManager {
     private BotFollowAnticsManager() {
     }
@@ -33,7 +39,7 @@ final class BotFollowAnticsManager {
             return handleActiveTick(entry, botPos, targetPos, now);
         }
 
-        if (!isEligible(entry, botPos, targetPos)) {
+        if (!isEligible(entry, botPos, targetPos, true)) {
             return false;
         }
 
@@ -56,17 +62,27 @@ final class BotFollowAnticsManager {
         }
 
         entry.followAnticMode = BotFollowAnticMode.NONE;
+        entry.followAnticTrigger = BotFollowAnticTrigger.NONE;
         entry.followAnticUntilMs = 0L;
         entry.nextFollowAnticActionAtMs = 0L;
         entry.followAnticAirSteerDir = 0;
     }
 
     static void startAntic(BotEntry entry, BotFollowAnticMode mode, long now, int durationMs) {
+        startAntic(entry, mode, now, durationMs, BotFollowAnticTrigger.AUTO_FOLLOW);
+    }
+
+    static void startAntic(BotEntry entry,
+                           BotFollowAnticMode mode,
+                           long now,
+                           int durationMs,
+                           BotFollowAnticTrigger trigger) {
         if (entry == null || mode == null || mode == BotFollowAnticMode.NONE) {
             return;
         }
 
         entry.followAnticMode = mode;
+        entry.followAnticTrigger = trigger == null ? BotFollowAnticTrigger.AUTO_FOLLOW : trigger;
         entry.followAnticUntilMs = now + Math.max(2000, durationMs);
         entry.nextFollowAnticActionAtMs = now;
         entry.followAnticAirSteerDir = ThreadLocalRandom.current().nextBoolean() ? 1 : -1;
@@ -89,11 +105,11 @@ final class BotFollowAnticsManager {
             return false;
         }
 
-        startRandomAntic(entry, System.currentTimeMillis(), (int) BotManager.randMs(2000, 5000));
+        startRandomAntic(entry, System.currentTimeMillis(), (int) BotManager.randMs(2000, 5000), BotFollowAnticTrigger.SOCIAL);
         return true;
     }
 
-    private static boolean isEligible(BotEntry entry, Point botPos, Point targetPos) {
+    private static boolean isEligible(BotEntry entry, Point botPos, Point targetPos, boolean requireFastFollow) {
         return entry.following
                 && !BotChatManager.isOwnerIdle(entry)
                 && !entry.grinding
@@ -104,12 +120,13 @@ final class BotFollowAnticsManager {
                 && !entry.climbing
                 && !entry.inAir
                 && !entry.downJumpPending
-                && entry.movementProfile.totalSpeedStat() > BotMovementProfile.BASE_TOTAL_STAT
+                && (!requireFastFollow || entry.movementProfile.totalSpeedStat() > BotMovementProfile.BASE_TOTAL_STAT)
                 && Math.abs(targetPos.y - botPos.y) <= BotMovementManager.cfg.JUMP_Y_THRESH * 2;
     }
 
     private static boolean shouldKeepRunning(BotEntry entry, Point botPos, Point targetPos, long now) {
-        if (!isEligible(entry, botPos, targetPos) || now >= entry.followAnticUntilMs) {
+        boolean requireFastFollow = entry.followAnticTrigger != BotFollowAnticTrigger.SOCIAL;
+        if (!isEligible(entry, botPos, targetPos, requireFastFollow) || now >= entry.followAnticUntilMs) {
             return false;
         }
         int walkStep = BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile);
@@ -137,7 +154,7 @@ final class BotFollowAnticsManager {
             return;
         }
 
-        startRandomAntic(entry, now, (int) BotManager.randMs(2000, 10_000));
+        startRandomAntic(entry, now, (int) BotManager.randMs(2000, 10_000), BotFollowAnticTrigger.AUTO_FOLLOW);
     }
 
     private static void maybeStartSpeedMismatchAntic(BotEntry entry, Point botPos, Point targetPos, long now, boolean runAiTick) {
@@ -160,7 +177,7 @@ final class BotFollowAnticsManager {
             return;
         }
 
-        startRandomAntic(entry, now, (int) BotManager.randMs(2000, 4500));
+        startRandomAntic(entry, now, (int) BotManager.randMs(2000, 4500), BotFollowAnticTrigger.AUTO_FOLLOW);
     }
 
     private static boolean isOwnerMostlyIdle(BotEntry entry) {
@@ -168,13 +185,17 @@ final class BotFollowAnticsManager {
     }
 
     static void startRandomAntic(BotEntry entry, long now, int durationMs) {
+        startRandomAntic(entry, now, durationMs, BotFollowAnticTrigger.AUTO_FOLLOW);
+    }
+
+    static void startRandomAntic(BotEntry entry, long now, int durationMs, BotFollowAnticTrigger trigger) {
         BotFollowAnticMode mode = switch (ThreadLocalRandom.current().nextInt(4)) {
             case 0 -> BotFollowAnticMode.WAIT;
             case 1 -> BotFollowAnticMode.JUMP;
             case 2 -> BotFollowAnticMode.PRONE;
             default -> BotFollowAnticMode.SPAM_PRONE;
         };
-        startAntic(entry, mode, now, durationMs);
+        startAntic(entry, mode, now, durationMs, trigger);
     }
 
     private static boolean handleActiveTick(BotEntry entry, Point botPos, Point targetPos, long now) {

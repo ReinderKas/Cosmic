@@ -81,6 +81,7 @@ class BotChatManagerTest {
 
         assertTrue(BotFollowAnticsManager.maybeStartGreetingAntic(entry, 0));
         assertFalse(entry.followAnticMode == BotFollowAnticMode.NONE);
+        assertEquals(BotFollowAnticTrigger.SOCIAL, entry.followAnticTrigger);
 
         BotFollowAnticsManager.clear(entry);
 

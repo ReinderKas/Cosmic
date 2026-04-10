@@ -183,6 +183,7 @@ public class BotEntry {
     int observedOwnerStepX = 0;
     int observedOwnerStepY = 0;
     BotFollowAnticMode followAnticMode = BotFollowAnticMode.NONE;
+    BotFollowAnticTrigger followAnticTrigger = BotFollowAnticTrigger.NONE;
     long followAnticUntilMs = 0L;
     long nextFollowAnticActionAtMs = 0L;
     long nextFollowAnticAtMs = 0L;
