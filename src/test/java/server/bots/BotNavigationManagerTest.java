@@ -187,10 +187,10 @@ class BotNavigationManagerTest {
         );
 
         assertFalse(BotNavigationManager.isWithinJumpLaunchWindow(graph, new Point(513, 107), jump));
-        assertTrue(BotNavigationManager.isWithinJumpLaunchWindow(graph, new Point(514, 107), jump));
+        assertFalse(BotNavigationManager.isWithinJumpLaunchWindow(graph, new Point(514, 107), jump));
         assertTrue(BotNavigationManager.isWithinJumpLaunchWindow(graph, new Point(516, 107), jump));
         assertTrue(BotNavigationManager.isWithinJumpLaunchWindow(graph, new Point(523, 107), jump));
-        assertTrue(BotNavigationManager.isWithinJumpLaunchWindow(graph, new Point(525, 107), jump));
+        assertFalse(BotNavigationManager.isWithinJumpLaunchWindow(graph, new Point(525, 107), jump));
         assertFalse(BotNavigationManager.isWithinJumpLaunchWindow(graph, new Point(526, 107), jump));
         assertFalse(BotNavigationManager.isWithinJumpLaunchWindow(graph, new Point(520, 160), jump));
     }
