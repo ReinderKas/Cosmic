@@ -190,6 +190,9 @@ public class BotEntry {
     long nextIdleFollowAnticRollAtMs = 0L;
     int followAnticAirSteerDir = 0;
     int followAnticJumpDir = 0;
+    int followAnticMoveDir = 0;
+    long nextFollowAnticJumpAtMs = 0L;
+    Point followAnticOriginPos = null;
     long nextFollowAnticVisualAtMs = 0L;
     long nextGearSuggestionAt = 0L;
     boolean spawnUpgradeCheckDone = false;

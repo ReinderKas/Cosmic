@@ -586,7 +586,7 @@ class BotMovementManagerTest {
         assertTrue(firstJumpVelX != 0, "diagonal jump antic should launch with horizontal momentum");
 
         BotPhysicsEngine.idleOnGround(entry, bot);
-        entry.nextFollowAnticActionAtMs = 0L;
+        entry.nextFollowAnticJumpAtMs = 0L;
 
         assertTrue(BotFollowAnticsManager.tryHandleTick(entry, new Point(110, 100), true));
         assertEquals(-Integer.signum(firstJumpVelX), Integer.signum(entry.airVelX),
@@ -612,6 +612,68 @@ class BotMovementManagerTest {
         assertTrue(BotFollowAnticsManager.tryHandleTick(entry, new Point(110, 100), true));
         assertEquals(BotFollowAnticMode.JUMP, entry.followAnticMode,
                 "jump antics should not clear themselves while their first jump is still airborne");
+    }
+
+    @Test
+    void shouldRepeatJumpAnticAfterLandingUntilDurationEnds() {
+        MapleMap map = new MapleMap(910000042, 0, 0, 910000042, 1.0f);
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        footholds.insert(new Foothold(new Point(0, 100), new Point(300, 100), 1));
+        map.setFootholds(footholds);
+
+        Character bot = mockBot(new Point(100, 100), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.following = true;
+        entry.movementProfile = new BotMovementProfile(140, 100);
+        BotFollowAnticsManager.startAntic(entry, BotFollowAnticMode.JUMP, System.currentTimeMillis(), 3000);
+
+        assertTrue(BotFollowAnticsManager.tryHandleTick(entry, new Point(110, 100), true));
+        assertTrue(entry.inAir);
+
+        BotPhysicsEngine.idleOnGround(entry, bot);
+        entry.nextFollowAnticActionAtMs = Long.MAX_VALUE;
+        entry.nextFollowAnticJumpAtMs = 0L;
+
+        assertTrue(BotFollowAnticsManager.tryHandleTick(entry, new Point(110, 100), true));
+        assertTrue(entry.inAir, "grounded jump antics should launch again even if air steering is cooling down");
+    }
+
+    @Test
+    void shouldSpamSidewaysDuringFollowAnticWithoutDroppingFollowMode() {
+        MapleMap map = new MapleMap(910000043, 0, 0, 910000043, 1.0f);
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        footholds.insert(new Foothold(new Point(0, 100), new Point(300, 100), 1));
+        map.setFootholds(footholds);
+
+        Character bot = mockBot(new Point(100, 100), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.following = true;
+        entry.movementProfile = new BotMovementProfile(140, 100);
+        BotFollowAnticsManager.startAntic(entry, BotFollowAnticMode.SPAM_SIDEWAYS, System.currentTimeMillis(), 3000);
+
+        assertTrue(BotFollowAnticsManager.tryHandleTick(entry, new Point(110, 100), true));
+        assertEquals(BotFollowAnticMode.SPAM_SIDEWAYS, entry.followAnticMode);
+        assertTrue(entry.lastDesiredDirection != 0, "sideway spam should hold a left/right movement input");
+        assertTrue(entry.following, "sideway spam should not convert follow mode into a manual move command");
+    }
+
+    @Test
+    void shouldReturnToAnticOriginWithPreciseMoveTargetAfterAnticEnds() {
+        MapleMap map = new MapleMap(910000044, 0, 0, 910000044, 1.0f);
+        Character bot = mockBot(new Point(100, 100), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.following = true;
+        entry.movementProfile = new BotMovementProfile(140, 100);
+        long now = System.currentTimeMillis();
+        BotFollowAnticsManager.startAntic(entry, BotFollowAnticMode.SPAM_SIDEWAYS, now, 2000);
+        bot.setPosition(new Point(130, 100));
+        entry.followAnticUntilMs = now - 1;
+
+        assertFalse(BotFollowAnticsManager.tryHandleTick(entry, new Point(110, 100), true));
+        assertEquals(BotFollowAnticMode.NONE, entry.followAnticMode);
+        assertEquals(new Point(100, 100), entry.moveTarget,
+                "antic cleanup should reuse the precise move-target path from the here command");
+        assertTrue(entry.moveTargetPrecise);
     }
 
     @Test

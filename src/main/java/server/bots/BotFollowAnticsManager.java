@@ -2,6 +2,7 @@ package server.bots;
 
 import client.Character;
 import net.packet.Packet;
+import server.maps.Foothold;
 import tools.PacketCreator;
 
 import java.awt.*;
@@ -14,7 +15,8 @@ enum BotFollowAnticMode {
     JUMP,
     DIAGONAL_JUMP,
     PRONE,
-    SPAM_PRONE
+    SPAM_PRONE,
+    SPAM_SIDEWAYS
 }
 
 enum BotFollowAnticTrigger {
@@ -37,7 +39,7 @@ final class BotFollowAnticsManager {
         long now = System.currentTimeMillis();
         if (entry.followAnticMode != BotFollowAnticMode.NONE) {
             if (!shouldKeepRunning(entry, botPos, targetPos, now)) {
-                clear(entry);
+                finishAntic(entry, botPos);
                 return false;
             }
             return handleActiveTick(entry, botPos, targetPos, now);
@@ -71,7 +73,31 @@ final class BotFollowAnticsManager {
         entry.nextFollowAnticActionAtMs = 0L;
         entry.followAnticAirSteerDir = 0;
         entry.followAnticJumpDir = 0;
+        entry.followAnticMoveDir = 0;
+        entry.nextFollowAnticJumpAtMs = 0L;
+        entry.followAnticOriginPos = null;
         entry.nextFollowAnticVisualAtMs = 0L;
+    }
+
+    private static void finishAntic(BotEntry entry, Point botPos) {
+        if (entry == null) {
+            return;
+        }
+
+        Point origin = entry.followAnticOriginPos == null ? null : new Point(entry.followAnticOriginPos);
+        clear(entry);
+        if (shouldReturnToOrigin(origin, botPos)) {
+            entry.moveTarget = origin;
+            entry.moveTargetPrecise = true;
+            BotMovementManager.clearNavigationState(entry);
+        }
+    }
+
+    private static boolean shouldReturnToOrigin(Point origin, Point botPos) {
+        if (origin == null || botPos == null) {
+            return false;
+        }
+        return Math.abs(botPos.x - origin.x) > 8 || Math.abs(botPos.y - origin.y) > 8;
     }
 
     static void startAntic(BotEntry entry, BotFollowAnticMode mode, long now, int durationMs) {
@@ -93,6 +119,9 @@ final class BotFollowAnticsManager {
         entry.nextFollowAnticActionAtMs = now;
         entry.followAnticAirSteerDir = ThreadLocalRandom.current().nextBoolean() ? 1 : -1;
         entry.followAnticJumpDir = entry.followAnticAirSteerDir == 0 ? 1 : entry.followAnticAirSteerDir;
+        entry.followAnticMoveDir = entry.followAnticAirSteerDir;
+        entry.nextFollowAnticJumpAtMs = now;
+        entry.followAnticOriginPos = entry.bot == null ? null : new Point(entry.bot.getPosition());
         entry.nextFollowAnticVisualAtMs = now + BotManager.randMs(500, 1200);
         entry.nextFollowAnticAtMs = now + BotManager.randMs(4000, 8000);
     }
@@ -217,19 +246,20 @@ final class BotFollowAnticsManager {
     }
 
     static void startRandomAntic(BotEntry entry, long now, int durationMs, BotFollowAnticTrigger trigger) {
-        BotFollowAnticMode mode = switch (ThreadLocalRandom.current().nextInt(5)) {
+        BotFollowAnticMode mode = switch (ThreadLocalRandom.current().nextInt(6)) {
             case 0 -> BotFollowAnticMode.WAIT;
             case 1 -> BotFollowAnticMode.JUMP;
             case 2 -> BotFollowAnticMode.DIAGONAL_JUMP;
             case 3 -> BotFollowAnticMode.PRONE;
-            default -> BotFollowAnticMode.SPAM_PRONE;
+            case 4 -> BotFollowAnticMode.SPAM_PRONE;
+            default -> BotFollowAnticMode.SPAM_SIDEWAYS;
         };
         startAntic(entry, mode, now, durationMs, trigger);
     }
 
     private static boolean handleActiveTick(BotEntry entry, Point botPos, Point targetPos, long now) {
         if (entry.climbing) {
-            clear(entry);
+            finishAntic(entry, botPos);
             return false;
         }
         if (entry.inAir) {
@@ -284,8 +314,12 @@ final class BotFollowAnticsManager {
                 maybeBroadcastProneAttackVisual(entry, now);
                 yield true;
             }
+            case SPAM_SIDEWAYS -> {
+                tickSidewaysMovement(entry, bot, botPos, now);
+                yield true;
+            }
             case JUMP -> {
-                if (now >= entry.nextFollowAnticActionAtMs) {
+                if (now >= entry.nextFollowAnticJumpAtMs) {
                     initiateAnticJump(entry, bot, botPos, targetPos, now, false);
                 } else {
                     BotPhysicsEngine.idleOnGround(entry, bot);
@@ -294,7 +328,7 @@ final class BotFollowAnticsManager {
                 yield true;
             }
             case DIAGONAL_JUMP -> {
-                if (now >= entry.nextFollowAnticActionAtMs) {
+                if (now >= entry.nextFollowAnticJumpAtMs) {
                     initiateAnticJump(entry, bot, botPos, targetPos, now, true);
                 } else {
                     BotPhysicsEngine.idleOnGround(entry, bot);
@@ -315,9 +349,7 @@ final class BotFollowAnticsManager {
         int walkStep = BotPhysicsEngine.walkStep(bot.getMap(), entry.movementProfile);
         int jumpDx;
         if (diagonal) {
-            int jumpDir = entry.followAnticJumpDir == 0
-                    ? (ThreadLocalRandom.current().nextBoolean() ? 1 : -1)
-                    : entry.followAnticJumpDir;
+            int jumpDir = nextDiagonalJumpDir(entry, botPos);
             jumpDx = jumpDir * walkStep;
             entry.followAnticJumpDir = -jumpDir;
             entry.followAnticAirSteerDir = jumpDir;
@@ -332,7 +364,71 @@ final class BotFollowAnticsManager {
         }
 
         BotMovementManager.initiateJump(entry, bot, jumpDx);
-        entry.nextFollowAnticActionAtMs = now + BotManager.randMs(150, 300);
+        entry.nextFollowAnticJumpAtMs = now + BotManager.randMs(200, 400);
+    }
+
+    private static int nextDiagonalJumpDir(BotEntry entry, Point botPos) {
+        Point origin = entry.followAnticOriginPos;
+        if (origin != null && botPos != null) {
+            int dxFromOrigin = botPos.x - origin.x;
+            int bias = Math.max(8, BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile));
+            if (dxFromOrigin >= bias) {
+                return -1;
+            }
+            if (dxFromOrigin <= -bias) {
+                return 1;
+            }
+        }
+        return entry.followAnticJumpDir == 0
+                ? (ThreadLocalRandom.current().nextBoolean() ? 1 : -1)
+                : entry.followAnticJumpDir;
+    }
+
+    private static void tickSidewaysMovement(BotEntry entry, Character bot, Point botPos, long now) {
+        if (now >= entry.nextFollowAnticActionAtMs || entry.followAnticMoveDir == 0) {
+            entry.followAnticMoveDir = nextSidewaysDir(entry, botPos);
+            entry.nextFollowAnticActionAtMs = now + BotManager.randMs(250, 650);
+        }
+
+        int dir = entry.followAnticMoveDir == 0 ? 1 : entry.followAnticMoveDir;
+        int walkStep = BotPhysicsEngine.walkStep(bot.getMap(), entry.movementProfile);
+        if (!BotPhysicsEngine.canWalkGroundStep(bot.getMap(), botPos, dir * walkStep)) {
+            dir = -dir;
+            entry.followAnticMoveDir = dir;
+            if (!BotPhysicsEngine.canWalkGroundStep(bot.getMap(), botPos, dir * walkStep)) {
+                BotPhysicsEngine.idleOnGround(entry, bot);
+                BotMovementManager.broadcastMovement(entry);
+                return;
+            }
+        }
+
+        Foothold currentFh = BotPhysicsEngine.findGroundFoothold(bot.getMap(), botPos);
+        if (currentFh == null) {
+            BotMovementManager.broadcastMovement(entry);
+            return;
+        }
+
+        entry.lastDesiredDirection = dir;
+        BotPhysicsEngine.applyGroundMotion(entry, bot, currentFh, dir);
+        BotMovementManager.broadcastMovement(entry);
+    }
+
+    private static int nextSidewaysDir(BotEntry entry, Point botPos) {
+        Point origin = entry.followAnticOriginPos;
+        int walkStep = BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile);
+        if (origin != null && botPos != null) {
+            int dxFromOrigin = botPos.x - origin.x;
+            int bound = Math.max(12, walkStep * 2);
+            if (dxFromOrigin >= bound) {
+                return -1;
+            }
+            if (dxFromOrigin <= -bound) {
+                return 1;
+            }
+        }
+        return entry.followAnticMoveDir == 0
+                ? (ThreadLocalRandom.current().nextBoolean() ? 1 : -1)
+                : -entry.followAnticMoveDir;
     }
 
     private static void maybeBroadcastProneAttackVisual(BotEntry entry, long now) {
