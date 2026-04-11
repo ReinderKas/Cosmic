@@ -40,7 +40,7 @@ final class BotPhysicsEngine {
         public double AIR_STEER_MAX   = 1.5;  // cap on air-steering speed (px/tick)
 
         public float CLIMB_SPEED_PXS = 100.0f;
-        public int ROPE_GRAB_X = 22;
+        public int ROPE_GRAB_X = 8;
         public int MAX_SNAP_DROP = 16;
         public int MAX_SLOPE_UP = 26;
         public int DOWN_JUMP_GRACE_MS = 350;
