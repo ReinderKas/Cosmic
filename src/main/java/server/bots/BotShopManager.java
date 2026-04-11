@@ -30,6 +30,10 @@ final class BotShopManager {
     private static final int SHOP_APPROACH_DELAY_MAX_MS = 5001;
     private static final int SHOP_STEP_DELAY_MIN_MS = 3000;
     private static final int SHOP_STEP_DELAY_MAX_MS = 6001;
+    private static final int POT_TRIGGER_THRESHOLD = 4; // 80% of target (5) for early trigger
+    private static final int POT_TARGET_THRESHOLD = 5; // full target when buying at shop
+    private static final int AMMO_TRIGGER_THRESHOLD = 4; // 80% of target (5) for early trigger
+    private static final int AMMO_TARGET_THRESHOLD = 5; // full target when buying at shop
 
     private BotShopManager() {}
 
@@ -62,12 +66,34 @@ final class BotShopManager {
         PurchaseSequence run(PurchaseSequence sequence, Shop shop);
     }
 
+    private static final List<String> RESUPPLY_MSGS = List.of(
+            "brb gotta resupply", "one sec, going to restock", "be right back, need supplies",
+            "brb, refilling", "be right back~"
+    );
+
     static void onMapChange(BotEntry entry, Character bot) {
         clearShopState(entry);
 
         NpcShopMatch match = findBestShop(bot);
         if (match == null) {
             return;
+        }
+
+        WeaponType wt = BotAttackExecutionProvider.getEquippedWeaponType(bot);
+        boolean needsRecharge = isRechargeWeaponType(wt) && hasRechargeableInShop(bot);
+        int ammoTrigger = BotCombatManager.cfg.AMMO_LOW_WARN * AMMO_TRIGGER_THRESHOLD;
+        boolean needsAmmoForShop = needsAmmo(wt) && BotCombatManager.countAmmo(bot, wt) < ammoTrigger && findAmmoItem(match.shop, wt) != null;
+        int[] pots = BotPotionManager.countPotions(bot);
+        int potTrigger = BotManager.cfg.POT_LOW_WARN * POT_TRIGGER_THRESHOLD;
+        boolean needsHpPots = pots[0] < potTrigger && findPotionItem(match.shop, bot, true) != null;
+        boolean needsMpPots = pots[1] < potTrigger && findPotionItem(match.shop, bot, false) != null;
+        if (!needsRecharge && !needsAmmoForShop && !needsHpPots && !needsMpPots) {
+            return;
+        }
+
+        long distSq = bot.getPosition().distanceSq(match.npcPos);
+        if (distSq > 1000L * 1000L) {
+            BotManager.getInstance().botSay(bot, BotManager.randomReply(RESUPPLY_MSGS));
         }
 
         entry.shopVisitPending = true;
@@ -280,7 +306,7 @@ final class BotShopManager {
             return new BuyReport(0, 0, 0, false);
         }
 
-        int target = BotCombatManager.cfg.AMMO_LOW_WARN * 5;
+        int target = BotCombatManager.cfg.AMMO_LOW_WARN * AMMO_TARGET_THRESHOLD;
         int current = BotCombatManager.countAmmo(bot, wt);
         return buyFixedCostItem(bot, shop, ammo, Math.max(0, target - current), 1000);
     }
@@ -365,7 +391,7 @@ final class BotShopManager {
             return new BuyReport(0, 0, 0, false);
         }
 
-        int target = BotManager.cfg.POT_LOW_WARN * 5;
+        int target = BotManager.cfg.POT_LOW_WARN * POT_TARGET_THRESHOLD;
         int[] pots = BotPotionManager.countPotions(bot);
         int current = forHp ? pots[0] : pots[1];
         return buyFixedCostItem(bot, shop, pot, Math.max(0, target - current), 100);
