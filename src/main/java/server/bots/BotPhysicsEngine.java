@@ -915,10 +915,10 @@ final class BotPhysicsEngine {
         if (entry.inAir) {
             return entry.facingDir >= 0 ? CharacterStance.JUMP_RIGHT_STANCE : CharacterStance.JUMP_LEFT_STANCE;
         }
-        if (entry.movementVelX > 0) {
+        if (entry.lastDesiredDirection > 0) {
             return CharacterStance.WALK_RIGHT_STANCE;
         }
-        if (entry.movementVelX < 0) {
+        if (entry.lastDesiredDirection < 0) {
             return CharacterStance.WALK_LEFT_STANCE;
         }
         return resolveIdleGroundStance(entry);

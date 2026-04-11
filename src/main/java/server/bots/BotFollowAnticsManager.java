@@ -181,14 +181,7 @@ final class BotFollowAnticsManager {
         if (!runAiTick || now < entry.nextFollowAnticAtMs) {
             return;
         }
-
-        int walkStep = BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile);
-        int absDx = Math.abs(targetPos.x - botPos.x);
-        int ownerStep = Math.max(Math.abs(entry.observedOwnerStepX), Math.abs(entry.observedOwnerStepY));
-        if (absDx > BotMovementManager.cfg.FOLLOW_DIST + walkStep) {
-            return;
-        }
-        if (ownerStep >= walkStep) {
+        if (!shouldStartSpeedMismatchAntic(entry, botPos, targetPos)) {
             return;
         }
 
@@ -198,6 +191,21 @@ final class BotFollowAnticsManager {
         }
 
         startRandomAntic(entry, now, (int) BotManager.randMs(2000, 4500), BotFollowAnticTrigger.AUTO_FOLLOW);
+    }
+
+    static boolean shouldStartSpeedMismatchAntic(BotEntry entry, Point botPos, Point targetPos) {
+        if (entry == null || entry.bot == null || botPos == null || targetPos == null) {
+            return false;
+        }
+        if (isOwnerMostlyIdle(entry)) {
+            return false;
+        }
+
+        int walkStep = BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile);
+        int absDx = Math.abs(targetPos.x - botPos.x);
+        int ownerStep = Math.max(Math.abs(entry.observedOwnerStepX), Math.abs(entry.observedOwnerStepY));
+        return absDx <= BotMovementManager.cfg.FOLLOW_DIST + walkStep
+                && ownerStep < walkStep;
     }
 
     private static boolean isOwnerMostlyIdle(BotEntry entry) {

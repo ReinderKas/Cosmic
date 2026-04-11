@@ -455,7 +455,7 @@ class BotMovementManagerTest {
     }
 
     @Test
-    void shouldPaceSameRegionFollowMovementNearOwnerInsteadOfUsingFullWalkStep() {
+    void shouldUseStopFollowHysteresisInsteadOfPacingSameRegionFollowMovement() {
         MapleMap map = new MapleMap(910000033, 0, 0, 910000033, 1.0f);
         server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
         footholds.insert(new Foothold(new Point(0, 100), new Point(200, 100), 1));
@@ -466,13 +466,17 @@ class BotMovementManagerTest {
         entry.following = true;
         entry.observedOwnerStepX = 4;
 
-        int walkStep = BotPhysicsEngine.walkStep(map, entry.movementProfile);
-        int pacedStep = BotMovementManager.resolveGroundStepX(
+        int stoppedStep = BotMovementManager.resolveGroundStepX(
                 entry, new Point(0, 100), new Point(20, 100), BotMovementManager.cfg.STOP_DIST, BotMovementManager.cfg.FOLLOW_DIST);
+        assertEquals(0, stoppedStep,
+                "follow should stop anywhere inside STOP_DIST instead of micro-throttling to an exact point");
 
-        assertTrue(pacedStep > 0);
-        assertTrue(pacedStep < walkStep,
-                "same-region follow should slow down near the owner instead of always using full bot walk speed");
+        int walkStep = BotPhysicsEngine.walkStep(map, entry.movementProfile);
+        int followStep = BotMovementManager.resolveGroundStepX(
+                entry, new Point(0, 100), new Point(90, 100), BotMovementManager.cfg.STOP_DIST, BotMovementManager.cfg.FOLLOW_DIST);
+
+        assertEquals(walkStep, followStep,
+                "follow should restart at FOLLOW_DIST using normal full-speed movement");
     }
 
     @Test
@@ -495,6 +499,39 @@ class BotMovementManagerTest {
 
         assertEquals(walkStep, step,
                 "fast follow bots should keep full walk speed instead of being micro-throttled");
+    }
+
+    @Test
+    void shouldShowStandingStanceWhileGroundVelocityDeceleratesWithoutMoveInput() {
+        MapleMap map = new MapleMap(910000035, 0, 0, 910000035, 1.0f);
+        Character bot = mockBot(new Point(0, 100), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.inAir = false;
+        entry.movementVelX = 80;
+        entry.lastDesiredDirection = 0;
+        entry.facingDir = 1;
+
+        assertTrue(BotPhysicsEngine.isStandingStance(BotPhysicsEngine.resolveStance(entry)),
+                "residual ground velocity should not force a walking stance when no move key is held");
+    }
+
+    @Test
+    void shouldNotUseSpeedMismatchAnticWhenOwnerIsIdle() {
+        MapleMap map = new MapleMap(910000041, 0, 0, 910000041, 1.0f);
+        Character bot = mockBot(new Point(100, 100), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.following = true;
+        entry.movementProfile = new BotMovementProfile(140, 100);
+        entry.observedOwnerStepX = 0;
+        entry.observedOwnerStepY = 0;
+
+        assertFalse(BotFollowAnticsManager.shouldStartSpeedMismatchAntic(entry, new Point(100, 100), new Point(110, 100)),
+                "idle owners should use the long idle-antic roll, not the active follow speed-mismatch antic");
+
+        entry.observedOwnerStepX = 4;
+
+        assertTrue(BotFollowAnticsManager.shouldStartSpeedMismatchAntic(entry, new Point(100, 100), new Point(110, 100)),
+                "slow-but-moving owners remain eligible for speed-mismatch follow antics");
     }
 
     @Test

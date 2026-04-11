@@ -501,68 +501,7 @@ class BotMovementManager {
             int localStopDist = Math.min(stopDist, 12);
             return updateStepX(entry, entry.bot.getMap(), botPos.x, targetPos.x, localStopDist, localStopDist);
         }
-        if (entry.movementProfile.totalSpeedStat() > BotMovementProfile.BASE_TOTAL_STAT) {
-            return updateStepX(entry, entry.bot.getMap(), botPos.x, targetPos.x, stopDist, followDist);
-        }
-        if (shouldUsePacedFollowController(entry, botPos, targetPos)) {
-            return updatePacedFollowStepX(entry, entry.bot.getMap(), botPos.x, targetPos.x, stopDist, followDist);
-        }
         return updateStepX(entry, entry.bot.getMap(), botPos.x, targetPos.x, stopDist, followDist);
-    }
-
-    private static boolean shouldUsePacedFollowController(BotEntry entry, Point botPos, Point targetPos) {
-        return entry.following
-                && !entry.grinding
-                && entry.moveTarget == null
-                && entry.navEdge == null
-                && !entry.navPreciseTarget
-                && botPos != null
-                && targetPos != null
-                && Math.abs(targetPos.y - botPos.y) <= cfg.JUMP_Y_THRESH * 2;
-    }
-
-    private static int updatePacedFollowStepX(BotEntry entry,
-                                              MapleMap map,
-                                              int botX,
-                                              int targetX,
-                                              int stopDist,
-                                              int followDist) {
-        int dx = targetX - botX;
-        int absDx = Math.abs(dx);
-        if (absDx == 0) {
-            entry.wasMovingX = false;
-            return 0;
-        }
-
-        int walkStep = BotPhysicsEngine.walkStep(map, entry.movementProfile);
-        int ownerStep = Integer.signum(entry.observedOwnerStepX) == Integer.signum(dx)
-                ? Math.min(walkStep, Math.abs(entry.observedOwnerStepX))
-                : 0;
-        int settleDist = Math.min(stopDist, Math.max(8, ownerStep));
-        if (absDx <= settleDist) {
-            entry.wasMovingX = false;
-            return 0;
-        }
-
-        if (absDx > followDist) {
-            int fastStep = calcStepX(map, entry.movementProfile, botX, targetX, true,
-                    Math.min(stopDist, 12), Math.min(stopDist, 12));
-            entry.wasMovingX = fastStep != 0;
-            return fastStep;
-        }
-
-        int available = absDx - settleDist;
-        int minStep = Math.min(available, ownerStep > 0 ? Math.max(1, ownerStep) : 1);
-        int desiredStep = (int) Math.ceil(available * 0.4);
-        int maxStep = ownerStep > 0 ? Math.min(walkStep, ownerStep + 2) : Math.max(2, walkStep / 2);
-        int stepMagnitude = Math.min(available, Math.min(maxStep, Math.max(minStep, desiredStep)));
-        if (stepMagnitude <= 0) {
-            entry.wasMovingX = false;
-            return 0;
-        }
-
-        entry.wasMovingX = true;
-        return dx >= 0 ? stepMagnitude : -stepMagnitude;
     }
 
     private static void applyGroundAction(BotEntry entry, Foothold currentFh, MoveAction action) {
