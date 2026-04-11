@@ -1446,7 +1446,8 @@ public class BotManager {
 
         // Only detect/act while actively navigating — idling near owner is not stuck.
         if (entry.inAir || entry.climbing
-                || (entry.navEdge == null && entry.moveTarget == null && !entry.graphWarmupFallback)) {
+                || entry.graphWarmupFallback
+                || (entry.navEdge == null && entry.moveTarget == null)) {
             entry.stuckMs = 0;
             entry.stuckCheckX = Integer.MIN_VALUE;
             return;

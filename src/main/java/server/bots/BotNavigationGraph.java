@@ -226,6 +226,10 @@ final class BotNavigationGraph implements Serializable {
         boolean containsLaunchX(int x) {
             return x >= launchMinX && x <= launchMaxX;
         }
+
+        boolean containsLaunchX(int x, int tolerance) {
+            return x >= launchMinX - tolerance && x <= launchMaxX + tolerance;
+        }
     }
 
     final int mapId;

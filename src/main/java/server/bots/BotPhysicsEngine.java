@@ -174,6 +174,20 @@ final class BotPhysicsEngine {
         return Math.max(1, (int) Math.round(step));
     }
 
+    /**
+     * Distance (px) needed for a bot starting from a standstill to reach (near) max walk speed
+     * before walking off a ledge. O(1) derivation from config constants — used by graphgen to
+     * place directional-drop launch points without simulating the runway tick by tick.
+     *
+     * <p>Friction model: dv/dt = hF*slip - (friction+slope)*v. Terminal v_max = hF*slip/(friction+slope).
+     * Time to ~95% terminal ≈ 3/(friction+slope). We use a fixed multiple of walkStep that comfortably
+     * exceeds the 95% mark for the calibrated constants without iterating.
+     */
+    static int launchRunwayPx(MapleMap map, BotMovementProfile profile) {
+        int step = walkStep(map, profile);
+        return Math.max(40, step * 6);
+    }
+
     static int velocityFromDeltaX(double deltaX) {
         return (int) Math.round(deltaX * (1000.0 / cfg.TICK_MS));
     }

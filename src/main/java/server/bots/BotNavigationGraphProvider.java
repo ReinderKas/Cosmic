@@ -28,7 +28,7 @@ import java.util.concurrent.Executors;
 final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
-    private static final int GRAPH_VERSION = 21;
+    private static final int GRAPH_VERSION = 22;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
     private static final int ROPE_ANCHOR_INTERVAL_PX = 30;
     private static final int MAX_PROFILED_JUMP_REGIONS = 5;
@@ -744,67 +744,55 @@ final class BotNavigationGraphProvider {
                                                Map<Integer, List<BotNavigationGraph.Edge>> outgoing,
                                                Set<String> edgeKeys,
                                                BotMovementProfile movementProfile) {
+        if (direction == 0) {
+            return;
+        }
         Point endpoint = direction < 0 ? from.leftPoint() : from.rightPoint();
-        DirectionalDropBuild directionalDrop = findDirectionalDropBuild(from, map, endpoint, direction, movementProfile);
-        if (directionalDrop == null) {
+
+        // O(1) runway: place the edge startPoint so the bot has room to accelerate
+        // to (near) max walk speed before walking off. No candidate iteration, no
+        // runway simulation — just constants from config.
+        int runwayPx = BotPhysicsEngine.launchRunwayPx(map, movementProfile);
+        int launchX;
+        if (direction < 0) {
+            launchX = Math.min(from.maxX, endpoint.x + runwayPx);
+        } else {
+            launchX = Math.max(from.minX, endpoint.x - runwayPx);
+        }
+        // Skip if region too small to fit a meaningful runway — no directional drop here.
+        int actualRunway = Math.abs(launchX - endpoint.x);
+        if (actualRunway < Math.min(runwayPx, 20)) {
+            return;
+        }
+        Point startPoint = from.pointAt(launchX);
+
+        // Ballistic fall from ledge at max walk velocity — single simulation call.
+        int stepX = BotPhysicsEngine.walkStep(map, movementProfile) * direction;
+        BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateFallLanding(map, endpoint, stepX);
+        if (landing == null) {
             return;
         }
 
-        BotPhysicsEngine.JumpLanding landing = directionalDrop.walkOff().landing();
         int toRegionId = regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1);
         BotNavigationGraph.Region below = regionsById.get(toRegionId);
         if (below == null || below.id == from.id) {
             return;
         }
-        if (landing.point().y <= directionalDrop.startPoint().y + 4) {
+        if (landing.point().y <= endpoint.y + 4) {
             return;
         }
 
+        int travelMs = BotPhysicsEngine.estimateFallLandingTimeMs(map, endpoint, stepX)
+                + estimateHorizontalTravelTimeMs(actualRunway, movementProfile);
+
         addEdge(from.id, below.id, BotNavigationGraph.EdgeType.DROP,
-                directionalDrop.startPoint(),
+                startPoint,
                 landing.point(),
-                directionalDrop.walkOff().launchStepX(),
+                stepX,
                 0,
-                directionalDrop.walkOff().travelTimeMs(),
+                travelMs,
                 outgoing,
                 edgeKeys);
-    }
-
-    private static DirectionalDropBuild findDirectionalDropBuild(BotNavigationGraph.Region from,
-                                                                 MapleMap map,
-                                                                 Point anchor,
-                                                                 int direction,
-                                                                 BotMovementProfile movementProfile) {
-        if (direction == 0) {
-            return null;
-        }
-
-        int limitX = direction > 0 ? from.minX : from.maxX;
-        List<DirectionalDropBuild> candidates = new ArrayList<>();
-        for (int x = anchor.x; direction > 0 ? x >= limitX : x <= limitX; x -= direction) {
-            Point candidate = from.pointAt(x);
-            BotPhysicsEngine.WalkOffLanding walkOff = BotPhysicsEngine.simulateWalkOffLanding(map, candidate, direction, movementProfile);
-            if (walkOff != null) {
-                candidates.add(new DirectionalDropBuild(candidate, walkOff));
-            }
-        }
-        if (candidates.isEmpty()) {
-            return null;
-        }
-
-        DirectionalDropBuild reference = candidates.getFirst();
-        for (DirectionalDropBuild candidate : candidates) {
-            if (isBetterDirectionalDrop(candidate, reference, direction)) {
-                reference = candidate;
-            }
-        }
-
-        for (DirectionalDropBuild candidate : candidates) {
-            if (matchesDirectionalDropBuild(candidate, reference)) {
-                return candidate;
-            }
-        }
-        return reference;
     }
 
     private static void addJumpEdges(BotNavigationGraph.Region from,
@@ -1539,39 +1527,6 @@ final class BotNavigationGraphProvider {
         }
 
         return 0;
-    }
-
-    private static boolean isBetterDirectionalDrop(DirectionalDropBuild candidate,
-                                                   DirectionalDropBuild currentBest,
-                                                   int direction) {
-        int candidateStep = Math.abs(candidate.walkOff().launchStepX());
-        int bestStep = Math.abs(currentBest.walkOff().launchStepX());
-        if (candidateStep != bestStep) {
-            return candidateStep > bestStep;
-        }
-
-        int candidateLanding = candidate.walkOff().landing().point().x * direction;
-        int bestLanding = currentBest.walkOff().landing().point().x * direction;
-        if (candidateLanding != bestLanding) {
-            return candidateLanding > bestLanding;
-        }
-
-        return candidate.startPoint().x * direction > currentBest.startPoint().x * direction;
-    }
-
-    private static boolean matchesDirectionalDropBuild(DirectionalDropBuild candidate,
-                                                       DirectionalDropBuild reference) {
-        if (candidate.walkOff().launchStepX() != reference.walkOff().launchStepX()) {
-            return false;
-        }
-        if (candidate.walkOff().landing().foothold().getId() != reference.walkOff().landing().foothold().getId()) {
-            return false;
-        }
-        return Math.abs(candidate.walkOff().landing().point().x - reference.walkOff().landing().point().x) <= 2
-                && Math.abs(candidate.walkOff().landing().point().y - reference.walkOff().landing().point().y) <= 2;
-    }
-
-    private record DirectionalDropBuild(Point startPoint, BotPhysicsEngine.WalkOffLanding walkOff) {
     }
 
     private record EndpointConnection(Point from, Point to) {

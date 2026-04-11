@@ -19,7 +19,10 @@ class BotDirectionalDropNavigationTest {
     @Test
     void shouldKeepDirectionalDropDirectionWhileBotIsStillOnRunway() {
         DropTestFixture fixture = createDirectionalDropFixture(910000040);
-        Character bot = mockBot(new Point(fixture.edge.startPoint.x - 2, fixture.edge.startPoint.y), fixture.map);
+        // New O(1) runway semantics: startPoint is placed launchRunwayPx behind the ledge.
+        // Once the bot has crossed the runway anchor in the launch direction, nav should
+        // feed endPoint until physics performs the walk-off.
+        Character bot = mockBot(new Point(fixture.edge.startPoint.x + 2, fixture.edge.startPoint.y), fixture.map);
         BotEntry entry = new BotEntry(bot, null, null);
         entry.physX = bot.getPosition().x;
         entry.physY = bot.getPosition().y;

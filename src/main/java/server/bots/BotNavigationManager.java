@@ -14,11 +14,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.concurrent.ConcurrentHashMap;
 
 final class BotNavigationManager {
     private static final int JUMP_READY_X_TOLERANCE = 10;
     private static final int EDGE_READY_X_TOLERANCE = 14;
     private static final int NO_MOVEMENT_WALK_TOLERANCE = 4;
+
+    /** Throttle warmup notifications per (ownerId -> mapId -> lastNotifyMs). */
+    private static final Map<Integer, Map<Integer, Long>> WARMUP_NOTIFIED = new ConcurrentHashMap<>();
 
     static final class NavigationDirective {
         final Point targetPos;
@@ -59,6 +63,7 @@ final class BotNavigationManager {
             if (graph == null) {
                 BotNavigationGraphProvider.warmGraphAsync(bot.getMap(), entry.movementProfile);
                 entry.graphWarmupFallback = true;
+                notifyWarmup(entry, bot);
                 entry.lastNavDecision = "graph-warmup";
                 clearNavigation(entry);
                 Point fallbackTarget = rawTargetPos != null ? new Point(rawTargetPos) : bot.getPosition();
@@ -162,6 +167,25 @@ final class BotNavigationManager {
 
     private static void clearNavigation(BotEntry entry) {
         BotMovementManager.clearNavigationState(entry);
+    }
+
+    private static void notifyWarmup(BotEntry entry, Character bot) {
+        Character owner = entry.owner;
+        if (owner == null) return;
+        int ownerId = owner.getId();
+        int mapId = bot.getMap().getId();
+        long now = System.currentTimeMillis();
+        Map<Integer, Long> byMap = WARMUP_NOTIFIED.get(ownerId);
+        if (byMap != null) {
+            Long last = byMap.get(mapId);
+            if (last != null && (now - last) < 10_000L) return;
+        }
+        // Only count walkable footholds when we are about to send — lazy, inside throttle gate
+        long walkable = bot.getMap().getFootholds().getAllFootholds().stream()
+                .filter(fh -> !fh.isWall()).count();
+        if (walkable < 100) return;
+        WARMUP_NOTIFIED.computeIfAbsent(ownerId, k -> new ConcurrentHashMap<>()).put(mapId, now);
+        owner.dropMessage(5, bot.getName() + " is warming map navigation cache, using fallback movement...");
     }
 
     private static BotNavigationGraph.Edge refreshPendingClimbExitEdge(BotNavigationGraph graph,
@@ -850,7 +874,7 @@ final class BotNavigationManager {
     static boolean isWithinJumpLaunchWindow(BotNavigationGraph graph,
                                             Point botPos,
                                             BotNavigationGraph.Edge edge) {
-        if (botPos == null || edge.type != BotNavigationGraph.EdgeType.JUMP || !edge.containsLaunchX(botPos.x)) {
+        if (botPos == null || edge.type != BotNavigationGraph.EdgeType.JUMP || !edge.containsLaunchX(botPos.x, 2)) {
             return false;
         }
 
