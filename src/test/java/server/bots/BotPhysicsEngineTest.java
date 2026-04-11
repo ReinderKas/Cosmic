@@ -520,8 +520,8 @@ class BotPhysicsEngineTest {
         MapleMap map = createEmptyTestMap(910000049);
         server.maps.FootholdTree footholds = map.getFootholds();
         Foothold lower = new Foothold(new Point(0, 100), new Point(50, 100), 1);
-        Foothold wall = new Foothold(new Point(50, 80), new Point(50, 100), 2);
-        Foothold upper = new Foothold(new Point(50, 80), new Point(120, 80), 3);
+        Foothold wall = new Foothold(new Point(50, 60), new Point(50, 100), 2);
+        Foothold upper = new Foothold(new Point(50, 60), new Point(120, 60), 3);
         wall.setNext(lower.getId());
         wall.setPrev(upper.getId());
         footholds.insert(lower);
@@ -530,6 +530,40 @@ class BotPhysicsEngineTest {
 
         assertFalse(BotPhysicsEngine.canWalkGroundStep(map, new Point(44, 100), 12),
                 "ground movement should not phase through collidable stair/platform walls");
+    }
+
+    @Test
+    void shouldWalkUpShortCollidableWallEndpointWithinSlopeLimit() {
+        MapleMap map = createEmptyTestMap(910000054);
+        server.maps.FootholdTree footholds = map.getFootholds();
+        Foothold lower = new Foothold(new Point(0, 100), new Point(50, 100), 1);
+        Foothold wall = new Foothold(new Point(50, 80), new Point(50, 100), 2);
+        Foothold upper = new Foothold(new Point(50, 80), new Point(120, 80), 3);
+        wall.setNext(lower.getId());
+        wall.setPrev(upper.getId());
+        footholds.insert(lower);
+        footholds.insert(wall);
+        footholds.insert(upper);
+
+        assertTrue(BotPhysicsEngine.canWalkGroundStep(map, new Point(44, 100), 12),
+                "short wall endpoints should behave like a walkable step up within MAX_SLOPE_UP");
+    }
+
+    @Test
+    void shouldWalkOffLedgeWhenWallTopIsLevelWithGround() {
+        MapleMap map = createEmptyTestMap(910000055);
+        server.maps.FootholdTree footholds = map.getFootholds();
+        Foothold upper = new Foothold(new Point(0, 80), new Point(50, 80), 1);
+        Foothold wall = new Foothold(new Point(50, 80), new Point(50, 140), 2);
+        Foothold lower = new Foothold(new Point(50, 140), new Point(120, 140), 3);
+        wall.setPrev(upper.getId());
+        wall.setNext(lower.getId());
+        footholds.insert(upper);
+        footholds.insert(wall);
+        footholds.insert(lower);
+
+        assertFalse(BotPhysicsEngine.isGroundStepBlockedByWall(map, new Point(44, 80), 12),
+                "a wall whose top is level with the current ground is a ledge edge, not a blocking wall");
     }
 
     @Test

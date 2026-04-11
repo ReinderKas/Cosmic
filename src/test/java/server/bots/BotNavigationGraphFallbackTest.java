@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -43,7 +44,7 @@ class BotNavigationGraphFallbackTest {
     }
 
     @Test
-    void shouldNotGenerateDirectionalDropThroughCollidableWall() {
+    void shouldGenerateDirectionalDropAtWallTopLedge() {
         MapleMap map = new MapleMap(910000051, 0, 0, 910000051, 1.0f);
         server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
         Foothold lower = new Foothold(new Point(0, 100), new Point(50, 100), 1);
@@ -59,9 +60,33 @@ class BotNavigationGraphFallbackTest {
         BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(map, BotMovementProfile.base());
         int upperRegionId = graph.findRegionId(map, new Point(100, 80));
 
-        assertFalse(graph.getOutgoing(upperRegionId).stream()
+        assertTrue(graph.getOutgoing(upperRegionId).stream()
                         .anyMatch(edge -> edge.type == BotNavigationGraph.EdgeType.DROP && edge.launchStepX < 0),
-                "a collidable wall at the platform side is not a walk-off ledge");
+                "a wall whose top is level with the current ground is a walk-off ledge");
+    }
+
+    @Test
+    void shouldNotGenerateJumpFromUnapproachableWallBoundaryLaunchPoint() {
+        MapleMap map = new MapleMap(910000053, 0, 0, 910000053, 1.0f);
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        Foothold upper = new Foothold(new Point(0, 60), new Point(50, 60), 1);
+        Foothold wall = new Foothold(new Point(50, 60), new Point(50, 100), 2);
+        Foothold lower = new Foothold(new Point(50, 100), new Point(140, 100), 3);
+        wall.setPrev(upper.getId());
+        wall.setNext(lower.getId());
+        footholds.insert(upper);
+        footholds.insert(wall);
+        footholds.insert(lower);
+        map.setFootholds(footholds);
+
+        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(map, BotMovementProfile.base());
+        int lowerRegionId = graph.findRegionId(map, new Point(51, 100));
+        int upperRegionId = graph.findRegionId(map, new Point(49, 60));
+
+        assertFalse(graph.getOutgoing(lowerRegionId).stream()
+                        .anyMatch(edge -> edge.type == BotNavigationGraph.EdgeType.JUMP
+                                && edge.toRegionId == upperRegionId),
+                "jump launch windows must not require walking into a collidable wall boundary");
     }
 
     private static Character mockBot(Point startPosition, MapleMap map) {

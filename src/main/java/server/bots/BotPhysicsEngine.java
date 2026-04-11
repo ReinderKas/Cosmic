@@ -362,7 +362,7 @@ final class BotPhysicsEngine {
     }
 
     static boolean isGroundRunwayBlockedByWall(MapleMap map, Point from, Point to) {
-        return findWallCollision(map, from, to).type() == AirCollisionType.WALL;
+        return findGroundWallCollision(map, from, to).type() == AirCollisionType.WALL;
     }
 
     static boolean isGroundFarBelow(MapleMap map, Point position) {
@@ -513,7 +513,7 @@ final class BotPhysicsEngine {
                 ? standingPoint.y
                 : currentPos.y;
 
-        AirCollision wall = findWallCollision(map, currentPos, new Point(nextX, baseY));
+        AirCollision wall = findGroundWallCollision(map, currentPos, new Point(nextX, baseY));
         if (wall.type() == AirCollisionType.WALL) {
             return new GroundStepPreview(baseY, currentPos, foothold, false, true);
         }
@@ -1350,6 +1350,17 @@ final class BotPhysicsEngine {
     }
 
     private static AirCollision findWallCollision(MapleMap map, Point previousPos, Point nextPos) {
+        return findWallCollision(map, previousPos, nextPos, false);
+    }
+
+    private static AirCollision findGroundWallCollision(MapleMap map, Point previousPos, Point nextPos) {
+        return findWallCollision(map, previousPos, nextPos, true);
+    }
+
+    private static AirCollision findWallCollision(MapleMap map,
+                                                  Point previousPos,
+                                                  Point nextPos,
+                                                  boolean allowWalkableGroundEndpoint) {
         if (map == null || map.getFootholds() == null) {
             return AirCollision.none();
         }
@@ -1363,7 +1374,7 @@ final class BotPhysicsEngine {
             if (!foothold.isWall() || !collidableWalls.contains(foothold.getId())) {
                 continue;
             }
-            AirCollision collision = wallCollision(foothold, previousPos, nextPos);
+            AirCollision collision = wallCollision(foothold, previousPos, nextPos, allowWalkableGroundEndpoint);
             if (collision.type() == AirCollisionType.WALL && collision.progress() < best.progress()) {
                 best = collision;
             }
@@ -1446,7 +1457,10 @@ final class BotPhysicsEngine {
         return new AirCollision(AirCollisionType.LAND, new Point(x, floor.y), foothold, progress);
     }
 
-    private static AirCollision wallCollision(Foothold wall, Point previousPos, Point nextPos) {
+    private static AirCollision wallCollision(Foothold wall,
+                                              Point previousPos,
+                                              Point nextPos,
+                                              boolean allowWalkableGroundEndpoint) {
         int wallX = wall.getX1();
         int startX = previousPos.x;
         int endX = nextPos.x;
@@ -1467,6 +1481,9 @@ final class BotPhysicsEngine {
         if (yAtWall < minY || yAtWall > maxY) {
             return AirCollision.none();
         }
+        if (allowWalkableGroundEndpoint && isWalkableGroundWallEndpoint(yAtWall, minY, maxY)) {
+            return AirCollision.none();
+        }
 
         int dir = Integer.compare(endX, startX);
         int safeX = wallX - dir;
@@ -1474,6 +1491,13 @@ final class BotPhysicsEngine {
                 new Point(safeX, (int) Math.round(yAtWall)),
                 wall,
                 progress);
+    }
+
+    private static boolean isWalkableGroundWallEndpoint(double yAtWall, int minY, int maxY) {
+        if (Math.abs(yAtWall - minY) < 0.001) {
+            return true;
+        }
+        return Math.abs(yAtWall - maxY) < 0.001 && maxY - minY <= cfg.MAX_SLOPE_UP;
     }
 
     private static double landingGroundHSpeed(MapleMap map,

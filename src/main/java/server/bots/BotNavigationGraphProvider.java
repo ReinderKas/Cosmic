@@ -28,7 +28,7 @@ import java.util.concurrent.Executors;
 final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
-    private static final int GRAPH_VERSION = 23;
+    private static final int GRAPH_VERSION = 24;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
     private static final int ROPE_ANCHOR_INTERVAL_PX = 30;
     private static final int MAX_PROFILED_JUMP_REGIONS = 5;
@@ -921,6 +921,11 @@ final class BotNavigationGraphProvider {
                 true, stats, jumpLandingCache, movementProfile);
         int maxX = findJumpLaunchBoundary(from, map, regionIdByFootholdId, anchorX, launchStepX, targetRegionId,
                 false, stats, jumpLandingCache, movementProfile);
+        minX = trimJumpLaunchBoundary(from, map, minX, maxX, true);
+        maxX = trimJumpLaunchBoundary(from, map, minX, maxX, false);
+        if (minX > maxX) {
+            return null;
+        }
 
         int representativeX = (minX + maxX) / 2;
         Point representativeStart = from.pointAt(representativeX);
@@ -988,6 +993,39 @@ final class BotNavigationGraphProvider {
             }
         }
         return validX;
+    }
+
+    private static int trimJumpLaunchBoundary(BotNavigationGraph.Region from,
+                                              MapleMap map,
+                                              int minX,
+                                              int maxX,
+                                              boolean trimLeft) {
+        int step = trimLeft ? 1 : -1;
+        for (int x = trimLeft ? minX : maxX; x >= minX && x <= maxX; x += step) {
+            if (isApproachableJumpLaunchX(from, map, x)) {
+                return x;
+            }
+        }
+        return trimLeft ? maxX + 1 : minX - 1;
+    }
+
+    private static boolean isApproachableJumpLaunchX(BotNavigationGraph.Region from, MapleMap map, int launchX) {
+        if (from == null || from.isRopeRegion || map == null) {
+            return false;
+        }
+        if (launchX > from.minX && canWalkToLaunchX(from, map, launchX - 1, launchX)) {
+            return true;
+        }
+        return launchX < from.maxX && canWalkToLaunchX(from, map, launchX + 1, launchX);
+    }
+
+    private static boolean canWalkToLaunchX(BotNavigationGraph.Region from, MapleMap map, int fromX, int launchX) {
+        Point fromPoint = from.pointAt(fromX);
+        Point launchPoint = from.pointAt(launchX);
+        if (fromPoint == null || launchPoint == null || fromPoint.equals(launchPoint)) {
+            return false;
+        }
+        return BotPhysicsEngine.canWalkGroundStep(map, fromPoint, launchPoint.x - fromPoint.x);
     }
 
     private static boolean landsJumpInRegion(MapleMap map,
