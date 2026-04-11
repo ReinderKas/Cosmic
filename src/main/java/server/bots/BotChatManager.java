@@ -89,6 +89,9 @@ public class BotChatManager {
             + "how\\s+(are|r)\\s+(you|u|ya)(\\s+doing)?|"
             + "what.?s\\s+(good|up|new|poppin.?))\\b",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern FIDGET_PATTERN = Pattern.compile(
+            "^\\s*fidget\\s*[?!.,]*\\s*$",
+            Pattern.CASE_INSENSITIVE);
 
     private static final Pattern STATS_PATTERN = Pattern.compile(
             INFO_PFX + "(stats?|str(ength)?|dex(terity)?|int(elligence)?|luk|level|lv)\\b"
@@ -643,6 +646,14 @@ public class BotChatManager {
                 BotManager.after(BotManager.randMs(1400, 1600), () ->
                         BotManager.getInstance().botSay(entry.bot, BotManager.randomReply(STOP_REPLIES)));
             });
+        } else if (isFidgetCommand(message)) {
+            BotManager.after(BotManager.randMs(250, 500), () -> {
+                if (BotFollowAnticsManager.maybeStartSocialAntic(entry)) {
+                    BotManager.getInstance().botSay(entry.bot, "ok");
+                } else {
+                    BotManager.getInstance().botSay(entry.bot, "cant rn");
+                }
+            });
         } else if (GREETING_PATTERN.matcher(message).find()) {
             BotManager.after(BotManager.randMs(900, 1100), () -> {
                 entry.bot.changeFaceExpression(Emote.HAPPY.getValue());
@@ -1044,7 +1055,7 @@ public class BotChatManager {
     }
 
     private static void reportHelp(BotEntry entry) {
-        queueBotSay(entry, "commands: follow, stop, move here, grind, stats, speed, skills, inventory, mesos, slots, scrolls, pots, debug stats, respec, respec ap");
+        queueBotSay(entry, "commands: follow, stop, move here, fidget, grind, stats, speed, skills, inventory, mesos, slots, scrolls, pots, debug stats, respec, respec ap");
         queueBotSay(entry, "support: support on/off, heals on/off, buff on/off, buff cheap/max, buff debug");
         queueBotSay(entry, "gear: ask 'any upgrades?' or say 'trade recommended gear'");
         queueBotSay(entry, "trade: mesos, scrolls, pots, equips, etc, or named items");
@@ -1203,6 +1214,10 @@ public class BotChatManager {
     /** Returns true when the owner hasn't moved in ≥5 min (AFK). Skip chat interactions. */
     static boolean isOwnerIdle(BotEntry entry) {
         return entry.ownerWasAfk;
+    }
+
+    static boolean isFidgetCommand(String message) {
+        return message != null && FIDGET_PATTERN.matcher(message).find();
     }
 
     private static void handleRequestUpgradeCommand(BotEntry entry, Character bot) {

@@ -191,6 +191,7 @@ public class BotEntry {
     int followAnticAirSteerDir = 0;
     int followAnticJumpDir = 0;
     int followAnticMoveDir = 0;
+    boolean followAnticSpamAirSteer = false;
     long nextFollowAnticJumpAtMs = 0L;
     Point followAnticOriginPos = null;
     long nextFollowAnticVisualAtMs = 0L;

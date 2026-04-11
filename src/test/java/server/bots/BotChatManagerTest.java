@@ -90,6 +90,20 @@ class BotChatManagerTest {
     }
 
     @Test
+    void shouldTriggerFidgetAnticWithoutGreetingRoll() {
+        BotEntry entry = new BotEntry(null, null, null);
+        entry.following = true;
+
+        assertTrue(BotChatManager.isFidgetCommand("fidget"));
+        assertTrue(BotChatManager.isFidgetCommand("fidget!"));
+        assertFalse(BotChatManager.isFidgetCommand("please fidget"));
+
+        assertTrue(BotFollowAnticsManager.maybeStartSocialAntic(entry));
+        assertFalse(entry.followAnticMode == BotFollowAnticMode.NONE);
+        assertEquals(BotFollowAnticTrigger.SOCIAL, entry.followAnticTrigger);
+    }
+
+    @Test
     void shouldNotTriggerGreetingAnticWhileOwnerIsAfk() {
         BotEntry entry = new BotEntry(null, null, null);
         entry.following = true;

@@ -639,6 +639,37 @@ class BotMovementManagerTest {
     }
 
     @Test
+    void shouldOnlySpamAirSteerWhenJumpAnticRollEnablesIt() {
+        MapleMap map = new MapleMap(910000046, 0, 0, 910000046, 1.0f);
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        footholds.insert(new Foothold(new Point(0, 100), new Point(300, 100), 1));
+        map.setFootholds(footholds);
+
+        Character bot = mockBot(new Point(100, 100), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.following = true;
+        entry.movementProfile = new BotMovementProfile(140, 100);
+        BotFollowAnticsManager.startAntic(entry, BotFollowAnticMode.JUMP, System.currentTimeMillis(), 3000);
+        BotFollowAnticsManager.tryHandleTick(entry, new Point(110, 100), true);
+
+        entry.followAnticSpamAirSteer = false;
+        entry.airSteerVelX = 0.0;
+        entry.nextFollowAnticActionAtMs = 0L;
+
+        assertTrue(BotFollowAnticsManager.tryHandleTick(entry, new Point(110, 100), true));
+        assertEquals(0.0, entry.airSteerVelX,
+                "non-spam jump antics should not reroll random air steering every airborne tick");
+
+        entry.followAnticSpamAirSteer = true;
+        entry.airSteerVelX = 0.0;
+        entry.nextFollowAnticActionAtMs = 0L;
+
+        assertTrue(BotFollowAnticsManager.tryHandleTick(entry, new Point(110, 100), true));
+        assertTrue(entry.airSteerVelX != 0.0,
+                "spam-air-steer jump antics should press random side input on their own delay");
+    }
+
+    @Test
     void shouldSpamSidewaysDuringFollowAnticWithoutDroppingFollowMode() {
         MapleMap map = new MapleMap(910000043, 0, 0, 910000043, 1.0f);
         server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
@@ -658,7 +689,7 @@ class BotMovementManagerTest {
     }
 
     @Test
-    void shouldReturnToAnticOriginWithPreciseMoveTargetAfterAnticEnds() {
+    void shouldContinueFollowingAfterAutoFollowAnticEnds() {
         MapleMap map = new MapleMap(910000044, 0, 0, 910000044, 1.0f);
         Character bot = mockBot(new Point(100, 100), map);
         BotEntry entry = new BotEntry(bot, null, null);
@@ -671,8 +702,37 @@ class BotMovementManagerTest {
 
         assertFalse(BotFollowAnticsManager.tryHandleTick(entry, new Point(110, 100), true));
         assertEquals(BotFollowAnticMode.NONE, entry.followAnticMode);
+        assertNull(entry.moveTarget, "speed-mismatch follow antics should resume following immediately");
+        assertFalse(entry.moveTargetPrecise);
+    }
+
+    @Test
+    void shouldReturnToAnticOriginWithPreciseMoveTargetAfterIdleOrSocialAnticEnds() {
+        MapleMap map = new MapleMap(910000045, 0, 0, 910000045, 1.0f);
+        Character bot = mockBot(new Point(100, 100), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.following = true;
+        entry.movementProfile = new BotMovementProfile(140, 100);
+        long now = System.currentTimeMillis();
+        BotFollowAnticsManager.startAntic(entry, BotFollowAnticMode.SPAM_SIDEWAYS, now, 2000, BotFollowAnticTrigger.SOCIAL);
+        bot.setPosition(new Point(130, 100));
+        entry.followAnticUntilMs = now - 1;
+
+        assertFalse(BotFollowAnticsManager.tryHandleTick(entry, new Point(110, 100), true));
         assertEquals(new Point(100, 100), entry.moveTarget,
-                "antic cleanup should reuse the precise move-target path from the here command");
+                "social antic cleanup should reuse the precise move-target path from the here command");
+        assertTrue(entry.moveTargetPrecise);
+
+        entry.moveTarget = null;
+        entry.moveTargetPrecise = false;
+        bot.setPosition(new Point(130, 100));
+        BotFollowAnticsManager.startAntic(entry, BotFollowAnticMode.SPAM_SIDEWAYS, now, 2000, BotFollowAnticTrigger.IDLE);
+        bot.setPosition(new Point(160, 100));
+        entry.followAnticUntilMs = now - 1;
+
+        assertFalse(BotFollowAnticsManager.tryHandleTick(entry, new Point(110, 100), true));
+        assertEquals(new Point(130, 100), entry.moveTarget,
+                "idle antic cleanup should return to its own recorded origin");
         assertTrue(entry.moveTargetPrecise);
     }
 

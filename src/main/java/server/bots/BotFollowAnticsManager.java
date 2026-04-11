@@ -22,6 +22,7 @@ enum BotFollowAnticMode {
 enum BotFollowAnticTrigger {
     NONE,
     AUTO_FOLLOW,
+    IDLE,
     SOCIAL
 }
 
@@ -74,6 +75,7 @@ final class BotFollowAnticsManager {
         entry.followAnticAirSteerDir = 0;
         entry.followAnticJumpDir = 0;
         entry.followAnticMoveDir = 0;
+        entry.followAnticSpamAirSteer = false;
         entry.nextFollowAnticJumpAtMs = 0L;
         entry.followAnticOriginPos = null;
         entry.nextFollowAnticVisualAtMs = 0L;
@@ -84,16 +86,20 @@ final class BotFollowAnticsManager {
             return;
         }
 
+        BotFollowAnticTrigger trigger = entry.followAnticTrigger;
         Point origin = entry.followAnticOriginPos == null ? null : new Point(entry.followAnticOriginPos);
         clear(entry);
-        if (shouldReturnToOrigin(origin, botPos)) {
+        if (shouldReturnToOrigin(trigger, origin, botPos)) {
             entry.moveTarget = origin;
             entry.moveTargetPrecise = true;
             BotMovementManager.clearNavigationState(entry);
         }
     }
 
-    private static boolean shouldReturnToOrigin(Point origin, Point botPos) {
+    private static boolean shouldReturnToOrigin(BotFollowAnticTrigger trigger, Point origin, Point botPos) {
+        if (trigger != BotFollowAnticTrigger.IDLE && trigger != BotFollowAnticTrigger.SOCIAL) {
+            return false;
+        }
         if (origin == null || botPos == null) {
             return false;
         }
@@ -120,6 +126,7 @@ final class BotFollowAnticsManager {
         entry.followAnticAirSteerDir = ThreadLocalRandom.current().nextBoolean() ? 1 : -1;
         entry.followAnticJumpDir = entry.followAnticAirSteerDir == 0 ? 1 : entry.followAnticAirSteerDir;
         entry.followAnticMoveDir = entry.followAnticAirSteerDir;
+        entry.followAnticSpamAirSteer = isJumpAntic(mode) && ThreadLocalRandom.current().nextInt(100) < 35;
         entry.nextFollowAnticJumpAtMs = now;
         entry.followAnticOriginPos = entry.bot == null ? null : new Point(entry.bot.getPosition());
         entry.nextFollowAnticVisualAtMs = now + BotManager.randMs(500, 1200);
@@ -127,6 +134,13 @@ final class BotFollowAnticsManager {
     }
 
     static boolean maybeStartGreetingAntic(BotEntry entry, int roll) {
+        if (roll >= 50) {
+            return false;
+        }
+        return maybeStartSocialAntic(entry);
+    }
+
+    static boolean maybeStartSocialAntic(BotEntry entry) {
         if (entry == null
                 || entry.followAnticMode != BotFollowAnticMode.NONE
                 || !entry.following
@@ -137,8 +151,7 @@ final class BotFollowAnticsManager {
                 || entry.navPreciseTarget
                 || entry.graphWarmupFallback
                 || entry.inAir
-                || entry.climbing
-                || roll >= 50) {
+                || entry.climbing) {
             return false;
         }
 
@@ -203,7 +216,7 @@ final class BotFollowAnticsManager {
             return;
         }
 
-        startRandomAntic(entry, now, (int) BotManager.randMs(2000, 10_000), BotFollowAnticTrigger.AUTO_FOLLOW);
+        startRandomAntic(entry, now, (int) BotManager.randMs(2000, 10_000), BotFollowAnticTrigger.IDLE);
     }
 
     private static void maybeStartSpeedMismatchAntic(BotEntry entry, Point botPos, Point targetPos, long now, boolean runAiTick) {
@@ -276,13 +289,12 @@ final class BotFollowAnticsManager {
                 || now < entry.nextFollowAnticActionAtMs) {
             return;
         }
-
-        int steerDir = entry.followAnticAirSteerDir;
-        if (steerDir == 0 || (entry.followAnticMode == BotFollowAnticMode.JUMP
-                && ThreadLocalRandom.current().nextInt(100) < 35)) {
-            steerDir = ThreadLocalRandom.current().nextBoolean() ? 1 : -1;
-            entry.followAnticAirSteerDir = steerDir;
+        if (!entry.followAnticSpamAirSteer) {
+            return;
         }
+
+        int steerDir = ThreadLocalRandom.current().nextBoolean() ? 1 : -1;
+        entry.followAnticAirSteerDir = steerDir;
         BotPhysicsEngine.applyAirSteering(entry, steerDir * 30);
         entry.nextFollowAnticActionAtMs = now + BotManager.randMs(150, 350);
     }
