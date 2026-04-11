@@ -628,8 +628,13 @@ final class BotPhysicsEngine {
     }
 
     private static void beginFall(BotEntry entry, Character bot, int airVelX) {
+        beginFall(entry, bot, bot.getPosition(), airVelX);
+    }
+
+    private static void beginFall(BotEntry entry, Character bot, Point position, int airVelX) {
         entry.blockedRopeGrab = null;
-        launchAirborne(entry, bot, bot.getPosition(), 0f, airVelX, false);
+        bot.setPosition(new Point(position));
+        launchAirborne(entry, bot, position, 0f, airVelX, false);
     }
 
     static void beginKnockback(BotEntry entry, Character bot, Point position, float initialVelY, int airVelX) {
@@ -751,7 +756,7 @@ final class BotPhysicsEngine {
         // platform happens to be within MAX_SLOPE_UP above. That is not an uphill slope of the
         // current foothold - the bot should fall, not jump up to the unconnected platform.
         if (step.lostGround()) {
-            beginFall(entry, bot, step.stepX());
+            beginFall(entry, bot, step.point(), step.stepX());
             return new GroundMotion(step.stepX(), true);
         }
 
@@ -802,7 +807,7 @@ final class BotPhysicsEngine {
         }
 
         if (preview.lostGround()) {
-            return new GroundStepResult(currentPos, foothold, displaced,
+            return new GroundStepResult(new Point(newX, preview.baseY()), foothold, displaced,
                     stepX, velocityFromDeltaX(displaced.physX() - currentPos.x), true);
         }
 
@@ -841,12 +846,12 @@ final class BotPhysicsEngine {
                 if (step.stepX() == 0) {
                     return null;
                 }
-                JumpLanding landing = simulateFallLanding(map, cursor, step.stepX());
+                JumpLanding landing = simulateFallLanding(map, step.point(), step.stepX());
                 if (landing == null) {
                     return null;
                 }
-                return new WalkOffLanding(new Point(cursor), step.stepX(), landing,
-                        elapsedMs + estimateFallLandingTimeMs(map, cursor, step.stepX()));
+                return new WalkOffLanding(new Point(step.point()), step.stepX(), landing,
+                        elapsedMs + estimateFallLandingTimeMs(map, step.point(), step.stepX()));
             }
 
             cursor = step.point();

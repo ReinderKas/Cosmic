@@ -513,6 +513,7 @@ class BotPhysicsEngineTest {
         assertTrue(entry.inAir, "walk-off should transition directly into airborne state");
         assertTrue(entry.airVelX > 0, "walk-off should preserve horizontal momentum instead of zeroing X velocity for one tick");
         assertTrue(entry.movementVelX > 0, "movement packet should carry non-zero horizontal velocity on the ledge-drop tick");
+        assertTrue(bot.getPosition().x > 10, "walk-off should keep the full horizontal step instead of snapping to the ledge edge");
     }
 
     @Test
