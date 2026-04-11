@@ -82,7 +82,7 @@ final class BotShopManager {
         WeaponType wt = BotAttackExecutionProvider.getEquippedWeaponType(bot);
         boolean needsRecharge = isRechargeWeaponType(wt) && hasRechargeableInShop(bot);
         int ammoTrigger = BotCombatManager.cfg.AMMO_LOW_WARN * AMMO_TRIGGER_THRESHOLD;
-        boolean needsAmmoForShop = needsAmmo(wt) && BotCombatManager.countAmmo(bot, wt) < ammoTrigger && findAmmoItem(match.shop, wt) != null;
+        boolean needsAmmoForShop = needsAmmo(bot, wt) && BotCombatManager.countAmmo(bot, wt) < ammoTrigger && findAmmoItem(match.shop, wt) != null;
         int[] pots = BotPotionManager.countPotions(bot);
         int potTrigger = BotManager.cfg.POT_LOW_WARN * POT_TRIGGER_THRESHOLD;
         boolean needsHpPots = pots[0] < potTrigger && findPotionItem(match.shop, bot, true) != null;
@@ -91,7 +91,7 @@ final class BotShopManager {
             return;
         }
 
-        long distSq = bot.getPosition().distanceSq(match.npcPos);
+        long distSq = (long) bot.getPosition().distanceSq(match.npcPos);
         if (distSq > 1000L * 1000L) {
             BotManager.getInstance().botSay(bot, BotManager.randomReply(RESUPPLY_MSGS));
         }
