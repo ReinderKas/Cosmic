@@ -6,6 +6,7 @@ import client.QuestStatus;
 import client.inventory.InventoryType;
 import client.inventory.Item;
 import client.inventory.WeaponType;
+import constants.game.CharacterStance;
 import constants.inventory.ItemConstants;
 import net.server.Server;
 import net.server.world.Party;
@@ -26,7 +27,6 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledFuture;
@@ -853,16 +853,18 @@ public class BotManager {
      * a platform different from the owner's (formation spread). If no platform is found
      * within range, or snap is disabled, fall back to the owner's foothold with X clamped
      * so the bot never targets a position that isn't on a real standing surface.
+     * If the owner is on a rope, target the rope region instead of searching for ground platforms.
      */
     private static Point resolveFollowTargetPos(Point followBase,
                                                 Character owner,
                                                 Point ownerPos,
                                                 int snapRange,
                                                 MapleMap map) {
+        if (owner != null && CharacterStance.isClimbing(owner.getStance()) && map != null) {
+            return clampedOnOwnerRegion(followBase.x, owner, ownerPos, map);
+        }
+
         if (snapRange > 0 && map != null) {
-            // Two probes: one at ownerY (finds platform at or below), one above by snapRange.
-            // Compare distances to ownerPos.y (not followBase.y, which is always ownerPos.y here,
-            // but keeping the comparison explicit guards against future changes).
             Point below = BotPhysicsEngine.findGroundPoint(map, followBase);
             Point above = BotPhysicsEngine.findGroundPoint(map, new Point(followBase.x, ownerPos.y - snapRange));
             boolean belowOk = below != null && Math.abs(below.y - ownerPos.y) <= snapRange;
@@ -873,15 +875,13 @@ public class BotManager {
                 return Math.abs(below.y - ownerPos.y) <= Math.abs(above.y - ownerPos.y) ? below : above;
             }
         }
-        // No platform found within snap range at the offset X — or snap is disabled.
-        // Fall back to the owner's current walk region, not just the single foothold segment,
-        // so formation still works across merged flat/sloped platforms when snap is disabled.
         return clampedOnOwnerRegion(followBase.x, owner, ownerPos, map);
     }
 
     /**
      * Clamps targetX to the owner's current walk region and returns a real standing point.
      * Falls back to the owner's foothold segment if the region cannot be resolved.
+     * For rope targets, finds the nearest rope to the formation target position.
      */
     private static Point clampedOnOwnerRegion(int targetX, Character owner, Point ownerPos, MapleMap map) {
         if (map != null) {
@@ -891,9 +891,17 @@ public class BotManager {
                         ? BotNavigationManager.resolveCharacterRegionId(graph, map, owner)
                         : graph.findRegionId(map, ownerPos);
                 BotNavigationGraph.Region ownerRegion = graph.getRegion(ownerRegionId);
-                if (ownerRegion != null && !ownerRegion.isRopeRegion) {
-                    int clampedX = Math.max(ownerRegion.minX, Math.min(ownerRegion.maxX, targetX));
-                    return ownerRegion.pointAt(clampedX);
+                if (ownerRegion != null) {
+                    if (ownerRegion.isRopeRegion) {
+                        BotNavigationGraph.Region nearestRope = findNearestRopeAtY(graph, targetX, ownerPos.y);
+                        if (nearestRope != null) {
+                            return new Point(nearestRope.minX, ownerPos.y);
+                        }
+                        return new Point(ownerPos.x, ownerPos.y);
+                    } else {
+                        int clampedX = Math.max(ownerRegion.minX, Math.min(ownerRegion.maxX, targetX));
+                        return ownerRegion.pointAt(clampedX);
+                    }
                 }
             }
         }
@@ -906,6 +914,32 @@ public class BotManager {
         }
         Point fallback = map == null ? null : BotPhysicsEngine.findGroundPoint(map, new Point(targetX, ownerPos.y));
         return fallback != null ? fallback : new Point(targetX, ownerPos.y);
+    }
+
+    /**
+     * Finds the rope region nearest to the target position (targetX, targetY).
+     * Returns null if no rope region is found within reasonable distance.
+     */
+    private static BotNavigationGraph.Region findNearestRopeAtY(BotNavigationGraph graph, int targetX, int targetY) {
+        BotNavigationGraph.Region nearestRope = null;
+        int nearestDistance = Integer.MAX_VALUE;
+        int maxDistance = 400;
+
+        for (BotNavigationGraph.Region region : graph.regions) {
+            if (region.isRopeRegion) {
+                if (region.minY > targetY || region.maxY < targetY) {
+                    continue;
+                }
+                int ropeX = region.minX;
+                int distance = Math.abs(ropeX - targetX);
+                if (distance < nearestDistance && distance <= maxDistance) {
+                    nearestDistance = distance;
+                    nearestRope = region;
+                }
+            }
+        }
+
+        return nearestRope;
     }
 
     FormationState formationStateFor(BotEntry entry) {
