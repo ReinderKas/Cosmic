@@ -193,6 +193,26 @@ class BotManagerTest {
     }
 
     @Test
+    void shouldUseFollowIdleFastPathOnlyWhileParkedNearTarget() {
+        MapleMap map = createEmptyTestMap(910000024);
+        map.getFootholds().insert(new Foothold(new Point(0, 100), new Point(200, 100), 1));
+        Character bot = mockMovingBot(new Point(80, 100), map);
+        BotEntry entry = new BotEntry(bot, mock(Character.class), null);
+        entry.following = true;
+
+        assertTrue(BotManager.tryFollowIdleMovementFastPath(entry, bot, new Point(100, 100), 1_000L));
+        assertEquals("idle-fast", entry.lastNavDecision);
+        assertTrue(BotManager.tryFollowIdleMovementFastPath(entry, bot, new Point(100, 100), 1_500L),
+                "idle follow bots should skip per-tick nav/ground movement between periodic checks");
+        assertFalse(BotManager.tryFollowIdleMovementFastPath(entry, bot, new Point(100, 100), 2_000L),
+                "idle fast path should allow a periodic full movement/nav check");
+
+        entry.observedOwnerStepX = 1;
+        assertFalse(BotManager.tryFollowIdleMovementFastPath(entry, bot, new Point(100, 100), 2_100L),
+                "owner movement should force normal movement resolution");
+    }
+
+    @Test
     void shouldKeepTenMinutePotShareBackoffSeparateForHpAndMp() throws Exception {
         BotManager manager = BotManager.getInstance();
         MapleMap map = mock(MapleMap.class);

@@ -1220,6 +1220,10 @@ public class BotManager {
             }
         }
 
+        if (tryFollowIdleMovementFastPath(entry, bot, targetPos, nowMs)) {
+            return;
+        }
+
         // Grind mode: navigate toward nearest monster, attack when in range
         if (entry.grinding) {
             // PQ nav override: walking to NPC or owner — skip monster seeking entirely
@@ -1455,7 +1459,57 @@ public class BotManager {
             targetPos = entry.shopTargetPos != null ? entry.shopTargetPos : entry.shopNpcPos;
         }
 
+        if (tryFollowIdleMovementFastPath(entry, bot, targetPos, entry.lastTickAtMs)) {
+            return;
+        }
+
         stepMovementCore(entry, targetPos, runAiTick);
+    }
+
+    static boolean tryFollowIdleMovementFastPath(BotEntry entry, Character bot, Point targetPos, long nowMs) {
+        if (!isFollowIdleMovementFastPathEligible(entry, bot, targetPos)) {
+            return false;
+        }
+
+        if (entry.nextFollowIdleMovementCheckAtMs == 0L) {
+            entry.nextFollowIdleMovementCheckAtMs = nowMs + 1000L;
+        } else if (nowMs >= entry.nextFollowIdleMovementCheckAtMs) {
+            entry.nextFollowIdleMovementCheckAtMs = nowMs + 1000L;
+            return false;
+        }
+
+        entry.lastNavDecision = "idle-fast";
+        entry.stuckMs = 0;
+        entry.stuckCheckX = Integer.MIN_VALUE;
+        return true;
+    }
+
+    private static boolean isFollowIdleMovementFastPathEligible(BotEntry entry, Character bot, Point targetPos) {
+        if (entry == null || bot == null || targetPos == null) {
+            return false;
+        }
+        if (!entry.following || entry.grinding || entry.moveTarget != null) {
+            return false;
+        }
+        if (entry.inAir || entry.climbing || entry.downJumpPending || entry.graphWarmupFallback) {
+            return false;
+        }
+        if (entry.navEdge != null || entry.navPreciseTarget || entry.fidgetMode != BotFidgetMode.NONE) {
+            return false;
+        }
+        if (entry.shopVisitPending || entry.shopSequenceActive || entry.kpq.navTarget != null) {
+            return false;
+        }
+        if (entry.wasMovingX || entry.lastDesiredDirection != 0 || entry.movementVelX != 0 || entry.movementVelY != 0) {
+            return false;
+        }
+        if (entry.observedOwnerStepX != 0 || entry.observedOwnerStepY != 0) {
+            return false;
+        }
+
+        Point botPos = bot.getPosition();
+        return Math.abs(targetPos.x - botPos.x) <= BotMovementManager.cfg.FOLLOW_DIST
+                && Math.abs(targetPos.y - botPos.y) <= BotMovementManager.cfg.STOP_DIST;
     }
 
     private void stepMovementCore(BotEntry entry,
