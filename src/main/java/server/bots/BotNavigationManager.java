@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 
 final class BotNavigationManager {
     private static final int JUMP_READY_X_TOLERANCE = 10;
@@ -329,7 +330,7 @@ final class BotNavigationManager {
             return null;
         }
         Point botPos = bot.getPosition();
-        if (!canExecuteJumpFromCurrentPosition(graph, bot.getMap(), botPos, edge)) {
+        if (!canExecuteSelectedJumpFromCurrentPosition(graph, entry, bot.getMap(), botPos, edge)) {
             // Bot may be standing at the top of a rope region whose bottom is the jump entry.
             // Grab the rope and descend — tickClimbing will naturally drive toward edge.startPoint.
             if (edge.startPoint.y > botPos.y) {
@@ -514,7 +515,7 @@ final class BotNavigationManager {
         }
         return switch (edge.type) {
             case WALK -> shouldUsePreciseWalkTarget(edge);
-            case JUMP -> !canExecuteJumpFromCurrentPosition(graph, entry.bot.getMap(), botPos, edge);
+            case JUMP -> !canExecuteSelectedJumpFromCurrentPosition(graph, entry, entry.bot.getMap(), botPos, edge);
             case DROP -> edge.launchStepX == 0
                     && !canExecuteDropFromCurrentPosition(graph, entry.bot.getMap(), botPos, edge);
             case CLIMB -> entry.climbing
@@ -530,7 +531,7 @@ final class BotNavigationManager {
         return switch (edge.type) {
             case WALK -> new Point(edge.endPoint);
             case CLIMB -> selectClimbWaypoint(graph, entry, botPos, edge);
-            case JUMP -> entry.inAir ? new Point(edge.endPoint) : selectJumpWaypoint(graph, botPos, edge);
+            case JUMP -> entry.inAir ? new Point(edge.endPoint) : selectJumpWaypoint(graph, entry, botPos, edge);
             case DROP -> selectDropWaypoint(entry, graph, botPos, edge);
             case PORTAL -> entry.inAir ? new Point(edge.endPoint) : new Point(edge.startPoint);
         };
@@ -538,17 +539,24 @@ final class BotNavigationManager {
 
     static Point selectJumpWaypoint(BotEntry entry, Point botPos, BotNavigationGraph.Edge edge) {
         BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(entry.bot.getMap(), entry.movementProfile);
-        return selectJumpWaypoint(graph, botPos, edge);
+        return selectJumpWaypoint(graph, entry, botPos, edge);
     }
 
     static Point selectJumpWaypoint(BotNavigationGraph graph, Point botPos, BotNavigationGraph.Edge edge) {
+        return selectJumpWaypoint(graph, null, botPos, edge);
+    }
+
+    private static Point selectJumpWaypoint(BotNavigationGraph graph,
+                                            BotEntry entry,
+                                            Point botPos,
+                                            BotNavigationGraph.Edge edge) {
         BotNavigationGraph.Region fromRegion = graph.getRegion(edge.fromRegionId);
         if (fromRegion == null || fromRegion.isRopeRegion) {
             return new Point(edge.startPoint);
         }
-        int targetX = edge.containsLaunchX(botPos.x)
-                ? botPos.x
-                : botPos.x < edge.launchMinX ? edge.launchMinX : edge.launchMaxX;
+        int targetX = entry == null
+                ? edge.containsLaunchX(botPos.x) ? botPos.x : botPos.x < edge.launchMinX ? edge.launchMinX : edge.launchMaxX
+                : selectedJumpLaunchX(entry, graph, edge);
         return fromRegion.pointAt(targetX);
     }
 
@@ -871,6 +879,19 @@ final class BotNavigationManager {
         return isWithinJumpLaunchWindow(graph, botPos, edge);
     }
 
+    private static boolean canExecuteSelectedJumpFromCurrentPosition(BotNavigationGraph graph,
+                                                                     BotEntry entry,
+                                                                     MapleMap map,
+                                                                     Point botPos,
+                                                                     BotNavigationGraph.Edge edge) {
+        if (!canExecuteJumpFromCurrentPosition(graph, map, botPos, edge)) {
+            return false;
+        }
+        int launchX = selectedJumpLaunchX(entry, graph, edge);
+        int tolerance = Math.max(1, BotPhysicsEngine.walkStep(map, entry != null ? entry.movementProfile : null));
+        return Math.abs(botPos.x - launchX) <= tolerance;
+    }
+
     private static boolean isReachableWithinRegion(BotNavigationGraph graph,
                                                    MapleMap map,
                                                    int regionId,
@@ -920,6 +941,46 @@ final class BotNavigationManager {
 
         Point expectedLaunchPoint = fromRegion.pointAt(botPos.x);
         return Math.abs(botPos.y - expectedLaunchPoint.y) <= BotMovementManager.cfg.JUMP_Y_THRESH;
+    }
+
+    private static int selectedJumpLaunchX(BotEntry entry,
+                                           BotNavigationGraph graph,
+                                           BotNavigationGraph.Edge edge) {
+        if (entry == null || graph == null || edge == null || edge.type != BotNavigationGraph.EdgeType.JUMP) {
+            return edge != null ? edge.startPoint.x : 0;
+        }
+        BotNavigationGraph.Region fromRegion = graph.getRegion(edge.fromRegionId);
+        if (fromRegion == null || fromRegion.isRopeRegion) {
+            return edge.startPoint.x;
+        }
+        if (sameEdge(entry.navJumpLaunchEdge, edge)
+                && entry.navJumpLaunchX >= edge.launchMinX
+                && entry.navJumpLaunchX <= edge.launchMaxX) {
+            return entry.navJumpLaunchX;
+        }
+
+        int minX = Math.max(edge.launchMinX, fromRegion.minX);
+        int maxX = Math.min(edge.launchMaxX, fromRegion.maxX);
+        if (minX > maxX) {
+            minX = edge.launchMinX;
+            maxX = edge.launchMaxX;
+        }
+
+        int width = Math.max(0, maxX - minX);
+        int margin = Math.min(width / 2, Math.max(1, BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile) * 2));
+        int randomMinX = minX + margin;
+        int randomMaxX = maxX - margin;
+        if (randomMinX > randomMaxX) {
+            randomMinX = minX;
+            randomMaxX = maxX;
+        }
+
+        int selectedX = randomMinX >= randomMaxX
+                ? randomMinX
+                : ThreadLocalRandom.current().nextInt(randomMinX, randomMaxX + 1);
+        entry.navJumpLaunchEdge = edge;
+        entry.navJumpLaunchX = selectedX;
+        return selectedX;
     }
 
     private static int intraRegionTravelCost(BotNavigationGraph graph, Point from, Point to) {

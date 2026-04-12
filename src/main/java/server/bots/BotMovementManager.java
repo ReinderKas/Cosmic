@@ -190,6 +190,8 @@ class BotMovementManager {
     static void clearNavigationState(BotEntry entry) {
         entry.navTargetPos = null;
         entry.navEdge = null;
+        entry.navJumpLaunchEdge = null;
+        entry.navJumpLaunchX = Integer.MIN_VALUE;
         entry.navTargetRegionId = -1;
         entry.navPreciseTarget = false;
     }

@@ -179,6 +179,8 @@ public class BotEntry {
     int lastDesiredDirection = 0;
     Point navTargetPos = null;
     BotNavigationGraph.Edge navEdge = null;
+    BotNavigationGraph.Edge navJumpLaunchEdge = null;
+    int navJumpLaunchX = Integer.MIN_VALUE;
     int navTargetRegionId = -1;
     boolean navPreciseTarget = false;
     boolean graphWarmupFallback = false;

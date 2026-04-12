@@ -196,12 +196,12 @@ class BotNavigationManagerTest {
     }
 
     @Test
-    void shouldApproachCenterOfJumpLaunchWindowWhenOutsideIt() {
+    void shouldPickStableJumpLaunchTargetInsideWindow() {
         MapleMap map = new MapleMap(910000010, 0, 0, 910000010, 1.0f);
         server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
         footholds.insert(new Foothold(new Point(500, 107), new Point(530, 107), 1));
         map.setFootholds(footholds);
-        BotNavigationGraphProvider.rebuildGraph(map);
+        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(map);
 
         Character bot = mock(Character.class);
         when(bot.getMap()).thenReturn(map);
@@ -213,9 +213,18 @@ class BotNavigationManagerTest {
                 516, 523, -8, 0, 0, 0, 0, 850
         );
 
-        assertEquals(new Point(516, 107), BotNavigationManager.selectJumpWaypoint(entry, new Point(449, 113), jump));
-        assertEquals(new Point(523, 107), BotNavigationManager.selectJumpWaypoint(entry, new Point(540, 113), jump));
-        assertEquals(new Point(520, 107), BotNavigationManager.selectJumpWaypoint(entry, new Point(520, 113), jump));
+        Point firstTarget = BotNavigationManager.selectJumpWaypoint(entry, new Point(449, 113), jump);
+        Point secondTarget = BotNavigationManager.selectJumpWaypoint(entry, new Point(540, 113), jump);
+        Point thirdTarget = BotNavigationManager.selectJumpWaypoint(entry, new Point(520, 113), jump);
+
+        assertTrue(firstTarget.x >= 519 && firstTarget.x <= 520);
+        assertEquals(107, firstTarget.y);
+        assertEquals(firstTarget, secondTarget);
+        assertEquals(firstTarget, thirdTarget);
+
+        assertEquals(new Point(516, 107), BotNavigationManager.selectJumpWaypoint(graph, new Point(449, 113), jump));
+        assertEquals(new Point(523, 107), BotNavigationManager.selectJumpWaypoint(graph, new Point(540, 113), jump));
+        assertEquals(new Point(520, 107), BotNavigationManager.selectJumpWaypoint(graph, new Point(520, 113), jump));
     }
 
     @Test
