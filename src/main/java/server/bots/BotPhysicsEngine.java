@@ -80,16 +80,22 @@ final class BotPhysicsEngine {
         private final Foothold foothold;
         private final double incomingDeltaX;
         private final double incomingDeltaY;
+        private final int ticks;
 
         JumpLanding(Point point, Foothold foothold) {
-            this(point, foothold, 0.0, 0.0);
+            this(point, foothold, 0.0, 0.0, 0);
         }
 
         JumpLanding(Point point, Foothold foothold, double incomingDeltaX, double incomingDeltaY) {
+            this(point, foothold, incomingDeltaX, incomingDeltaY, 0);
+        }
+
+        JumpLanding(Point point, Foothold foothold, double incomingDeltaX, double incomingDeltaY, int ticks) {
             this.point = point;
             this.foothold = foothold;
             this.incomingDeltaX = incomingDeltaX;
             this.incomingDeltaY = incomingDeltaY;
+            this.ticks = ticks;
         }
 
         Point point() {
@@ -106,6 +112,10 @@ final class BotPhysicsEngine {
 
         double incomingDeltaY() {
             return incomingDeltaY;
+        }
+
+        int timeMs() {
+            return ticks * cfg.TICK_MS;
         }
     }
 
@@ -1793,6 +1803,106 @@ final class BotPhysicsEngine {
             if (collision.type() == AirCollisionType.LAND && remainingLandingGraceMs == 0L) {
                 return new JumpLanding(collision.point(), collision.foothold(),
                         nextPoint.x - previousPoint.x, nextPoint.y - previousPoint.y);
+            }
+
+            previousIntY = intY;
+        }
+
+        return null;
+    }
+
+    private static int estimateRopeGrabTimeMs(MapleMap map,
+                                              Point from,
+                                              float initialVelY,
+                                              int stepX,
+                                              Rope targetRope,
+                                              long landingGraceMs) {
+        if (targetRope == null) {
+            return Integer.MAX_VALUE;
+        }
+
+        float velocityY = initialVelY;
+        double physX = from.x;
+        double physY = from.y;
+        int previousIntY = from.y;
+        long remainingLandingGraceMs = Math.max(0L, landingGraceMs);
+
+        for (int tick = 0; tick < (1500 / cfg.TICK_MS); tick++) {
+            Point current = new Point((int) Math.round(physX), (int) Math.round(physY));
+            if (canGrabRopeAtPoint(current, targetRope)) {
+                return tick * cfg.TICK_MS;
+            }
+
+            if (remainingLandingGraceMs > 0L) {
+                remainingLandingGraceMs = Math.max(0L, remainingLandingGraceMs - cfg.TICK_MS);
+            }
+
+            physX += stepX;
+            float gravity = gravityPerTick();
+            physY += velocityY + 0.5f * gravity;
+            velocityY = Math.min(velocityY + gravity, maxFallPerTick());
+
+            int x = (int) Math.round(physX);
+            int intY = (int) Math.round(physY);
+            AirCollision collision = resolveAirCollision(map, new Point((int) Math.round(physX - stepX), previousIntY),
+                    new Point(x, intY));
+            if (collision.type() == AirCollisionType.WALL) {
+                physX = collision.point().x;
+                physY = collision.point().y;
+                stepX = 0;
+                previousIntY = collision.point().y;
+                continue;
+            }
+            if (collision.type() == AirCollisionType.LAND && remainingLandingGraceMs == 0L) {
+                return Integer.MAX_VALUE;
+            }
+
+            previousIntY = intY;
+        }
+
+        return Integer.MAX_VALUE;
+    }
+
+    private static boolean canGrabRopeAtPoint(Point position, Rope rope) {
+        return Math.abs(position.x - rope.x()) <= cfg.ROPE_GRAB_X
+                && position.y >= rope.topY()
+                && position.y <= rope.bottomY();
+    }
+
+    private static JumpLanding simulateLanding(MapleMap map,
+                                               Point from,
+                                               float initialVelY,
+                                               int stepX,
+                                               long landingGraceMs) {
+        float velocityY = initialVelY;
+        double physX = from.x;
+        double physY = from.y;
+        int previousIntY = from.y;
+        long remainingLandingGraceMs = Math.max(0L, landingGraceMs);
+
+        for (int tick = 0; tick < (1500 / cfg.TICK_MS); tick++) {
+            if (remainingLandingGraceMs > 0L) {
+                remainingLandingGraceMs = Math.max(0L, remainingLandingGraceMs - cfg.TICK_MS);
+            }
+
+            physX += stepX;
+            float gravity = gravityPerTick();
+            physY += velocityY + 0.5f * gravity;
+            velocityY = Math.min(velocityY + gravity, maxFallPerTick());
+
+            int x = (int) Math.round(physX);
+            int intY = (int) Math.round(physY);
+            AirCollision collision = resolveAirCollision(map, new Point((int) Math.round(physX - stepX), previousIntY),
+                    new Point(x, intY));
+            if (collision.type() == AirCollisionType.WALL) {
+                physX = collision.point().x;
+                physY = collision.point().y;
+                stepX = 0;
+                previousIntY = collision.point().y;
+                continue;
+            }
+            if (collision.type() == AirCollisionType.LAND && remainingLandingGraceMs == 0L) {
+                return new JumpLanding(collision.point(), collision.foothold(), tick + 1);
             }
 
             previousIntY = intY;

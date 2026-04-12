@@ -261,7 +261,7 @@ final class BotNavigationGraphProvider {
         }
     }
 
-    private record JumpLaunchWindow(int minX, int maxX, Point startPoint, Point endPoint) {
+    private record JumpLaunchWindow(int minX, int maxX, Point startPoint, Point endPoint, int landingTimeMs) {
     }
 
     private record JumpLaunchWindowBounds(int minX, int maxX) {
@@ -841,7 +841,7 @@ final class BotNavigationGraphProvider {
                 addEdge(from.id, to.id, BotNavigationGraph.EdgeType.JUMP,
                         launchWindow.startPoint(), launchWindow.endPoint(),
                         launchWindow.minX(), launchWindow.maxX(),
-                        launchStepX, 0, BotPhysicsEngine.estimateJumpLandingTimeMs(map, launchWindow.startPoint(), launchStepX, movementProfile),
+                        launchStepX, 0, launchWindow.landingTimeMs(),
                         outgoing, edgeKeys);
                 stats.edgeCount++;
             }
@@ -949,7 +949,8 @@ final class BotNavigationGraphProvider {
             return null;
         }
 
-        return new JumpLaunchWindow(minX, maxX, representativeStart, representativeSimulation.landing().point());
+        return new JumpLaunchWindow(minX, maxX, representativeStart, representativeSimulation.landing().point(),
+                representativeSimulation.landing().timeMs());
     }
 
     private static int findJumpLaunchBoundary(BotNavigationGraph.Region from,
@@ -1038,17 +1039,59 @@ final class BotNavigationGraphProvider {
             return null;
         }
 
-        int left = firstX;
-        while (left > minX && isValidJumpLaunchX(from, map, regionIdByFootholdId, left - 1,
-                launchStepX, targetRegionId, stats, jumpLandingCache, movementProfile)) {
-            left--;
-        }
-        int right = firstX;
-        while (right < maxX && isValidJumpLaunchX(from, map, regionIdByFootholdId, right + 1,
-                launchStepX, targetRegionId, stats, jumpLandingCache, movementProfile)) {
-            right++;
-        }
+        int left = findTrimBoundary(from, map, regionIdByFootholdId, firstX, minX,
+                launchStepX, targetRegionId, true, stats, jumpLandingCache, movementProfile);
+        int right = findTrimBoundary(from, map, regionIdByFootholdId, firstX, maxX,
+                launchStepX, targetRegionId, false, stats, jumpLandingCache, movementProfile);
         return new JumpLaunchWindowBounds(left, right);
+    }
+
+    private static int findTrimBoundary(BotNavigationGraph.Region from,
+                                        MapleMap map,
+                                        Map<Integer, Integer> regionIdByFootholdId,
+                                        int startX,
+                                        int limitX,
+                                        int launchStepX,
+                                        int targetRegionId,
+                                        boolean searchLeft,
+                                        JumpBuildStats stats,
+                                        JumpLandingCache jumpLandingCache,
+                                        BotMovementProfile movementProfile) {
+        int validX = startX;
+        int invalidX = startX;
+        int step = 1;
+
+        while (true) {
+            int probeX = searchLeft
+                    ? Math.max(limitX, startX - step)
+                    : Math.min(limitX, startX + step);
+            if (probeX == validX) {
+                break;
+            }
+
+            if (!isValidJumpLaunchX(from, map, regionIdByFootholdId, probeX,
+                    launchStepX, targetRegionId, stats, jumpLandingCache, movementProfile)) {
+                invalidX = probeX;
+                break;
+            }
+
+            validX = probeX;
+            if (probeX == limitX) {
+                return probeX;
+            }
+            step *= 2;
+        }
+
+        while (Math.abs(validX - invalidX) > 1) {
+            int probeX = (validX + invalidX) / 2;
+            if (isValidJumpLaunchX(from, map, regionIdByFootholdId, probeX,
+                    launchStepX, targetRegionId, stats, jumpLandingCache, movementProfile)) {
+                validX = probeX;
+            } else {
+                invalidX = probeX;
+            }
+        }
+        return validX;
     }
 
     private static boolean isValidJumpLaunchX(BotNavigationGraph.Region from,
