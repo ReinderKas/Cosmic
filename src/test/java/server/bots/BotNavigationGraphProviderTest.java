@@ -366,6 +366,34 @@ class BotNavigationGraphProviderTest {
         assertEquals(swamp1Graph.findRegionId(swamp1, new Point(1378, 123)), swamp1Graph.findRegionId(swamp1, new Point(-1723, 118)));
     }
 
+    @Test
+    void shouldPreferDirectElliniaJumpFromRegion64ToRegion65() {
+        Point botPosition = new Point(-61, -938);
+        Point ownerPosition = new Point(-268, -907);
+        int botRegionId = elliniaGraph.findRegionId(ellinia, botPosition);
+        int ownerRegionId = elliniaGraph.findRegionId(ellinia, ownerPosition);
+
+        assertEquals(64, botRegionId);
+        assertEquals(65, ownerRegionId);
+
+        BotNavigationGraph.Edge directJump = elliniaGraph.getOutgoing(botRegionId).stream()
+                .filter(edge -> edge.type == BotNavigationGraph.EdgeType.JUMP)
+                .filter(edge -> edge.toRegionId == ownerRegionId)
+                .filter(edge -> edge.containsLaunchX(botPosition.x))
+                .findFirst()
+                .orElse(null);
+
+        assertNotNull(directJump, "Expected direct Ellinia jump edge from region 64 to region 65 at the logged bot X");
+        assertTrue(directJump.launchMinX < 0, "jump launch window should keep valid negative X coordinates");
+        assertJumpEdgeLandsInRegion(elliniaGraph, ellinia, directJump, ownerRegionId);
+
+        List<BotNavigationGraph.Edge> path = findPath(elliniaGraph, ellinia, botPosition, ownerPosition);
+
+        assertEquals(1, path.size(), "expected direct jump path instead of Ellinia detour");
+        assertEquals(BotNavigationGraph.EdgeType.JUMP, path.getFirst().type);
+        assertEquals(ownerRegionId, path.getFirst().toRegionId);
+    }
+
     private static List<BotNavigationGraph.Edge> findPath(BotNavigationGraph graph,
                                                           MapleMap map,
                                                           Point start,

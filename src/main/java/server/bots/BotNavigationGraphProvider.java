@@ -28,7 +28,7 @@ import java.util.concurrent.Executors;
 final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
-    private static final int GRAPH_VERSION = 26;
+    private static final int GRAPH_VERSION = 27;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
     private static final int ROPE_ANCHOR_INTERVAL_PX = 30;
     private static final int MAX_PROFILED_JUMP_REGIONS = 5;
@@ -1006,20 +1006,23 @@ final class BotNavigationGraphProvider {
                                                                  int maxX,
                                                                  int preferredX) {
         int startX = Math.max(minX, Math.min(maxX, preferredX));
-        int firstX = -1;
+        int firstX = 0;
+        boolean foundFirstX = false;
         for (int radius = 0; radius <= Math.max(startX - minX, maxX - startX); radius++) {
             int leftX = startX - radius;
             if (leftX >= minX && isApproachableJumpLaunchX(from, map, leftX)) {
                 firstX = leftX;
+                foundFirstX = true;
                 break;
             }
             int rightX = startX + radius;
             if (rightX <= maxX && rightX != leftX && isApproachableJumpLaunchX(from, map, rightX)) {
                 firstX = rightX;
+                foundFirstX = true;
                 break;
             }
         }
-        if (firstX < 0) {
+        if (!foundFirstX) {
             return null;
         }
 
