@@ -2,11 +2,15 @@ package server.combat;
 
 import client.BuffStat;
 import client.Character;
+import client.Job;
 import client.Skill;
 import client.SkillFactory;
 import client.inventory.Equip;
 import client.inventory.InventoryType;
 import client.inventory.Item;
+import constants.skills.Aran;
+import constants.skills.Archer;
+import constants.skills.Assassin;
 import constants.skills.BlazeWizard;
 import constants.skills.Cleric;
 import constants.skills.DragonKnight;
@@ -18,6 +22,8 @@ import constants.skills.NightLord;
 import constants.skills.NightWalker;
 import constants.skills.Rogue;
 import constants.skills.Shadower;
+import constants.skills.ThunderBreaker;
+import constants.skills.WindArcher;
 import net.server.channel.handlers.AbstractDealDamageHandler;
 import server.StatEffect;
 import server.life.Monster;
@@ -28,6 +34,15 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public final class CombatFormulaProvider {
     public record DamageProfile(int minDamage, int maxDamage, boolean magicAttack, boolean alwaysHit) {
+    }
+
+    /**
+     * Critical hit parameters resolved from a bot's job passives and active buffs.
+     * critChance is in [0.0, 1.0]; critMultiplier is the damage scaling factor on a crit
+     * (2.0 = standard +100% crit per formula doc step 6).
+     */
+    public record CritProfile(double critChance, double critMultiplier) {
+        public static final CritProfile NONE = new CritProfile(0.0, 1.0);
     }
 
     private static final double MIN_HIT_CHANCE = 0.01d;
@@ -183,11 +198,109 @@ public final class CombatFormulaProvider {
                 ? new int[]{damageProfile.minDamage(), damageProfile.maxDamage()}
                 : applyMonsterDefense(bot, monster, damageProfile.minDamage(), damageProfile.maxDamage(),
                 damageProfile.magicAttack());
-        List<Integer> lines = damageProfile.alwaysHit()
-                ? rollDamageLines(hits, adjustedDamage[0], adjustedDamage[1], 1.0d)
-                : rollDamageLines(bot, monster, hits, adjustedDamage[0], adjustedDamage[1], damageProfile.magicAttack());
+        List<Integer> lines;
+        if (damageProfile.alwaysHit()) {
+            lines = rollDamageLines(hits, adjustedDamage[0], adjustedDamage[1], 1.0d);
+        } else if (!damageProfile.magicAttack()) {
+            CritProfile crit = resolveCritProfile(bot);
+            double hitChance = calculateMobHitChance(bot, monster, false);
+            lines = rollDamageLines(hits, adjustedDamage[0], adjustedDamage[1],
+                    hitChance, crit.critChance(), crit.critMultiplier());
+        } else {
+            lines = rollDamageLines(bot, monster, hits, adjustedDamage[0], adjustedDamage[1], true);
+        }
         int normalizedHitDelay = Math.max(0, Math.min(Short.MAX_VALUE, hitDelayMs));
         return new AbstractDealDamageHandler.AttackTarget((short) normalizedHitDelay, lines);
+    }
+
+    /**
+     * Resolves the critical hit profile for a bot from its job's passive crit skill and any
+     * active Sharp Eyes buff. Only physical attacks use this; magic attacks never crit.
+     *
+     * <p>Crit chance comes from the passive crit skill x-field (e.g. Critical Shot level 20 → 40%).
+     * Sharp Eyes adds its encoded crit rate and damage bonus on top.
+     * Standard crit multiplier is 2.0 (+100% per formula doc step 6).
+     */
+    public CritProfile resolveCritProfile(Character bot) {
+        if (!canJobCrit(bot)) return CritProfile.NONE;
+
+        double critChance = resolvePassiveCritChance(bot);
+        double critMultiplier = 2.0;
+
+        // Sharp Eyes buff value encodes: (critRate% << 8) | critDmgBonus%
+        Integer sharpEyesValue = bot.getBuffedValue(BuffStat.SHARP_EYES);
+        if (sharpEyesValue != null) {
+            int seCritRate = (sharpEyesValue >> 8) & 0xFF;
+            int seCritDmgBonus = sharpEyesValue & 0xFF;
+            critChance = Math.min(1.0, critChance + seCritRate / 100.0);
+            critMultiplier += seCritDmgBonus / 100.0;
+        }
+
+        return new CritProfile(Math.min(1.0, critChance), critMultiplier);
+    }
+
+    /**
+     * Rolls damage lines with per-hit critical evaluation.
+     * Each hit first checks hitChance (miss → 0), then rolls a base value in [min, max],
+     * then independently checks critChance. On crit, damage = floor(base × critMultiplier),
+     * capped at 99999 (standard MapleStory single-hit cap).
+     */
+    List<Integer> rollDamageLines(int hits, int minDamage, int maxDamage,
+                                  double hitChance, double critChance, double critMultiplier) {
+        int normalizedMinDamage = Math.max(0, minDamage);
+        int normalizedMaxDamage = Math.max(normalizedMinDamage, maxDamage);
+        double normalizedHitChance = Math.max(0.0d, Math.min(MAX_HIT_CHANCE, hitChance));
+
+        List<Integer> damageLines = new ArrayList<>(Math.max(0, hits));
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        for (int i = 0; i < hits; i++) {
+            if (random.nextDouble() > normalizedHitChance) {
+                damageLines.add(0);
+                continue;
+            }
+            int base = normalizedMinDamage < normalizedMaxDamage
+                    ? random.nextInt(normalizedMinDamage, normalizedMaxDamage + 1)
+                    : normalizedMaxDamage;
+            if (critChance > 0 && random.nextDouble() < critChance) {
+                base = (int) Math.min(99999, Math.floor(base * critMultiplier));
+            }
+            damageLines.add(base);
+        }
+        return damageLines;
+    }
+
+    private boolean canJobCrit(Character bot) {
+        Job job = bot.getJob();
+        return job.isA(Job.BOWMAN) || job.isA(Job.THIEF)
+                || job.isA(Job.NIGHTWALKER1) || job.isA(Job.WINDARCHER1)
+                || job == Job.ARAN3 || job == Job.ARAN4
+                || job == Job.MARAUDER || job == Job.BUCCANEER;
+    }
+
+    private double resolvePassiveCritChance(Character bot) {
+        int critSkillId = getCritSkillId(bot);
+        if (critSkillId == 0) return 0.0;
+        Skill critSkill = SkillFactory.getSkill(critSkillId);
+        if (critSkill == null) return 0.0;
+        int level = bot.getSkillLevel(critSkill);
+        if (level <= 0) return 0.0;
+        StatEffect effect = critSkill.getEffect(level);
+        return effect != null ? effect.getX() / 100.0 : 0.0;
+    }
+
+    /**
+     * Returns the passive crit skill ID for this bot's job tree, or 0 if none.
+     * The skill's x-field holds the crit chance percent (e.g. 40 → 40%).
+     * WindArcher/NightWalker are checked before their parent Cygnus trees to get the correct skill.
+     */
+    private int getCritSkillId(Character bot) {
+        Job job = bot.getJob();
+        if (job.isA(Job.WINDARCHER1))  return WindArcher.CRITICAL_SHOT;
+        if (job.isA(Job.BOWMAN))       return Archer.CRITICAL_SHOT;
+        if (job.isA(Job.NIGHTWALKER1)) return NightWalker.CRITICAL_THROW;
+        if (job.isA(Job.THIEF))        return Assassin.CRITICAL_THROW;
+        if (job == Job.ARAN3 || job == Job.ARAN4) return Aran.COMBO_CRITICAL;
+        return 0; // Marauder/Buccaneer: no standard crit passive in v83
     }
 
     private DamageProfile resolvePhysicalDamageProfile(Character bot, int skillId, StatEffect effect) {

@@ -198,6 +198,79 @@ class CombatFormulaProviderTest {
         assertTrue(profile.alwaysHit());
     }
 
+    // --- Critical hit profile tests ---
+
+    @Test
+    void shouldReturnNoCritForNonCritJob() {
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.WARRIOR);
+        when(bot.getBuffedValue(BuffStat.SHARP_EYES)).thenReturn(null);
+
+        CombatFormulaProvider.CritProfile profile = provider.resolveCritProfile(bot);
+
+        assertEquals(0.0, profile.critChance());
+        assertEquals(1.0, profile.critMultiplier());
+    }
+
+    @Test
+    void shouldReturnBaseCritMultiplierForCritJobWithNoSkill() {
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.BOWMAN);
+        when(bot.getBuffedValue(BuffStat.SHARP_EYES)).thenReturn(null);
+        when(bot.getSkillLevel(org.mockito.ArgumentMatchers.any(client.Skill.class))).thenReturn((byte) 0);
+
+        CombatFormulaProvider.CritProfile profile = provider.resolveCritProfile(bot);
+
+        assertEquals(0.0, profile.critChance());
+        assertEquals(2.0, profile.critMultiplier());
+    }
+
+    @Test
+    void shouldIncludeSharpEyesCritRateAndDamageBonus() {
+        // Sharp Eyes encodes: critRate% << 8 | critDmgBonus%
+        // e.g. level 30: critRate=10, critDmgBonus=40 → buffValue = (10 << 8) | 40 = 2600
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.BOWMAN);
+        when(bot.getBuffedValue(BuffStat.SHARP_EYES)).thenReturn((10 << 8) | 40);
+        when(bot.getSkillLevel(org.mockito.ArgumentMatchers.any(client.Skill.class))).thenReturn((byte) 0);
+
+        CombatFormulaProvider.CritProfile profile = provider.resolveCritProfile(bot);
+
+        assertEquals(0.10, profile.critChance(), 1e-9);
+        assertEquals(2.40, profile.critMultiplier(), 1e-9);
+    }
+
+    @Test
+    void shouldCapCritChanceAt100Percent() {
+        // critRate=100% from Sharp Eyes alone
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.BOWMAN);
+        when(bot.getBuffedValue(BuffStat.SHARP_EYES)).thenReturn((100 << 8) | 0);
+        when(bot.getSkillLevel(org.mockito.ArgumentMatchers.any(client.Skill.class))).thenReturn((byte) 0);
+
+        CombatFormulaProvider.CritProfile profile = provider.resolveCritProfile(bot);
+
+        assertEquals(1.0, profile.critChance());
+    }
+
+    @Test
+    void shouldApplyCritMultiplierToDamageLinesWhenCritChanceIsGuaranteed() {
+        List<Integer> lines = provider.rollDamageLines(8, 100, 100, 1.0, 1.0, 2.0);
+        assertTrue(lines.stream().allMatch(line -> line == 200));
+    }
+
+    @Test
+    void shouldNeverCritWhenCritChanceIsZero() {
+        List<Integer> lines = provider.rollDamageLines(8, 100, 100, 1.0, 0.0, 2.0);
+        assertTrue(lines.stream().allMatch(line -> line == 100));
+    }
+
+    @Test
+    void shouldCapCritDamageAt99999() {
+        List<Integer> lines = provider.rollDamageLines(4, 99999, 99999, 1.0, 1.0, 2.0);
+        assertTrue(lines.stream().allMatch(line -> line == 99999));
+    }
+
     private static Character mockDamageBot() {
         Character bot = mock(Character.class);
         when(bot.getJob()).thenReturn(Job.BEGINNER);
