@@ -29,6 +29,7 @@ import static org.mockito.Mockito.when;
 class BotPhysicsEngineTest {
     private static MapleMap henesys;
     private static MapleMap ellinia;
+    private static MapleMap elliniaWeaponStore;
     private static MapleMap kerning;
     private static MapleMap kpqS1;
     private static MapleMap sleepyForest;
@@ -38,6 +39,7 @@ class BotPhysicsEngineTest {
         System.setProperty("wz-path", Path.of("wz").toAbsolutePath().toString());
         henesys = BotNavigationMapLoader.loadMapGeometry(100000000);
         ellinia = BotNavigationMapLoader.loadMapGeometry(101000000);
+        elliniaWeaponStore = BotNavigationMapLoader.loadMapGeometry(101000001);
         kerning = BotNavigationMapLoader.loadMapGeometry(103000000);
         kpqS1 = BotNavigationMapLoader.loadMapGeometry(103000800);
         sleepyForest = BotNavigationMapLoader.loadMapGeometry(105040400);
@@ -383,6 +385,18 @@ class BotPhysicsEngineTest {
         assertNotNull(landing);
         assertTrue(landing.point().y < 0,
                 "the logged r9->r5 jump should land on the upper platform instead of falling back to the ground below");
+    }
+
+    @Test
+    void shouldKeepAirborneBotInsideMapSideBoundary() {
+        Point start = new Point(376, 182);
+        int stepX = BotPhysicsEngine.walkStep(elliniaWeaponStore);
+
+        BotPhysicsEngine.JumpLanding landing =
+                BotPhysicsEngine.simulateJumpLanding(elliniaWeaponStore, start, stepX);
+
+        assertNotNull(landing, "rightward shop jump should hit the map boundary and fall back to the platform");
+        assertEquals(new Point(400, 182), landing.point());
     }
 
     @Test

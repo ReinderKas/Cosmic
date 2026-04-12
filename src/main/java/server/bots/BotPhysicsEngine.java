@@ -1389,7 +1389,7 @@ final class BotPhysicsEngine {
         }
 
         java.util.Set<Integer> collidableWalls = getCollidableWallIds(map);
-        AirCollision best = AirCollision.none();
+        AirCollision best = mapSideBoundaryCollision(map, previousPos, nextPos);
         for (Foothold foothold : map.getFootholds().getAllFootholds()) {
             if (!foothold.isWall() || !collidableWalls.contains(foothold.getId())) {
                 continue;
@@ -1400,6 +1400,33 @@ final class BotPhysicsEngine {
             }
         }
         return best;
+    }
+
+    private static AirCollision mapSideBoundaryCollision(MapleMap map, Point previousPos, Point nextPos) {
+        Rectangle area = map.getMapArea();
+        if (area == null || area.width <= 0 || area.height <= 0 || previousPos.x == nextPos.x) {
+            return AirCollision.none();
+        }
+
+        int dir = Integer.compare(nextPos.x, previousPos.x);
+        int boundaryX = dir > 0 ? area.x + area.width : area.x;
+        if (dir > 0 && (previousPos.x > boundaryX || nextPos.x <= boundaryX)) {
+            return AirCollision.none();
+        }
+        if (dir < 0 && (previousPos.x < boundaryX || nextPos.x >= boundaryX)) {
+            return AirCollision.none();
+        }
+
+        double progress = (boundaryX - previousPos.x) / (double) (nextPos.x - previousPos.x);
+        if (progress < 0.0 || progress > 1.0) {
+            return AirCollision.none();
+        }
+
+        double yAtBoundary = previousPos.y + (nextPos.y - previousPos.y) * progress;
+        return new AirCollision(AirCollisionType.WALL,
+                new Point(boundaryX, (int) Math.round(yAtBoundary)),
+                null,
+                progress);
     }
 
     /**
