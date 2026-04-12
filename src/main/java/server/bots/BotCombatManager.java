@@ -120,7 +120,7 @@ class BotCombatManager {
         public int   RANGED_RETREAT_DISTANCE_X = 120;
 
         // Ammo
-        public int   AMMO_LOW_WARN = 200;
+        public int   AMMO_LOW_WARN = 500;
 
         // Grind / AoE
         public int   GRIND_SEEK_RANGE  = 800;
