@@ -155,8 +155,7 @@ final class BotMovementSimulationLab {
                         pendingStep.entry(),
                         pendingStep.targetSnapshot().primaryTargetPos(),
                         pendingStep.targetSnapshot().rawOwnerPos(),
-                        pendingStep.runAiTick(),
-                        false);
+                        pendingStep.runAiTick());
                 trace.add(TraceFrame.capture(
                         trace.size(),
                         elapsedMs,
@@ -168,10 +167,6 @@ final class BotMovementSimulationLab {
     }
 
     void stepRaw(String botName, Point targetPos, boolean runAiTick) {
-        stepRaw(botName, targetPos, runAiTick, false);
-    }
-
-    void stepRaw(String botName, Point targetPos, boolean runAiTick, boolean applyGrindSpread) {
         BotEntry entry = requireBot(botName);
         elapsedMs += BotMovementManager.cfg.TICK_MS;
         entry.lastTickWasAi = runAiTick;
@@ -180,7 +175,7 @@ final class BotMovementSimulationLab {
         BotManager.TargetSnapshot targetSnapshot = manager.captureTargetSnapshot(entry);
         Point ownerPos = targetSnapshot.rawOwnerPos();
         entry.lastOwnerPos = new Point(ownerPos);
-        manager.stepMovementOnly(entry, new Point(targetPos), ownerPos, runAiTick, applyGrindSpread);
+        manager.stepMovementOnly(entry, new Point(targetPos), ownerPos, runAiTick);
         trace.add(TraceFrame.capture(trace.size(), elapsedMs, botName, entry, manager.captureTargetSnapshot(entry)));
     }
 

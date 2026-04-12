@@ -28,7 +28,7 @@ import java.util.concurrent.Executors;
 final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
-    private static final int GRAPH_VERSION = 27;
+    private static final int GRAPH_VERSION = 28;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
     private static final int ROPE_ANCHOR_INTERVAL_PX = 30;
     private static final int MAX_PROFILED_JUMP_REGIONS = 5;
@@ -1143,7 +1143,7 @@ final class BotNavigationGraphProvider {
 
         int ropeX = rope.x();
         int jumpStep = BotMovementManager.walkStep(map, movementProfile);
-        int maxRopeJumpDx = BotPhysicsEngine.maxRopeJumpHorizontalTravel(map, movementProfile);
+        int maxRopeJumpDx = BotPhysicsEngine.maxRopeGrabSimulationHorizontalTravel(map, movementProfile);
 
         // Direct step-off at the top of the rope
         addTopStepOffEdge(ropeRegion, rope, map, regionsById, regionIdByFootholdId, outgoing, edgeKeys);

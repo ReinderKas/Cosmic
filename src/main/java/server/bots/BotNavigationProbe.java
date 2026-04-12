@@ -5,6 +5,7 @@ import server.maps.MapleMap;
 
 import java.awt.*;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -37,6 +38,7 @@ public final class BotNavigationProbe {
         List<Point> jumps = new ArrayList<>();
         List<PathProbe> paths = new ArrayList<>();
         List<Integer> regions = new ArrayList<>();
+        List<Integer> edgeRegions = new ArrayList<>();
         List<RegionPathProbe> regionPaths = new ArrayList<>();
 
         for (int i = 1; i < args.length; i++) {
@@ -48,6 +50,7 @@ public final class BotNavigationProbe {
                 case "--jump" -> jumps.add(parsePoint(nextArg(args, ++i, "--jump")));
                 case "--path" -> paths.add(parsePath(nextArg(args, ++i, "--path")));
                 case "--region" -> regions.add(Integer.parseInt(nextArg(args, ++i, "--region")));
+                case "--edges" -> edgeRegions.add(Integer.parseInt(nextArg(args, ++i, "--edges")));
                 case "--path-region" -> regionPaths.add(parseRegionPath(nextArg(args, ++i, "--path-region")));
                 default -> throw new IllegalArgumentException("Unknown arg: " + arg);
             }
@@ -73,6 +76,9 @@ public final class BotNavigationProbe {
         for (int regionId : regions) {
             probeRegion(graph, regionId);
         }
+        for (int regionId : edgeRegions) {
+            probeEdges(graph, regionId);
+        }
         if (listRopes) {
             probeRopes(graph, map);
         }
@@ -86,7 +92,7 @@ public final class BotNavigationProbe {
 
     private static void printUsage() {
         System.out.println("Usage: BotNavigationProbe <mapId> [--rebuild] [--point x,y] [--jump x,y] [--path x1,y1:x2,y2]");
-        System.out.println("       BotNavigationProbe <mapId> [--region id] [--path-region fromRegion:toRegion] [--ropes]");
+        System.out.println("       BotNavigationProbe <mapId> [--region id] [--edges id] [--path-region fromRegion:toRegion] [--ropes]");
         System.out.println("Example: BotNavigationProbe 100000000 --rebuild --point 1080,334 --jump 1080,334 --path 990,334:938,274");
     }
 
@@ -298,6 +304,33 @@ public final class BotNavigationProbe {
                 region.minX, region.maxX, region.minY, region.maxY, region.segments.size(),
                 region.centerPoint().x, region.centerPoint().y);
         System.out.printf("  outgoing %s%n", counts);
+    }
+
+    private static void probeEdges(BotNavigationGraph graph, int regionId) {
+        BotNavigationGraph.Region region = graph.getRegion(regionId);
+        System.out.printf("%nEdges from region %d%n", regionId);
+        if (region == null) {
+            System.out.println("  missing");
+            return;
+        }
+
+        List<BotNavigationGraph.Edge> edges = new ArrayList<>(graph.getOutgoing(regionId));
+        edges.sort(Comparator.comparing((BotNavigationGraph.Edge edge) -> edge.type)
+                .thenComparingInt(edge -> edge.toRegionId)
+                .thenComparingInt(edge -> edge.startPoint.x)
+                .thenComparingInt(edge -> edge.startPoint.y)
+                .thenComparingInt(edge -> edge.endPoint.x)
+                .thenComparingInt(edge -> edge.endPoint.y));
+        if (edges.isEmpty()) {
+            System.out.println("  none");
+            return;
+        }
+
+        for (BotNavigationGraph.Edge edge : edges) {
+            System.out.printf("  %s %d,%d -> %d,%d  %s  toRegion=%d  cost=%d%n",
+                    edge.type, edge.startPoint.x, edge.startPoint.y, edge.endPoint.x, edge.endPoint.y,
+                    edgeDetails(edge), edge.toRegionId, edge.cost);
+        }
     }
 
     private static void probeRopes(BotNavigationGraph graph, MapleMap map) {

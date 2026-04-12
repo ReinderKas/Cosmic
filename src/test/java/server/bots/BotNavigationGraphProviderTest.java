@@ -141,6 +141,28 @@ class BotNavigationGraphProviderTest {
     }
 
     @Test
+    void shouldGenerateKpqRopeTransferPathToRightUpperPlatform() {
+        int leftRopeRegionId = kpqS1Graph.findRopeRegionId(new Point(-437, -892));
+        int rightRopeRegionId = kpqS1Graph.findRopeRegionId(new Point(-337, -1000));
+        int targetRegionId = kpqS1Graph.findRegionId(kpqS1, new Point(-86, -897));
+
+        assertTrue(leftRopeRegionId > 0);
+        assertTrue(rightRopeRegionId > 0);
+        assertTrue(targetRegionId > 0);
+        assertTrue(kpqS1Graph.getOutgoing(leftRopeRegionId).stream()
+                        .anyMatch(edge -> edge.type == BotNavigationGraph.EdgeType.CLIMB
+                                && edge.toRegionId == rightRopeRegionId
+                                && edge.launchStepX > 0),
+                "Expected rope-to-rope transfer from the left KPQ rope to the adjacent right rope");
+
+        List<BotNavigationGraph.Edge> path = BotNavigationManager.findPath(kpqS1Graph, kpqS1,
+                new Point(-437, -892), leftRopeRegionId, targetRegionId, new Point(-86, -897));
+
+        assertFalse(path.isEmpty(), "Left KPQ rope should route to the right upper platform");
+        assertEquals(targetRegionId, path.getLast().toRegionId);
+    }
+
+    @Test
     void shouldResolveOwnerToUpperPlatformWhenPositionHasSubpixelRounding() {
         // Regression: pathlog-SLASH-2026-04-02T125933 — owner at (2596,1696), bot at (2573,1935),
         // both resolved to region 187. findGroundFoothold returned the lower foothold because the

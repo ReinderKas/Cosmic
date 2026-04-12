@@ -68,7 +68,7 @@ final class BotNavigationManager {
                 clearNavigation(entry);
                 Point fallbackTarget = rawTargetPos != null ? new Point(rawTargetPos) : bot.getPosition();
                 if (entry.pathLogger != null) {
-                    entry.pathLogger.record(entry, BotManager.getInstance().captureTargetSnapshot(entry), -1, false, runAiTick);
+                    entry.pathLogger.record(entry, captureTargetSnapshot(entry, rawTargetPos), -1, false, runAiTick);
                 }
                 return new NavigationDirective(fallbackTarget, false);
             }
@@ -106,7 +106,7 @@ final class BotNavigationManager {
                         : startRegionId == targetRegionId ? "same-region" : "no-path";
                 clearNavigation(entry);
                 if (entry.pathLogger != null) {
-                    entry.pathLogger.record(entry, BotManager.getInstance().captureTargetSnapshot(entry), startRegionId, false, runAiTick);
+                    entry.pathLogger.record(entry, captureTargetSnapshot(entry, rawTargetPos), startRegionId, false, runAiTick);
                 }
                 return new NavigationDirective(rawTargetPos, false);
             }
@@ -115,7 +115,7 @@ final class BotNavigationManager {
             if (executionDirective != null) {
                 entry.lastNavDecision = "exec";
                 if (entry.pathLogger != null) {
-                    entry.pathLogger.record(entry, BotManager.getInstance().captureTargetSnapshot(entry), startRegionId, true, runAiTick);
+                    entry.pathLogger.record(entry, captureTargetSnapshot(entry, rawTargetPos), startRegionId, true, runAiTick);
                 }
                 return executionDirective;
             }
@@ -124,7 +124,7 @@ final class BotNavigationManager {
             entry.navPreciseTarget = shouldUsePreciseTarget(graph, entry, botPos, edge);
             entry.navTargetPos = selectWaypoint(entry, graph, botPos, edge);
             if (entry.pathLogger != null) {
-                entry.pathLogger.record(entry, BotManager.getInstance().captureTargetSnapshot(entry), startRegionId, false, runAiTick);
+                entry.pathLogger.record(entry, captureTargetSnapshot(entry, rawTargetPos), startRegionId, false, runAiTick);
             }
             return new NavigationDirective(new Point(entry.navTargetPos), false);
         } finally {
@@ -167,6 +167,22 @@ final class BotNavigationManager {
 
     private static void clearNavigation(BotEntry entry) {
         BotMovementManager.clearNavigationState(entry);
+    }
+
+    private static BotManager.TargetSnapshot captureTargetSnapshot(BotEntry entry, Point rawTargetPos) {
+        BotManager.TargetSnapshot snapshot = BotManager.getInstance().captureTargetSnapshot(entry);
+        if (rawTargetPos == null || rawTargetPos.equals(snapshot.primaryTargetPos())) {
+            return snapshot;
+        }
+        return new BotManager.TargetSnapshot(
+                snapshot.formation(),
+                snapshot.rawOwnerPos(),
+                snapshot.followBasePos(),
+                snapshot.followTargetPos(),
+                snapshot.moveTargetPos(),
+                snapshot.grindTargetPos(),
+                new Point(rawTargetPos),
+                "nav-input");
     }
 
     private static void notifyWarmup(BotEntry entry, Character bot) {

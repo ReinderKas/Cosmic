@@ -979,7 +979,7 @@ public class BotManager {
                 && entry.grindTarget.isAlive()
                 && entry.grindTarget.getMap() == bot.getMap()
                 ? entry.grindTarget
-                : entry.grinding ? BotCombatManager.findGrindTarget(bot) : null;
+                : entry.grinding ? BotCombatManager.findGrindTarget(entry, bot) : null;
         Point grindTargetPos = activeGrindTarget == null ? null : new Point(activeGrindTarget.getPosition());
         Point primaryTargetPos;
         String primaryTargetSource;
@@ -1160,7 +1160,7 @@ public class BotManager {
         // Follow mode: attack monsters already in attack range without chasing
         if (entry.following && !entry.noAmmo && runAiTick && !entry.climbing
                 && Math.abs(botPos.x - owner.getPosition().x) <= BotMovementManager.cfg.FOLLOW_DIST * 5) {
-            Monster followTarget = BotCombatManager.findGrindTarget(bot);
+            Monster followTarget = BotCombatManager.findGrindTarget(entry, bot);
             if (followTarget != null) {
                 Point followTargetPos = followTarget.getPosition();
                 WeaponType followWeaponType = BotAttackExecutionProvider.getEquippedWeaponType(bot);
@@ -1203,9 +1203,13 @@ public class BotManager {
             // Stick to current target while it's alive and in range; only re-pick when needed
             double seekRangeSq = (double) BotCombatManager.cfg.GRIND_SEEK_RANGE * BotCombatManager.cfg.GRIND_SEEK_RANGE;
             Monster target = entry.grindTarget;
+            if (target != null && runAiTick && !BotCombatManager.isReachableGrindTarget(entry, bot, target)) {
+                target = null;
+                entry.grindTarget = null;
+            }
             if (target == null || !target.isAlive()
                     || target.getPosition().distanceSq(botPos) > seekRangeSq) {
-                target = runAiTick ? BotCombatManager.findGrindTarget(bot) : null;
+                target = runAiTick ? BotCombatManager.findGrindTarget(entry, bot) : null;
             }
             if (target == null) {
                 if (entry.inAir) {
@@ -1250,7 +1254,7 @@ public class BotManager {
             }
         }
 
-        stepMovementCore(entry, targetPos, runAiTick, entry.grinding);
+        stepMovementCore(entry, targetPos, runAiTick);
     }
 
     private Character resolveTickOwner(BotEntry entry, int ownerCharId) {
@@ -1368,15 +1372,14 @@ public class BotManager {
         Point ownerPos = targetSnapshot.rawOwnerPos();
         updateObservedOwnerMotion(entry, ownerPos);
         entry.lastOwnerPos = new Point(ownerPos);
-        stepMovementOnly(entry, targetSnapshot.primaryTargetPos(), ownerPos, runAiTick, false);
+        stepMovementOnly(entry, targetSnapshot.primaryTargetPos(), ownerPos, runAiTick);
         return runAiTick;
     }
 
     void stepMovementOnly(BotEntry entry,
                           Point targetPos,
                           Point ownerPos,
-                          boolean runAiTick,
-                          boolean applyGrindSpread) {
+                          boolean runAiTick) {
         if (entry == null || entry.bot == null || targetPos == null) {
             return;
         }
@@ -1413,22 +1416,18 @@ public class BotManager {
             targetPos = entry.shopTargetPos != null ? entry.shopTargetPos : entry.shopNpcPos;
         }
 
-        stepMovementCore(entry, targetPos, runAiTick, applyGrindSpread);
+        stepMovementCore(entry, targetPos, runAiTick);
     }
 
     private void stepMovementCore(BotEntry entry,
                                   Point targetPos,
-                                  boolean runAiTick,
-                                  boolean applyGrindSpread) {
+                                  boolean runAiTick) {
         BotNavigationManager.NavigationDirective navDirective = BotNavigationManager.resolveTarget(entry, targetPos, runAiTick);
         if (navDirective.consumedTick) {
             return;
         }
 
         Point steeringTarget = navDirective.targetPos;
-        if (applyGrindSpread && entry.navEdge == null) {
-            steeringTarget = new Point(steeringTarget.x + entry.followOffsetX, steeringTarget.y);
-        }
         if (entry.moveTargetPrecise && entry.navEdge == null) {
             entry.navPreciseTarget = true;
         }

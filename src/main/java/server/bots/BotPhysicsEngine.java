@@ -1010,6 +1010,11 @@ final class BotPhysicsEngine {
         return maxHorizontalTravel(map, profile, ropeJumpForcePerTick(profile));
     }
 
+    static int maxRopeGrabSimulationHorizontalTravel(MapleMap map, BotMovementProfile profile) {
+        int maxTicks = Math.max(1, 1500 / cfg.TICK_MS);
+        return walkStep(map, profile) * maxTicks;
+    }
+
     static Point simulateRopeJumpGrab(MapleMap map, Point from, int stepX, Rope targetRope) {
         return simulateRopeJumpGrab(map, from, stepX, targetRope, BotMovementProfile.base());
     }
