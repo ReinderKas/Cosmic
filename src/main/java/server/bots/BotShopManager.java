@@ -179,12 +179,14 @@ final class BotShopManager {
 
         if (isRechargeWeaponType(wt)) {
             actions.add((sequence, shop) -> {
-                int recharged = doRecharge(bot, shop);
-                if (recharged > 0) {
+                BuyReport recharge = doRecharge(bot, shop);
+                if (recharge.quantity() > 0) {
+                    int recharged = recharge.quantity();
                     String ammoName = wt == WeaponType.GUN ? "bullets" : "throwing stars";
-                    sequence.bought().add("refilled " + recharged + " set" + (recharged > 1 ? "s" : "") + " of my " + ammoName);
+                    sequence.bought().add("refilled " + recharged + " set"
+                            + (recharged > 1 ? "s" : "") + " of my " + ammoName);
                 }
-                return sequence;
+                return sequence.withFirstShortfall(recharge);
             });
         }
         if (needsAmmo(bot, wt)) {
@@ -323,8 +325,11 @@ final class BotShopManager {
         return false;
     }
 
-    private static int doRecharge(Character bot, Shop shop) {
+    private static BuyReport doRecharge(Character bot, Shop shop) {
         int recharged = 0;
+        int attempted = 0;
+        int shortfallItemId = 0;
+        boolean broke = false;
         for (Item item : bot.getInventory(InventoryType.USE).list()) {
             if (!ItemConstants.isRechargeable(item.getItemId())) {
                 continue;
@@ -337,12 +342,16 @@ final class BotShopManager {
             Shop.TransactionResult result = shop.rechargeDirect(bot, item.getPosition());
             if (result == Shop.TransactionResult.SUCCESS) {
                 recharged++;
+                attempted++;
             }
             if (result == Shop.TransactionResult.NOT_ENOUGH_MESO) {
+                attempted++;
+                shortfallItemId = item.getItemId();
+                broke = true;
                 break;
             }
         }
-        return recharged;
+        return new BuyReport(shortfallItemId, recharged, attempted, broke);
     }
 
     private static ShopSlotItem findPotionItem(Shop shop, Character bot, boolean forHp) {
