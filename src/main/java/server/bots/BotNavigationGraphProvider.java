@@ -28,9 +28,10 @@ import java.util.concurrent.Executors;
 final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
-    private static final int GRAPH_VERSION = 30;
+    private static final int GRAPH_VERSION = 31;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
     private static final int ROPE_ANCHOR_INTERVAL_PX = 30;
+    private static final int JUMP_POST_LANDING_STABILITY_TICKS = 3;
     private static final int MAX_PROFILED_JUMP_REGIONS = 5;
     private static final Path CACHE_DIR = Path.of("cache", "bot-nav", "v" + GRAPH_VERSION);
     private static final Map<GraphCacheKey, BotNavigationGraph> GRAPHS = new ConcurrentHashMap<>();
@@ -277,7 +278,7 @@ final class BotNavigationGraphProvider {
     }
 
     private static final class JumpLandingCache {
-        private final Map<JumpLandingKey, BotPhysicsEngine.JumpLanding> hits = new HashMap<>();
+        private final Map<JumpLandingKey, BotPhysicsEngine.PostLandingJump> hits = new HashMap<>();
         private final Set<JumpLandingKey> misses = new HashSet<>();
     }
 
@@ -815,13 +816,14 @@ final class BotNavigationGraphProvider {
         JumpBuildStats stats = new JumpBuildStats();
         for (Point anchor : anchors) {
             for (int launchStepX : new int[]{-jumpStep, 0, jumpStep}) {
-                BotPhysicsEngine.JumpLanding landing = simulateJumpLandingCached(
+                BotPhysicsEngine.PostLandingJump simulatedLanding = simulateJumpLandingCached(
                         map, anchor, launchStepX, jumpLandingCache, stats, movementProfile);
-                if (landing == null) {
+                if (simulatedLanding == null || simulatedLanding.lostGround()) {
                     continue;
                 }
+                BotPhysicsEngine.JumpLanding landing = simulatedLanding.landing();
 
-                int toRegionId = regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1);
+                int toRegionId = regionIdByFootholdId.getOrDefault(simulatedLanding.finalFoothold().getId(), -1);
                 BotNavigationGraph.Region to = regionsById.get(toRegionId);
                 if (to == null || to.id == from.id) {
                     continue;
@@ -858,14 +860,14 @@ final class BotNavigationGraphProvider {
         }
     }
 
-    private static BotPhysicsEngine.JumpLanding simulateJumpLandingCached(MapleMap map,
-                                                                          Point start,
-                                                                          int launchStepX,
-                                                                          JumpLandingCache jumpLandingCache,
-                                                                          JumpBuildStats stats,
-                                                                          BotMovementProfile movementProfile) {
+    private static BotPhysicsEngine.PostLandingJump simulateJumpLandingCached(MapleMap map,
+                                                                              Point start,
+                                                                              int launchStepX,
+                                                                              JumpLandingCache jumpLandingCache,
+                                                                              JumpBuildStats stats,
+                                                                              BotMovementProfile movementProfile) {
         JumpLandingKey key = new JumpLandingKey(start.x, start.y, launchStepX);
-        BotPhysicsEngine.JumpLanding cachedLanding = jumpLandingCache.hits.get(key);
+        BotPhysicsEngine.PostLandingJump cachedLanding = jumpLandingCache.hits.get(key);
         if (cachedLanding != null) {
             recordJumpSample(stats, true);
             return cachedLanding;
@@ -875,7 +877,8 @@ final class BotNavigationGraphProvider {
             return null;
         }
 
-        BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateJumpLanding(map, start, launchStepX, movementProfile);
+        BotPhysicsEngine.PostLandingJump landing = BotPhysicsEngine.simulateJumpLandingWithPostLandingTicks(
+                map, start, launchStepX, movementProfile, JUMP_POST_LANDING_STABILITY_TICKS);
         if (landing == null) {
             jumpLandingCache.misses.add(key);
         } else {
@@ -935,18 +938,18 @@ final class BotNavigationGraphProvider {
 
         int representativeX = (minX + maxX) / 2;
         Point representativeStart = from.pointAt(representativeX);
-        BotPhysicsEngine.JumpLanding representativeLanding =
+        BotPhysicsEngine.PostLandingJump representativeSimulation =
                 simulateJumpLandingCached(map, representativeStart, launchStepX, jumpLandingCache, stats, movementProfile);
-        if (representativeLanding == null) {
+        if (representativeSimulation == null || representativeSimulation.lostGround()) {
             return null;
         }
 
-        int landingRegionId = regionIdByFootholdId.getOrDefault(representativeLanding.foothold().getId(), -1);
+        int landingRegionId = regionIdByFootholdId.getOrDefault(representativeSimulation.finalFoothold().getId(), -1);
         if (landingRegionId != targetRegionId) {
             return null;
         }
 
-        return new JumpLaunchWindow(minX, maxX, representativeStart, representativeLanding.point());
+        return new JumpLaunchWindow(minX, maxX, representativeStart, representativeSimulation.landing().point());
     }
 
     private static int findJumpLaunchBoundary(BotNavigationGraph.Region from,
@@ -1119,12 +1122,12 @@ final class BotNavigationGraphProvider {
                                              JumpBuildStats stats,
                                              JumpLandingCache jumpLandingCache,
                                              BotMovementProfile movementProfile) {
-        BotPhysicsEngine.JumpLanding landing = simulateJumpLandingCached(
+        BotPhysicsEngine.PostLandingJump landing = simulateJumpLandingCached(
                 map, start, launchStepX, jumpLandingCache, stats, movementProfile);
-        if (landing == null) {
+        if (landing == null || landing.lostGround()) {
             return false;
         }
-        return regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1) == targetRegionId;
+        return regionIdByFootholdId.getOrDefault(landing.finalFoothold().getId(), -1) == targetRegionId;
     }
 
     // --- Rope entry edges: ground/rope region → rope region ---

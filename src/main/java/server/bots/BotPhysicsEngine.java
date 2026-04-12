@@ -78,10 +78,18 @@ final class BotPhysicsEngine {
     static final class JumpLanding {
         private final Point point;
         private final Foothold foothold;
+        private final double incomingDeltaX;
+        private final double incomingDeltaY;
 
         JumpLanding(Point point, Foothold foothold) {
+            this(point, foothold, 0.0, 0.0);
+        }
+
+        JumpLanding(Point point, Foothold foothold, double incomingDeltaX, double incomingDeltaY) {
             this.point = point;
             this.foothold = foothold;
+            this.incomingDeltaX = incomingDeltaX;
+            this.incomingDeltaY = incomingDeltaY;
         }
 
         Point point() {
@@ -91,6 +99,20 @@ final class BotPhysicsEngine {
         Foothold foothold() {
             return foothold;
         }
+
+        double incomingDeltaX() {
+            return incomingDeltaX;
+        }
+
+        double incomingDeltaY() {
+            return incomingDeltaY;
+        }
+    }
+
+    record PostLandingJump(JumpLanding landing,
+                           Point finalPoint,
+                           Foothold finalFoothold,
+                           boolean lostGround) {
     }
 
     record WalkOffLanding(Point launchPoint,
@@ -867,6 +889,37 @@ final class BotPhysicsEngine {
         return null;
     }
 
+    static PostLandingJump simulatePostLandingGroundTicks(MapleMap map,
+                                                          JumpLanding landing,
+                                                          int desiredDir,
+                                                          BotMovementProfile profile,
+                                                          int ticks) {
+        if (landing == null) {
+            return null;
+        }
+        if (map == null || landing.point() == null || landing.foothold() == null || ticks <= 0) {
+            return new PostLandingJump(landing,
+                    landing.point() == null ? null : new Point(landing.point()),
+                    landing.foothold(), false);
+        }
+
+        double landingHSpeed = landingGroundHSpeed(map, landing.foothold(),
+                landing.incomingDeltaX(), landing.incomingDeltaY(), profile);
+        GroundTravelState state = new GroundTravelState(landing.point().x, landingHSpeed, 0.0);
+        Point cursor = new Point(landing.point());
+        Foothold currentFoothold = landing.foothold();
+        for (int i = 0; i < ticks; i++) {
+            GroundStepResult step = simulateGroundMotion(map, cursor, currentFoothold, desiredDir, state, profile);
+            if (step.lostGround()) {
+                return new PostLandingJump(landing, step.point(), step.foothold(), true);
+            }
+            cursor = new Point(step.point());
+            currentFoothold = step.foothold();
+            state = step.state();
+        }
+        return new PostLandingJump(landing, cursor, currentFoothold, false);
+    }
+
     private static Point roundedAirPosition(BotEntry entry) {
         return new Point((int) Math.round(entry.physX), (int) Math.round(entry.physY));
     }
@@ -1067,6 +1120,18 @@ final class BotPhysicsEngine {
         return simulateLanding(map, from, -jumpForcePerTick(profile), stepX, 0L);
     }
 
+    static PostLandingJump simulateJumpLandingWithPostLandingTicks(MapleMap map,
+                                                                   Point from,
+                                                                   int stepX,
+                                                                   BotMovementProfile profile,
+                                                                   int postLandingTicks) {
+        JumpLanding landing = simulateJumpLanding(map, from, stepX, profile);
+        if (landing == null) {
+            return null;
+        }
+        return simulatePostLandingGroundTicks(map, landing, Integer.compare(stepX, 0), profile, postLandingTicks);
+    }
+
     static JumpLanding simulateDownJumpLanding(MapleMap map, Point from) {
         return simulateLanding(map, from, -downJumpForcePerTick(), 0, cfg.DOWN_JUMP_GRACE_MS);
     }
@@ -1130,7 +1195,8 @@ final class BotPhysicsEngine {
     private static JumpLanding findAirLanding(MapleMap map, Point previousPos, Point nextPos) {
         AirCollision collision = resolveAirCollision(map, previousPos, nextPos);
         return collision.type() == AirCollisionType.LAND
-                ? new JumpLanding(collision.point(), collision.foothold())
+                ? new JumpLanding(collision.point(), collision.foothold(),
+                nextPos.x - previousPos.x, nextPos.y - previousPos.y)
                 : null;
     }
 
@@ -1714,8 +1780,9 @@ final class BotPhysicsEngine {
 
             int x = (int) Math.round(physX);
             int intY = (int) Math.round(physY);
-            AirCollision collision = resolveAirCollision(map, new Point((int) Math.round(physX - stepX), previousIntY),
-                    new Point(x, intY));
+            Point previousPoint = new Point((int) Math.round(physX - stepX), previousIntY);
+            Point nextPoint = new Point(x, intY);
+            AirCollision collision = resolveAirCollision(map, previousPoint, nextPoint);
             if (collision.type() == AirCollisionType.WALL) {
                 physX = collision.point().x;
                 physY = collision.point().y;
@@ -1724,7 +1791,8 @@ final class BotPhysicsEngine {
                 continue;
             }
             if (collision.type() == AirCollisionType.LAND && remainingLandingGraceMs == 0L) {
-                return new JumpLanding(collision.point(), collision.foothold());
+                return new JumpLanding(collision.point(), collision.foothold(),
+                        nextPoint.x - previousPoint.x, nextPoint.y - previousPoint.y);
             }
 
             previousIntY = intY;

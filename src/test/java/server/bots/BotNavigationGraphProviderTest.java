@@ -445,6 +445,43 @@ class BotNavigationGraphProviderTest {
                 "jump launch windows must not include X positions that no longer land in the target region");
     }
 
+    @Test
+    void shouldTrimJumpWindowThatFallsOffLandingPlatformWithMomentum() {
+        MapleMap map = BotNavigationMapLoader.loadMapGeometry(100000202);
+        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(map);
+        int stepX = BotPhysicsEngine.walkStep(map, graph.movementProfile);
+        Point badLaunch = new Point(-1881, -1341);
+        Point stableLaunch = new Point(-1898, -1341);
+        int fromRegionId = graph.findRegionId(map, badLaunch);
+        int targetRegionId = graph.findRegionId(map, new Point(-1841, -1379));
+
+        assertEquals(8, fromRegionId);
+        assertEquals(7, targetRegionId);
+
+        BotPhysicsEngine.PostLandingJump unstableLanding =
+                BotPhysicsEngine.simulateJumpLandingWithPostLandingTicks(map, badLaunch, stepX, graph.movementProfile, 3);
+        BotPhysicsEngine.PostLandingJump stableLanding =
+                BotPhysicsEngine.simulateJumpLandingWithPostLandingTicks(map, stableLaunch, stepX, graph.movementProfile, 3);
+
+        assertNotNull(unstableLanding);
+        assertTrue(unstableLanding.lostGround(),
+                "logged right-edge launch should fall off region 7 after landing momentum is applied");
+        assertNotNull(stableLanding);
+        assertFalse(stableLanding.lostGround(),
+                "nearby deeper launch should stay on the destination platform after landing momentum");
+
+        assertTrue(graph.getOutgoing(fromRegionId).stream()
+                        .anyMatch(edge -> edge.type == BotNavigationGraph.EdgeType.JUMP
+                                && edge.toRegionId == targetRegionId
+                                && edge.containsLaunchX(stableLaunch.x)),
+                "stable launches should still route to the target platform");
+        assertFalse(graph.getOutgoing(fromRegionId).stream()
+                        .anyMatch(edge -> edge.type == BotNavigationGraph.EdgeType.JUMP
+                                && edge.toRegionId == targetRegionId
+                                && edge.containsLaunchX(badLaunch.x)),
+                "jump launch windows must exclude launches that immediately walk off the landing platform");
+    }
+
     private static List<BotNavigationGraph.Edge> findPath(BotNavigationGraph graph,
                                                           MapleMap map,
                                                           Point start,
