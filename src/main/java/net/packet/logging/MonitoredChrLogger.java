@@ -70,13 +70,18 @@ public class MonitoredChrLogger {
         if (!monitoredChrIds.contains(chr.getId())) {
             return;
         }
-        RecvOpcode op = getOpcodeFromValue(packetId);
+        RecvOpcode op = getOpcodeFromValue(Short.toUnsignedInt(packetId));
         if (isRecvBlocked(op)) {
             return;
         }
 
         String packet = packetContent.length > 0 ? HexTool.toHexString(packetContent) : "<empty>";
-        log.info("{}-{} {}-{}", c.getAccountName(), chr.getName(), packetId, packet);
+        log.info("{}-{} {}-{}", c.getAccountName(), chr.getName(), formatPacketId(packetId), packet);
+    }
+
+    static String formatPacketId(short packetId) {
+        int unsignedPacketId = Short.toUnsignedInt(packetId);
+        return "%d(0x%X)".formatted(unsignedPacketId, unsignedPacketId);
     }
 
     private static boolean isRecvBlocked(RecvOpcode op) {

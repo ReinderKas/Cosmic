@@ -10,7 +10,7 @@ tools:
       duration).
     input:
       files: [logs/monitored-packets*.log]
-      line_format: "HH:MM:SS.mmm [thread] INFO  logging.MonitoredChrLogger - {acct}-{chr} {packetId}-{HEX BYTES}"
+      line_format: "HH:MM:SS.mmm [thread] INFO  logging.MonitoredChrLogger - {acct}-{chr} {packetId}(0x{packetIdHex})-{HEX BYTES}"
     output: stdout (human-readable, one line per packet)
     exports: [LINE_RE, parse_packet, ts_ms, load_log, format_frag]
     cli: "py tools/scripts/parse_movement_log.py <log-path> [<log-path> ...]"

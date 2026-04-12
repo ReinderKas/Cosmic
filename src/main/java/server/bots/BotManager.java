@@ -2,6 +2,7 @@ package server.bots;
 
 import client.BotClient;
 import client.Character;
+import client.Disease;
 import client.QuestStatus;
 import client.inventory.InventoryType;
 import client.inventory.Item;
@@ -15,12 +16,14 @@ import net.server.world.PartyOperation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import server.TimerManager;
-import server.life.Monster;
 import server.bots.pq.BotPqHooks;
+import server.life.Monster;
+import server.life.MobSkill;
 import server.maps.Foothold;
 import server.maps.MapleMap;
 import server.quest.Quest;
 import tools.PacketCreator;
+import tools.Pair;
 
 import java.awt.*;
 import java.sql.SQLException;
@@ -354,6 +357,11 @@ public class BotManager {
         Character botChar = Character.loadCharFromDB(charId, botClient, true);
         botClient.setPlayer(botChar);
         botClient.setAccID(botChar.getAccountID());
+        Map<Disease, Pair<Long, MobSkill>> diseases =
+                Server.getInstance().getPlayerBuffStorage().getDiseasesFromStorage(charId);
+        if (diseases != null) {
+            botChar.silentApplyDiseases(diseases);
+        }
 
         MapleMap spawnMap = targetMap != null
                 ? targetMap
@@ -371,6 +379,7 @@ public class BotManager {
         botChar.setEnteredChannelWorld();
         spawnMap.addPlayer(botChar);
         botChar.visitMap(spawnMap);
+        botChar.diseaseExpireTask();
         return botChar;
     }
 

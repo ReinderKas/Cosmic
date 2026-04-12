@@ -7,7 +7,7 @@ Used as both:
   * a CLI:    `py tools/scripts/parse_movement_log.py <path-to-log>`
 
 Log line format produced by MonitoredChrLogger (see src/main/java/net/packet/logging/MonitoredChrLogger.java):
-    HH:MM:SS.mmm [thread] INFO  logging.MonitoredChrLogger - {acct}-{chrName} {packetId}-{HEX BYTES}
+    HH:MM:SS.mmm [thread] INFO  logging.MonitoredChrLogger - {acct}-{chrName} {packetId}(0x{packetIdHex})-{HEX BYTES}
 
 Wire format after the `{packetId}-`:
     9 bytes  — header skipped by MovePlayerHandler (portal/field key + echo pos)
@@ -32,7 +32,7 @@ from datetime import datetime
 from pathlib import Path
 
 LINE_RE = re.compile(
-    r'^(\d{2}:\d{2}:\d{2}\.\d{3}).*-\s+\S+-\S+\s+(\d+)-([0-9A-Fa-f ]+)\s*$'
+    r'^(\d{2}:\d{2}:\d{2}\.\d{3}).*-\s+\S+-\S+\s+(\d+)(?:\(0x[0-9A-Fa-f]+\))?-([0-9A-Fa-f ]+)\s*$'
 )
 
 ABS_CMDS = {0, 5, 17}
