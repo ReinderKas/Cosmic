@@ -2,7 +2,6 @@ package server.combat;
 
 import client.BuffStat;
 import client.Character;
-import client.Job;
 import client.Skill;
 import client.SkillFactory;
 import client.inventory.Equip;
@@ -50,6 +49,18 @@ public final class CombatFormulaProvider {
     private static final double MIN_HIT_CHANCE = 0.01d;
     private static final double MAX_HIT_CHANCE = 1.0d;
     private static final CombatFormulaProvider instance = new CombatFormulaProvider();
+
+    /**
+     * All passive skills whose x-field encodes crit chance % and whose presence grants +100% crit damage.
+     * Scanned directly on the bot's skill map — no job-type checks needed.
+     */
+    private static final List<Integer> CRIT_PASSIVE_SKILL_IDS = List.of(
+            Archer.CRITICAL_SHOT,
+            WindArcher.CRITICAL_SHOT,
+            Assassin.CRITICAL_THROW,
+            NightWalker.CRITICAL_THROW,
+            Aran.COMBO_CRITICAL
+    );
 
     public static CombatFormulaProvider getInstance() {
         return instance;
@@ -218,22 +229,29 @@ public final class CombatFormulaProvider {
     }
 
     /**
-     * Resolves the critical hit profile for a bot from its job's passive crit skill and any
-     * active Sharp Eyes buff. Only physical attacks use this; magic attacks never crit.
+     * Resolves the critical hit profile by scanning the bot's actual leveled skills against
+     * the known crit passive set. No job-type filter — works correctly regardless of job
+     * advancement level or future skill additions.
      *
-     * <p>Crit chance comes from the passive crit skill x-field (e.g. Critical Shot level 20 → 40%).
-     * Sharp Eyes adds its encoded crit rate and damage bonus on top, additively.
-     * Crit multiplier = 1.0 (base hit) + 1.0 (passive +100% bonus, if leveled) + SE bonus%.
-     * Jobs with no passive (Marauder/Buccaneer) start at 1.0 and rely solely on SE for crit dmg.
+     * <p>Crit chance comes from the passive skill's x-field (e.g. Critical Shot lv20 → 40%).
+     * Multiplier = 1.0 (base hit) + 1.0 if a passive is leveled (+100% crit bonus) + SE bonus%.
+     * All additive per line; magic attacks skip this entirely.
      */
     public CritProfile resolveCritProfile(Character bot) {
-        if (!canJobCrit(bot)) return CritProfile.NONE;
+        double critChance = 0.0;
+        double critMultiplier = 1.0;
 
-        double passiveCritChance = resolvePassiveCritChance(bot);
-        double critChance = passiveCritChance;
-        // Base multiplier: 1.0 (the hit itself) + 1.0 bonus if the crit passive is leveled.
-        // Jobs without a passive (Marauder/Buccaneer) start at 1.0 and only gain SE's bonus.
-        double critMultiplier = 1.0 + (passiveCritChance > 0 ? 1.0 : 0.0);
+        for (int skillId : CRIT_PASSIVE_SKILL_IDS) {
+            int level = bot.getSkillLevel(skillId);
+            if (level <= 0) continue;
+            Skill skill = SkillFactory.getSkill(skillId);
+            if (skill == null) continue;
+            StatEffect effect = skill.getEffect(level);
+            if (effect == null) continue;
+            critChance = Math.min(1.0, critChance + effect.getX() / 100.0);
+            critMultiplier += 1.0; // standard passive: +100% crit damage
+            break; // only one crit passive applies per bot
+        }
 
         // Sharp Eyes buff value encodes: (critRate% << 8) | critDmgBonus%
         Integer sharpEyesValue = bot.getBuffedValue(BuffStat.SHARP_EYES);
@@ -278,40 +296,6 @@ public final class CombatFormulaProvider {
             damageLines.add(base);
         }
         return new CritDamageResult(damageLines, critIndices);
-    }
-
-    private boolean canJobCrit(Character bot) {
-        Job job = bot.getJob();
-        return job.isA(Job.BOWMAN) || job.isA(Job.THIEF)
-                || job.isA(Job.NIGHTWALKER1) || job.isA(Job.WINDARCHER1)
-                || job == Job.ARAN3 || job == Job.ARAN4
-                || job == Job.MARAUDER || job == Job.BUCCANEER;
-    }
-
-    private double resolvePassiveCritChance(Character bot) {
-        int critSkillId = getCritSkillId(bot);
-        if (critSkillId == 0) return 0.0;
-        Skill critSkill = SkillFactory.getSkill(critSkillId);
-        if (critSkill == null) return 0.0;
-        int level = bot.getSkillLevel(critSkill);
-        if (level <= 0) return 0.0;
-        StatEffect effect = critSkill.getEffect(level);
-        return effect != null ? effect.getX() / 100.0 : 0.0;
-    }
-
-    /**
-     * Returns the passive crit skill ID for this bot's job tree, or 0 if none.
-     * The skill's x-field holds the crit chance percent (e.g. 40 → 40%).
-     * WindArcher/NightWalker are checked before their parent Cygnus trees to get the correct skill.
-     */
-    private int getCritSkillId(Character bot) {
-        Job job = bot.getJob();
-        if (job.isA(Job.WINDARCHER1))  return WindArcher.CRITICAL_SHOT;
-        if (job.isA(Job.BOWMAN))       return Archer.CRITICAL_SHOT;
-        if (job.isA(Job.NIGHTWALKER1)) return NightWalker.CRITICAL_THROW;
-        if (job.isA(Job.THIEF))        return Assassin.CRITICAL_THROW;
-        if (job == Job.ARAN3 || job == Job.ARAN4) return Aran.COMBO_CRITICAL;
-        return 0; // Marauder/Buccaneer: no standard crit passive in v83
     }
 
     private DamageProfile resolvePhysicalDamageProfile(Character bot, int skillId, StatEffect effect) {
