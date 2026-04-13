@@ -314,20 +314,15 @@ final class BotPhysicsEngine {
     private record EndpointConnection(Point from, Point to) {
     }
 
-    private static EndpointConnection closestEndpointConnection(Foothold first, Foothold second) {
-        Point[] firstEndpoints = new Point[]{
-                new Point(first.getX1(), first.getY1()),
-                new Point(first.getX2(), first.getY2())
-        };
-        Point[] secondEndpoints = new Point[]{
-                new Point(second.getX1(), second.getY1()),
-                new Point(second.getX2(), second.getY2())
-        };
+    private static Point[] endpoints(Foothold fh) {
+        return new Point[]{new Point(fh.getX1(), fh.getY1()), new Point(fh.getX2(), fh.getY2())};
+    }
 
+    private static EndpointConnection closestEndpointConnection(Foothold first, Foothold second) {
         EndpointConnection best = null;
         int bestDistance = Integer.MAX_VALUE;
-        for (Point from : firstEndpoints) {
-            for (Point to : secondEndpoints) {
+        for (Point from : endpoints(first)) {
+            for (Point to : endpoints(second)) {
                 int distance = Math.abs(to.x - from.x) + Math.abs(to.y - from.y);
                 if (distance < bestDistance) {
                     best = new EndpointConnection(from, to);
@@ -339,17 +334,8 @@ final class BotPhysicsEngine {
     }
 
     private static EndpointConnection sharedEndpointConnection(Foothold first, Foothold second) {
-        Point[] firstEndpoints = new Point[]{
-                new Point(first.getX1(), first.getY1()),
-                new Point(first.getX2(), first.getY2())
-        };
-        Point[] secondEndpoints = new Point[]{
-                new Point(second.getX1(), second.getY1()),
-                new Point(second.getX2(), second.getY2())
-        };
-
-        for (Point from : firstEndpoints) {
-            for (Point to : secondEndpoints) {
+        for (Point from : endpoints(first)) {
+            for (Point to : endpoints(second)) {
                 if (from.equals(to)) {
                     return new EndpointConnection(from, to);
                 }
@@ -911,7 +897,7 @@ final class BotPhysicsEngine {
             if (step.lostGround()) {
                 return new PostLandingJump(landing, step.point(), step.foothold(), true);
             }
-            cursor = new Point(step.point());
+            cursor = step.point();
             currentFoothold = step.foothold();
             state = step.state();
         }
@@ -1382,11 +1368,6 @@ final class BotPhysicsEngine {
                 && dy >= -cfg.MAX_SLOPE_UP;
     }
 
-    // Legacy alias kept for tests and call sites that care only about the endpoint step check.
-    static boolean canWalkBetweenFootholds(Foothold a, Foothold b) {
-        return canWalkAcrossFootholds(a, b);
-    }
-
     private static double mapGroundSpeedScale(MapleMap map) {
         float footholdSpeed = map.getFootholdSpeed();
         if (footholdSpeed <= 0.0f) {
@@ -1659,6 +1640,8 @@ final class BotPhysicsEngine {
         double physY = from.y;
         int previousIntY = from.y;
         long remainingLandingGraceMs = Math.max(0L, landingGraceMs);
+        final float gravity = gravityPerTick();
+        final float maxFall = maxFallPerTick();
 
         for (int tick = 0; tick < (1500 / cfg.TICK_MS); tick++) {
             Point current = new Point((int) Math.round(physX), (int) Math.round(physY));
@@ -1671,9 +1654,8 @@ final class BotPhysicsEngine {
             }
 
             physX += stepX;
-            float gravity = gravityPerTick();
             physY += velocityY + 0.5f * gravity;
-            velocityY = Math.min(velocityY + gravity, maxFallPerTick());
+            velocityY = Math.min(velocityY + gravity, maxFall);
 
             int x = (int) Math.round(physX);
             int intY = (int) Math.round(physY);
@@ -1732,6 +1714,8 @@ final class BotPhysicsEngine {
         double physY = from.y;
         int previousIntY = from.y;
         long remainingLandingGraceMs = Math.max(0L, landingGraceMs);
+        final float gravity = gravityPerTick();
+        final float maxFall = maxFallPerTick();
 
         for (int tick = 0; tick < (1500 / cfg.TICK_MS); tick++) {
             if (remainingLandingGraceMs > 0L) {
@@ -1739,9 +1723,8 @@ final class BotPhysicsEngine {
             }
 
             physX += stepX;
-            float gravity = gravityPerTick();
             physY += velocityY + 0.5f * gravity;
-            velocityY = Math.min(velocityY + gravity, maxFallPerTick());
+            velocityY = Math.min(velocityY + gravity, maxFall);
 
             int x = (int) Math.round(physX);
             int intY = (int) Math.round(physY);
