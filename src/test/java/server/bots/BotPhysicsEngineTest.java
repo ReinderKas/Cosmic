@@ -502,7 +502,7 @@ class BotPhysicsEngineTest {
         Foothold platform  = new Foothold(new Point(0, 10),    new Point(10, 10),   1);
         Foothold floating  = new Foothold(new Point(-100, -16), new Point(100, -16), 2);
 
-        assertFalse(BotPhysicsEngine.canWalkBetweenFootholds(platform, floating));
+        assertFalse(BotPhysicsEngine.canWalkAcrossFootholds(platform, floating));
     }
 
     @Test

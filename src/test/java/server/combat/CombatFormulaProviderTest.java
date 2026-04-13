@@ -214,6 +214,7 @@ class CombatFormulaProviderTest {
 
     @Test
     void shouldReturnBaseCritMultiplierForCritJobWithNoSkill() {
+        // Crit passive not leveled → no +100% passive bonus; multiplier stays at 1.0 (hit only)
         Character bot = mock(Character.class);
         when(bot.getJob()).thenReturn(Job.BOWMAN);
         when(bot.getBuffedValue(BuffStat.SHARP_EYES)).thenReturn(null);
@@ -222,7 +223,7 @@ class CombatFormulaProviderTest {
         CombatFormulaProvider.CritProfile profile = provider.resolveCritProfile(bot);
 
         assertEquals(0.0, profile.critChance());
-        assertEquals(2.0, profile.critMultiplier());
+        assertEquals(1.0, profile.critMultiplier());
     }
 
     @Test
@@ -236,8 +237,9 @@ class CombatFormulaProviderTest {
 
         CombatFormulaProvider.CritProfile profile = provider.resolveCritProfile(bot);
 
+        // passive level 0 → no +100% bonus; only SE +40% → 1.0 + 0.4 = 1.4
         assertEquals(0.10, profile.critChance(), 1e-9);
-        assertEquals(2.40, profile.critMultiplier(), 1e-9);
+        assertEquals(1.40, profile.critMultiplier(), 1e-9);
     }
 
     @Test
@@ -266,8 +268,9 @@ class CombatFormulaProviderTest {
 
         CombatFormulaProvider.CritProfile profile = provider.resolveCritProfile(bot);
 
+        // passive level 0 → multiplier = 1.0 (hit only) + 0% SE bonus = 1.0
         assertEquals(1.0, profile.critChance());
-        assertEquals(2.0, profile.critMultiplier());
+        assertEquals(1.0, profile.critMultiplier());
     }
 
     @Test

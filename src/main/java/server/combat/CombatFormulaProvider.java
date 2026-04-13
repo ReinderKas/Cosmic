@@ -222,14 +222,18 @@ public final class CombatFormulaProvider {
      * active Sharp Eyes buff. Only physical attacks use this; magic attacks never crit.
      *
      * <p>Crit chance comes from the passive crit skill x-field (e.g. Critical Shot level 20 → 40%).
-     * Sharp Eyes adds its encoded crit rate and damage bonus on top.
-     * Standard crit multiplier is 2.0 (+100% per formula doc step 6).
+     * Sharp Eyes adds its encoded crit rate and damage bonus on top, additively.
+     * Crit multiplier = 1.0 (base hit) + 1.0 (passive +100% bonus, if leveled) + SE bonus%.
+     * Jobs with no passive (Marauder/Buccaneer) start at 1.0 and rely solely on SE for crit dmg.
      */
     public CritProfile resolveCritProfile(Character bot) {
         if (!canJobCrit(bot)) return CritProfile.NONE;
 
-        double critChance = resolvePassiveCritChance(bot);
-        double critMultiplier = 2.0;
+        double passiveCritChance = resolvePassiveCritChance(bot);
+        double critChance = passiveCritChance;
+        // Base multiplier: 1.0 (the hit itself) + 1.0 bonus if the crit passive is leveled.
+        // Jobs without a passive (Marauder/Buccaneer) start at 1.0 and only gain SE's bonus.
+        double critMultiplier = 1.0 + (passiveCritChance > 0 ? 1.0 : 0.0);
 
         // Sharp Eyes buff value encodes: (critRate% << 8) | critDmgBonus%
         Integer sharpEyesValue = bot.getBuffedValue(BuffStat.SHARP_EYES);

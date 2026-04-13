@@ -9,6 +9,7 @@ import client.inventory.Item;
 import constants.game.GameConstants;
 import constants.inventory.ItemConstants;
 import server.Trade;
+import server.combat.CombatFormulaProvider;
 import server.maps.FieldLimit;
 import server.maps.MapleMap;
 
@@ -130,6 +131,11 @@ public class BotChatManager {
             INFO_PFX + "(debug\\s+stats?|attack\\s+cooldown|atk\\s+cooldown)\\b"
             + "|\\bshow\\s+(me\\s+)?debug\\s+stats\\b"
             + "|\\bwhat.?s\\s+(your|ur)\\s+attack\\s+cooldown\\b",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern CRIT_DEBUG_PATTERN = Pattern.compile(
+            "\\bcrit\\s*(debug|stats?|rate|chance|info)?\\s*\\??\\s*$"
+            + "|\\bdo\\s+you\\s+(crit|get\\s+crits?)\\b"
+            + "|\\bwhat.?s\\s+(your|ur)\\s+crit\\b",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern HELP_PATTERN = Pattern.compile(
             "\\b(help|commands?|what\\s+can\\s+you\\s+do|how\\s+do\\s+i\\s+use\\s+you)\\b",
@@ -739,6 +745,8 @@ public class BotChatManager {
             BotManager.after(BotManager.randMs(900, 1100), () -> reportPotions(entry, entry.bot));
         if (matchesWholeCommand(DEBUG_STATS_PATTERN, message))
             BotManager.after(BotManager.randMs(900, 1100), () -> reportDebugStats(entry, entry.bot));
+        if (matchesWholeCommand(CRIT_DEBUG_PATTERN, message))
+            BotManager.after(BotManager.randMs(900, 1100), () -> reportCritDebug(entry, entry.bot));
 
         // Job advancement — check if message contains a valid job selection
         if (JOB_SELECT_PATTERN.matcher(message).find()) {
@@ -1059,6 +1067,26 @@ public class BotChatManager {
         queueBotSay(entry, BotCombatManager.describeDebugStats(entry, bot));
     }
 
+    private static void reportCritDebug(BotEntry entry, Character bot) {
+        CombatFormulaProvider formula = CombatFormulaProvider.getInstance();
+        CombatFormulaProvider.CritProfile crit = formula.resolveCritProfile(bot);
+        CombatFormulaProvider.DamageProfile dmg = formula.resolveDamageProfile(bot, 0, 0, false);
+
+        int critPct = (int) Math.round(crit.critChance() * 100);
+        if (critPct == 0) {
+            queueBotSay(entry, "i can't crit (my job doesn't have a crit passive)");
+            return;
+        }
+
+        int critMin = (int) Math.min(99999, Math.floor(dmg.minDamage() * crit.critMultiplier()));
+        int critMax = (int) Math.min(99999, Math.floor(dmg.maxDamage() * crit.critMultiplier()));
+        queueBotSay(entry, String.format(
+                "crit: %d%% chance, %.2fx multiplier | base %d-%d | crit %d-%d",
+                critPct, crit.critMultiplier(),
+                dmg.minDamage(), dmg.maxDamage(),
+                critMin, critMax));
+    }
+
     private static void reportBuffDebug(BotEntry entry, Character bot) {
         for (String line : BotBuffManager.getDebugLines(entry, bot)) {
             queueBotSay(entry, line);
@@ -1066,7 +1094,7 @@ public class BotChatManager {
     }
 
     private static void reportHelp(BotEntry entry) {
-        queueBotSay(entry, "commands: follow, stop, move here, fidget, grind, stats, speed, skills, inventory, mesos, slots, scrolls, pots, debug stats, respec, respec ap");
+        queueBotSay(entry, "commands: follow, stop, move here, fidget, grind, stats, speed, skills, inventory, mesos, slots, scrolls, pots, debug stats, crit, respec, respec ap");
         queueBotSay(entry, "support: support on/off, heals on/off, buff on/off, buff cheap/max, buff debug");
         queueBotSay(entry, "gear: ask 'any upgrades?' or say 'trade recommended gear'");
         queueBotSay(entry, "trade: mesos, scrolls, pots, equips, etc, or named items");
