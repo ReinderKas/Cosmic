@@ -1206,10 +1206,14 @@ public class BotManager {
                 if (followRetreat) {
                     targetPos = selectGrindNavigationTarget(entry, botPos, followTargetPos);
                     entry.degenAttackDone = false;
-                } else {
+                } else if (entry.moveWindowMs <= 0) {
                     BotCombatManager.AttackPlan ap = BotCombatManager.planAttack(entry, bot, followTarget);
                     if (BotCombatManager.isTargetInAttackRange(ap, bot, followTarget)) {
                         BotCombatManager.attackMonster(entry, bot, ap);
+                        int followDx = Math.abs(botPos.x - targetSnapshot.followTargetPos().x);
+                        entry.moveWindowMs = followDx > BotMovementManager.cfg.FOLLOW_DIST * 3 ? 1000
+                                           : followDx > BotMovementManager.cfg.FOLLOW_DIST     ? 200
+                                           : 0;
                         if (ap.isCloseRangeRoute()
                                 && BotCombatManager.isRangedAmmoWeapon(followWeaponType)) {
                             entry.degenAttackDone = true;
@@ -1226,8 +1230,10 @@ public class BotManager {
 
         // Grind mode: navigate toward nearest monster, attack when in range
         if (entry.grinding) {
-            // PQ nav override: walking to NPC or owner — skip monster seeking entirely
-            if (entry.kpq.navTarget != null) {
+            // PQ nav override: walking to NPC or owner — skip monster seeking entirely.
+            // Coupon-seeking (soft hint) is excluded: the bot should still fight mobs
+            // opportunistically and only drift toward the coupon when idle.
+            if (entry.kpq.navTarget != null && !BotPqHooks.isCouponSeeking(entry)) {
                 targetPos = entry.kpq.navTarget;
                 BotNavigationManager.NavigationDirective pqNav = BotNavigationManager.resolveTarget(entry, targetPos, runAiTick);
                 if (!pqNav.consumedTick) {
@@ -1255,13 +1261,18 @@ public class BotManager {
             }
             if (target == null) {
                 entry.grindTarget = null;
-                if (entry.inAir) {
+                if (BotPqHooks.isCouponSeeking(entry)) {
+                    // No mob in seek range — drift toward the nearby coupon drop instead of idling.
+                    targetPos = entry.kpq.navTarget;
+                    // falls through to stepMovementCore below
+                } else if (entry.inAir) {
                     BotMovementManager.tickAirborne(entry, targetPos);
+                    return;
                 } else {
                     BotPhysicsEngine.idleOnGround(entry, bot);
                     BotMovementManager.broadcastMovement(entry);
+                    return;
                 }
-                return;
             }
             entry.grindTarget = target;
             Point tp = target.getPosition();
@@ -1271,9 +1282,19 @@ public class BotManager {
                     || BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(grindWeaponType, botPos, tp);
 
             if (!entry.climbing) {
-                if (!shouldRetreatForRangedSpacing && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)) {
+                boolean couponSeeking = BotPqHooks.isCouponSeeking(entry);
+                if (!shouldRetreatForRangedSpacing && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)
+                        && (!couponSeeking || entry.moveWindowMs <= 0)) {
                     // In range — attack if grounded, or during ascent of a jump
                     BotCombatManager.attackMonster(entry, bot, attackPlan);
+                    // After attacking in coupon-seek mode, add a movement window based on
+                    // distance to the coupon so the bot walks toward it between attacks.
+                    if (couponSeeking && entry.kpq.navTarget != null) {
+                        int couponDx = Math.abs(botPos.x - entry.kpq.navTarget.x);
+                        entry.moveWindowMs = couponDx > BotMovementManager.cfg.FOLLOW_DIST * 3 ? 1000
+                                           : couponDx > BotMovementManager.cfg.FOLLOW_DIST     ? 200
+                                           : 0;
+                    }
                     // If a ranged bot just did a degenerate close-range hit, force retreat next tick
                     if (attackPlan.isCloseRangeRoute()
                             && BotCombatManager.isRangedAmmoWeapon(grindWeaponType)) {

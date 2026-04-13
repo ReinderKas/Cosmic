@@ -66,6 +66,7 @@ public class BotEntry {
     Monster grindTarget = null;
     long nextGrindTargetSearchAtMs = 0L;
     int attackCooldownMs = 0;
+    int moveWindowMs = 0;    // movement-only gap after attack animation; attacks blocked, walking allowed
 
     // Skill cache
     int cachedSkillJob = -1;

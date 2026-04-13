@@ -306,6 +306,7 @@ class BotCombatManager {
     private static void clearActionState(BotEntry entry) {
         entry.grindTarget = null;
         entry.attackCooldownMs = 0;
+        entry.moveWindowMs = 0;
         BotMovementManager.clearNavigationState(entry);
         entry.movementBroadcastValid = false;
     }
@@ -638,10 +639,12 @@ class BotCombatManager {
     }
 
     static void tickActionLock(BotEntry entry) {
-        if (entry.attackCooldownMs <= 0) {
-            return;
+        if (entry.attackCooldownMs > 0) {
+            entry.attackCooldownMs = BotMovementManager.tickDown(entry.attackCooldownMs);
+        } else if (entry.moveWindowMs > 0) {
+            // Movement window: animation done, bot may walk but not attack yet.
+            entry.moveWindowMs = BotMovementManager.tickDown(entry.moveWindowMs);
         }
-        entry.attackCooldownMs = BotMovementManager.tickDown(entry.attackCooldownMs);
     }
 
     private static AttackPlan planAoeAttack(BotEntry entry, Character bot, Monster primaryTarget) {
