@@ -234,6 +234,15 @@ public final class CombatFormulaProvider {
         boolean elementalResetActive = bot.getBuffedValue(BuffStat.ELEMENTAL_RESET) != null;
         rawMax = applySkillElementalMultiplier(rawMax, skillId, monster, elementalResetActive);
         rawMin = applySkillElementalMultiplier(rawMin, skillId, monster, elementalResetActive);
+        // parseDamage omits STRONG penalty as anti-cheat headroom; bots apply it for realism
+        if (skillId != 0 && !elementalResetActive && monster != null) {
+            Skill elemSkill = SkillFactory.getSkill(skillId);
+            if (elemSkill != null && elemSkill.getElement() != Element.NEUTRAL
+                    && monster.getElementalEffectiveness(elemSkill.getElement()) == ElementalEffectiveness.STRONG) {
+                rawMax = Math.max(1, rawMax / 2);
+                rawMin = Math.max(1, rawMin / 2);
+            }
+        }
         rawMax = applyWkChargeElementalBonus(rawMax, bot, monster);
         rawMin = applyWkChargeElementalBonus(rawMin, bot, monster);
         int modMax = (int) Math.min(Integer.MAX_VALUE, rawMax);
@@ -367,9 +376,6 @@ public final class CombatFormulaProvider {
                 damage = (long) Math.floor(damage * (ceffect.getDamage() + 50) / 100 + 0.20 + (comboBuff - 5) * 0.04);
             } else {
                 int skillLv = chr.getSkillLevel(comboId);
-                if (skillLv <= 0 || chr.isGM()) {
-                    skillLv = SkillFactory.getSkill(comboId).getMaxLevel();
-                }
                 if (skillLv > 0) {
                     StatEffect ceffect = SkillFactory.getSkill(comboId).getEffect(skillLv);
                     damage = (long) Math.floor(damage * (ceffect.getDamage() + 50) / 100 + Math.floor((comboBuff - 1) * (skillLv / 6)) / 100);
@@ -406,8 +412,7 @@ public final class CombatFormulaProvider {
         if (bonusDmgBuff != 100) {
             damage = (long) Math.ceil(damage * bonusDmgBuff / 100.0f);
         }
-        // Unconditional if leveled — matches parseDamage headroom; real skill needs HP < 10%
-        if (chr.getSkillLevel(DarkKnight.BERSERK) > 0) {
+        if (chr.getSkillLevel(DarkKnight.BERSERK) > 0 && chr.getHp() * 10 <= chr.getMaxHp()) {
             damage *= 2;
         }
         return damage;
