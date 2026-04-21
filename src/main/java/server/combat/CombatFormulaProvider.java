@@ -24,6 +24,7 @@ import constants.skills.Shadower;
 import constants.skills.ThunderBreaker;
 import constants.skills.WindArcher;
 import constants.game.GameConstants;
+import constants.skills.Buccaneer;
 import constants.skills.Crusader;
 import constants.skills.DarkKnight;
 import constants.skills.DawnWarrior;
@@ -235,8 +236,6 @@ public final class CombatFormulaProvider {
         rawMin = applySkillElementalMultiplier(rawMin, skillId, monster, elementalResetActive);
         rawMax = applyWkChargeElementalBonus(rawMax, bot, monster);
         rawMin = applyWkChargeElementalBonus(rawMin, bot, monster);
-        // TODO: Barrage per-hit 2^(j-3) scaling (parseDamage lines 847-851) — needs hit-index awareness
-        // TODO: Shadow Partner 50% on second half of hits (parseDamage lines 852-857)
         int modMax = (int) Math.min(Integer.MAX_VALUE, rawMax);
         int modMin = (int) Math.min(modMax, Math.max(1, (int) rawMin));
         int[] adjustedDamage = applyMonsterDefense(bot, monster, modMin, modMax, damageProfile.magicAttack());
@@ -244,6 +243,9 @@ public final class CombatFormulaProvider {
         if (!damageProfile.magicAttack()) {
             CritProfile crit = resolveCritProfile(bot);
             double hitChance = calculateMobHitChance(bot, monster, false);
+            if (skillId == Buccaneer.BARRAGE || skillId == ThunderBreaker.BARRAGE) {
+                return rollBarrageDamageLines(hits, adjustedDamage, hitChance, crit, normalizedHitDelay);
+            }
             if (shadowPartner) {
                 return rollWithShadowPartnerPhysical(hits, adjustedDamage, hitChance, crit, normalizedHitDelay);
             }
@@ -288,6 +290,29 @@ public final class CombatFormulaProvider {
         List<Integer> lines = new ArrayList<>(rollDamageLines(bot, monster, mainHits, adjustedDamage[0], adjustedDamage[1], true));
         lines.addAll(rollDamageLines(bot, monster, partnerHits, partnerMin, partnerMax, true));
         return new AbstractDealDamageHandler.AttackTarget((short) normalizedHitDelay, lines);
+    }
+
+    // Barrage hits j>3 deal 2^(j-3)x damage — matches parseDamage lines 847-851
+    private AbstractDealDamageHandler.AttackTarget rollBarrageDamageLines(
+            int hits, int[] adjustedDamage, double hitChance, CritProfile crit, int normalizedHitDelay) {
+        List<Integer> lines = new ArrayList<>(hits);
+        Set<Integer> critIndices = new HashSet<>();
+        for (int j = 0; j < hits; j++) {
+            int scaledMin = adjustedDamage[0];
+            int scaledMax = adjustedDamage[1];
+            if (j > 3) {
+                int factor = 1 << (j - 3); // 2^(j-3)
+                scaledMax = (int) Math.min(Integer.MAX_VALUE, (long) adjustedDamage[1] * factor);
+                scaledMin = (int) Math.min(scaledMax, (long) adjustedDamage[0] * factor);
+            }
+            CritDamageResult hit = rollDamageLinesWithCrit(1, scaledMin, scaledMax,
+                    hitChance, crit.critChance(), crit.critMultiplier());
+            lines.addAll(hit.lines());
+            if (!hit.critIndices().isEmpty()) {
+                critIndices.add(j);
+            }
+        }
+        return new AbstractDealDamageHandler.AttackTarget((short) normalizedHitDelay, lines, critIndices);
     }
 
     /** Shared with AbstractDealDamageHandler.parseDamage — keep in sync. */
