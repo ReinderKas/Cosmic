@@ -5,6 +5,9 @@ import client.Skill;
 import client.SkillFactory;
 import constants.skills.Bishop;
 import constants.skills.Cleric;
+import constants.skills.ILArchMage;
+import constants.skills.ILMage;
+import constants.skills.ILWizard;
 import constants.skills.Magician;
 import constants.skills.Priest;
 import java.util.List;
@@ -17,6 +20,9 @@ public final class MageBuilds {
     public static List<BuildStep> getBuildOrder(Job job) {
         return switch (job) {
             case MAGICIAN -> magicianBuild();
+            case IL_WIZARD -> ilWizardBuild();
+            case IL_MAGE -> ilMageBuild();
+            case IL_ARCHMAGE -> ilArchMageBuild();
             case CLERIC -> clericBuild();
             case PRIEST -> priestBuild();
             case BISHOP -> bishopBuild();
@@ -41,6 +47,50 @@ public final class MageBuilds {
                 s(Magician.IMPROVED_MP_RECOVERY, 16),
                 s(Magician.MAGIC_CLAW, 20),
                 s(Magician.MAGIC_GUARD, 20)
+        );
+    }
+
+    // https://forum.maplelegends.com/index.php?threads/ice-lightning-mage-guide.12054/
+    private static List<BuildStep> ilWizardBuild() {
+        return List.of(
+                s(ILWizard.TELEPORT, 1),
+                s(ILWizard.THUNDERBOLT, max(ILWizard.THUNDERBOLT)),
+                s(ILWizard.MEDITATION, 20),
+                s(ILWizard.MP_EATER, 20),
+                s(ILWizard.TELEPORT, 20),
+                s(ILWizard.COLD_BEAM, max(ILWizard.COLD_BEAM))
+        );
+    }
+
+    private static List<BuildStep> ilMageBuild() {
+        return List.of(
+                s(ILMage.ELEMENT_AMPLIFICATION, 1),
+                s(ILMage.ICE_STRIKE, max(ILMage.ICE_STRIKE)),
+                s(ILMage.SPELL_BOOSTER, 11),
+                s(ILMage.ELEMENT_AMPLIFICATION, max(ILMage.ELEMENT_AMPLIFICATION)),
+                s(ILMage.SPELL_BOOSTER, 20),
+                s(ILMage.ELEMENT_COMPOSITION, max(ILMage.ELEMENT_COMPOSITION)),
+                s(ILMage.SEAL, 20),
+                s(ILMage.PARTIAL_RESISTANCE, max(ILMage.PARTIAL_RESISTANCE))
+        );
+    }
+
+    private static List<BuildStep> ilArchMageBuild() {
+        return List.of(
+                s(ILArchMage.BLIZZARD, 3),
+                s(ILArchMage.BLIZZARD, 10),
+                s(ILArchMage.MAPLE_WARRIOR, 9),
+                s(ILArchMage.BLIZZARD, max(ILArchMage.BLIZZARD)),
+                s(ILArchMage.MAPLE_WARRIOR, 19),
+                s(ILArchMage.CHAIN_LIGHTNING, max(ILArchMage.CHAIN_LIGHTNING)),
+                s(ILArchMage.ICE_DEMON, 5),
+                s(ILArchMage.IFRIT, max(ILArchMage.IFRIT)),
+                s(ILArchMage.ICE_DEMON, max(ILArchMage.ICE_DEMON)),
+                s(ILArchMage.MAPLE_WARRIOR, max(ILArchMage.MAPLE_WARRIOR)),
+                s(ILArchMage.BIG_BANG, max(ILArchMage.BIG_BANG)),
+                s(ILArchMage.INFINITY, max(ILArchMage.INFINITY)),
+                s(ILArchMage.MANA_REFLECTION, max(ILArchMage.MANA_REFLECTION)),
+                s(ILArchMage.HEROS_WILL, max(ILArchMage.HEROS_WILL))
         );
     }
 
