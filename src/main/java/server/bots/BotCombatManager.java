@@ -513,7 +513,7 @@ class BotCombatManager {
         for (Monster target : undeadTargets) {
             attack.targets.put(target.getObjectId(),
                     CombatFormulaProvider.getInstance().makeTarget(
-                            bot, target, 1, damageProfile, skillTiming.hitDelayMs()));
+                            bot, target, 1, healSkillId, damageProfile, skillTiming.hitDelayMs()));
         }
         BotAttackExecutionProvider.applyAttackRoute(route, attack, bot);
     }
@@ -701,7 +701,7 @@ class BotCombatManager {
         for (Monster target : attackPlan.targets) {
             attack.targets.put(target.getObjectId(),
                     CombatFormulaProvider.getInstance().makeTarget(bot, target, attackPlan.numDamage,
-                            damageProfile, attackPlan.hitDelayMs));
+                            attackPlan.skillId, damageProfile, attackPlan.hitDelayMs));
         }
 
         BotAttackExecutionProvider.applyAttackRoute(attackPlan.route, attack, bot);

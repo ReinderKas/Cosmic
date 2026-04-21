@@ -23,8 +23,19 @@ import constants.skills.Rogue;
 import constants.skills.Shadower;
 import constants.skills.ThunderBreaker;
 import constants.skills.WindArcher;
+import constants.game.GameConstants;
+import constants.skills.Crusader;
+import constants.skills.DarkKnight;
+import constants.skills.DawnWarrior;
+import constants.skills.Hero;
+import constants.skills.Marauder;
+import constants.skills.Paladin;
+import constants.skills.WhiteKnight;
+import net.server.PlayerBuffValueHolder;
 import net.server.channel.handlers.AbstractDealDamageHandler;
 import server.StatEffect;
+import server.life.Element;
+import server.life.ElementalEffectiveness;
 import server.life.Monster;
 
 import java.util.ArrayList;
@@ -207,25 +218,174 @@ public final class CombatFormulaProvider {
 
     public AbstractDealDamageHandler.AttackTarget makeTarget(Character bot, Monster monster, int hits,
                                                       DamageProfile damageProfile, int hitDelayMs) {
-        int[] adjustedDamage = damageProfile.alwaysHit()
-                ? new int[]{damageProfile.minDamage(), damageProfile.maxDamage()}
-                : applyMonsterDefense(bot, monster, damageProfile.minDamage(), damageProfile.maxDamage(),
-                damageProfile.magicAttack());
+        return makeTarget(bot, monster, hits, 0, damageProfile, hitDelayMs);
+    }
+
+    public AbstractDealDamageHandler.AttackTarget makeTarget(Character bot, Monster monster, int hits,
+                                                      int skillId, DamageProfile damageProfile, int hitDelayMs) {
         int normalizedHitDelay = Math.max(0, Math.min(Short.MAX_VALUE, hitDelayMs));
         if (damageProfile.alwaysHit()) {
-            List<Integer> lines = rollDamageLines(hits, adjustedDamage[0], adjustedDamage[1], 1.0d);
+            List<Integer> lines = rollDamageLines(hits, damageProfile.minDamage(), damageProfile.maxDamage(), 1.0d);
             return new AbstractDealDamageHandler.AttackTarget((short) normalizedHitDelay, lines);
-        } else if (!damageProfile.magicAttack()) {
+        }
+        long rawMin = applyCharacterDamageModifiers(damageProfile.minDamage(), bot, skillId);
+        long rawMax = applyCharacterDamageModifiers(damageProfile.maxDamage(), bot, skillId);
+        boolean elementalResetActive = bot.getBuffedValue(BuffStat.ELEMENTAL_RESET) != null;
+        rawMax = applySkillElementalMultiplier(rawMax, skillId, monster, elementalResetActive);
+        rawMin = applySkillElementalMultiplier(rawMin, skillId, monster, elementalResetActive);
+        rawMax = applyWkChargeElementalBonus(rawMax, bot, monster);
+        rawMin = applyWkChargeElementalBonus(rawMin, bot, monster);
+        // TODO: Barrage per-hit 2^(j-3) scaling (parseDamage lines 847-851) — needs hit-index awareness
+        // TODO: Shadow Partner 50% on second half of hits (parseDamage lines 852-857)
+        int modMax = (int) Math.min(Integer.MAX_VALUE, rawMax);
+        int modMin = (int) Math.min(modMax, Math.max(1, (int) rawMin));
+        int[] adjustedDamage = applyMonsterDefense(bot, monster, modMin, modMax, damageProfile.magicAttack());
+        boolean shadowPartner = hits > 1 && bot.getBuffEffect(BuffStat.SHADOWPARTNER) != null;
+        if (!damageProfile.magicAttack()) {
             CritProfile crit = resolveCritProfile(bot);
             double hitChance = calculateMobHitChance(bot, monster, false);
+            if (shadowPartner) {
+                return rollWithShadowPartnerPhysical(hits, adjustedDamage, hitChance, crit, normalizedHitDelay);
+            }
             CritDamageResult result = rollDamageLinesWithCrit(hits, adjustedDamage[0], adjustedDamage[1],
                     hitChance, crit.critChance(), crit.critMultiplier());
             return new AbstractDealDamageHandler.AttackTarget((short) normalizedHitDelay,
                     result.lines(), result.critIndices());
         } else {
+            if (shadowPartner) {
+                return rollWithShadowPartnerMagic(bot, monster, hits, adjustedDamage, normalizedHitDelay);
+            }
             List<Integer> lines = rollDamageLines(bot, monster, hits, adjustedDamage[0], adjustedDamage[1], true);
             return new AbstractDealDamageHandler.AttackTarget((short) normalizedHitDelay, lines);
         }
+    }
+
+    private AbstractDealDamageHandler.AttackTarget rollWithShadowPartnerPhysical(
+            int hits, int[] adjustedDamage, double hitChance, CritProfile crit, int normalizedHitDelay) {
+        int mainHits = hits / 2;
+        int partnerHits = hits - mainHits;
+        int partnerMax = Math.max(1, adjustedDamage[1] / 2);
+        int partnerMin = Math.max(1, Math.min(partnerMax, adjustedDamage[0] / 2));
+        CritDamageResult main = rollDamageLinesWithCrit(mainHits, adjustedDamage[0], adjustedDamage[1],
+                hitChance, crit.critChance(), crit.critMultiplier());
+        CritDamageResult partner = rollDamageLinesWithCrit(partnerHits, partnerMin, partnerMax,
+                hitChance, crit.critChance(), crit.critMultiplier());
+        List<Integer> lines = new ArrayList<>(main.lines());
+        lines.addAll(partner.lines());
+        Set<Integer> critIndices = new HashSet<>(main.critIndices());
+        for (int idx : partner.critIndices()) {
+            critIndices.add(mainHits + idx);
+        }
+        return new AbstractDealDamageHandler.AttackTarget((short) normalizedHitDelay, lines, critIndices);
+    }
+
+    private AbstractDealDamageHandler.AttackTarget rollWithShadowPartnerMagic(
+            Character bot, Monster monster, int hits, int[] adjustedDamage, int normalizedHitDelay) {
+        int mainHits = hits / 2;
+        int partnerHits = hits - mainHits;
+        int partnerMax = Math.max(1, adjustedDamage[1] / 2);
+        int partnerMin = Math.max(1, Math.min(partnerMax, adjustedDamage[0] / 2));
+        List<Integer> lines = new ArrayList<>(rollDamageLines(bot, monster, mainHits, adjustedDamage[0], adjustedDamage[1], true));
+        lines.addAll(rollDamageLines(bot, monster, partnerHits, partnerMin, partnerMax, true));
+        return new AbstractDealDamageHandler.AttackTarget((short) normalizedHitDelay, lines);
+    }
+
+    /** Shared with AbstractDealDamageHandler.parseDamage — keep in sync. */
+    public long applySkillElementalMultiplier(long damage, int skillId, Monster monster, boolean elementalResetActive) {
+        if (skillId == 0 || elementalResetActive) return damage;
+        Skill skill = SkillFactory.getSkill(skillId);
+        if (skill == null || skill.getElement() == Element.NEUTRAL) return damage;
+        if (monster == null) return (long) (damage * 1.5);
+        ElementalEffectiveness eff = monster.getElementalEffectiveness(skill.getElement());
+        if (eff == ElementalEffectiveness.WEAK) return (long) (damage * 1.5);
+        // STRONG intentionally not penalized — matches parseDamage commented-out headroom
+        return damage;
+    }
+
+    /** Shared with AbstractDealDamageHandler.parseDamage — keep in sync. */
+    public long applyWkChargeElementalBonus(long damage, Character chr, Monster monster) {
+        if (chr.getBuffEffect(BuffStat.WK_CHARGE) == null) return damage;
+        int sourceId = chr.getBuffSource(BuffStat.WK_CHARGE);
+        int level = chr.getBuffedValue(BuffStat.WK_CHARGE);
+        if (monster == null) return (long) (damage * 1.5);
+        Element chargeElement;
+        boolean isHoly;
+        if (sourceId == WhiteKnight.BW_FIRE_CHARGE || sourceId == WhiteKnight.SWORD_FIRE_CHARGE) {
+            chargeElement = Element.FIRE; isHoly = false;
+        } else if (sourceId == WhiteKnight.BW_ICE_CHARGE || sourceId == WhiteKnight.SWORD_ICE_CHARGE) {
+            chargeElement = Element.ICE; isHoly = false;
+        } else if (sourceId == WhiteKnight.BW_LIT_CHARGE || sourceId == WhiteKnight.SWORD_LIT_CHARGE) {
+            chargeElement = Element.LIGHTING; isHoly = false;
+        } else if (sourceId == Paladin.BW_HOLY_CHARGE || sourceId == Paladin.SWORD_HOLY_CHARGE) {
+            chargeElement = Element.HOLY; isHoly = true;
+        } else {
+            return damage;
+        }
+        if (monster.getStats().getEffectiveness(chargeElement) == ElementalEffectiveness.WEAK) {
+            double base = isHoly ? 1.2 : 1.05;
+            return (long) (damage * (base + level * 0.015));
+        }
+        return damage;
+    }
+
+    /**
+     * Character-level damage multipliers shared with parseDamage.
+     * Intentionally matches parseDamage anti-cheat headrooms (Berserk unconditional, etc.).
+     */
+    public long applyCharacterDamageModifiers(long damage, Character chr, int skillId) {
+        Integer comboBuff = chr.getBuffedValue(BuffStat.COMBO);
+        if (comboBuff != null && comboBuff > 0) {
+            int comboId = chr.isCygnus() ? DawnWarrior.COMBO : Crusader.COMBO;
+            int advComboId = chr.isCygnus() ? DawnWarrior.ADVANCED_COMBO : Hero.ADVANCED_COMBO;
+            if (comboBuff > 6) {
+                StatEffect ceffect = SkillFactory.getSkill(advComboId).getEffect(chr.getSkillLevel(advComboId));
+                damage = (long) Math.floor(damage * (ceffect.getDamage() + 50) / 100 + 0.20 + (comboBuff - 5) * 0.04);
+            } else {
+                int skillLv = chr.getSkillLevel(comboId);
+                if (skillLv <= 0 || chr.isGM()) {
+                    skillLv = SkillFactory.getSkill(comboId).getMaxLevel();
+                }
+                if (skillLv > 0) {
+                    StatEffect ceffect = SkillFactory.getSkill(comboId).getEffect(skillLv);
+                    damage = (long) Math.floor(damage * (ceffect.getDamage() + 50) / 100 + Math.floor((comboBuff - 1) * (skillLv / 6)) / 100);
+                }
+            }
+            if (GameConstants.isFinisherSkill(skillId)) {
+                int orbs = comboBuff - 1;
+                if (orbs == 2) {
+                    damage = (long) (damage * 1.2);
+                } else if (orbs == 3) {
+                    damage = (long) (damage * 1.54);
+                } else if (orbs == 4) {
+                    damage *= 2;
+                } else if (orbs >= 5) {
+                    damage = (long) (damage * 2.5);
+                }
+            }
+        }
+        if (chr.getEnergyBar() == 15000) {
+            int energyChargeId = chr.isCygnus() ? ThunderBreaker.ENERGY_CHARGE : Marauder.ENERGY_CHARGE;
+            Skill energySkill = SkillFactory.getSkill(energyChargeId);
+            if (energySkill != null) {
+                int lvl = chr.getSkillLevel(energySkill);
+                if (lvl > 0) {
+                    // Integer division matches parseDamage headroom exactly
+                    damage *= (100 + energySkill.getEffect(lvl).getDamage()) / 100;
+                }
+            }
+        }
+        int bonusDmgBuff = 100;
+        for (PlayerBuffValueHolder pbvh : chr.getAllBuffs()) {
+            bonusDmgBuff += pbvh.effect.getDamage() - 100;
+        }
+        if (bonusDmgBuff != 100) {
+            damage = (long) Math.ceil(damage * bonusDmgBuff / 100.0f);
+        }
+        // Unconditional if leveled — matches parseDamage headroom; real skill needs HP < 10%
+        if (chr.getSkillLevel(DarkKnight.BERSERK) > 0) {
+            damage *= 2;
+        }
+        return damage;
     }
 
     /**
