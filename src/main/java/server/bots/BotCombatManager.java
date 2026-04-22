@@ -475,8 +475,15 @@ class BotCombatManager {
         if (lvl <= 0) return false;
         StatEffect fx = skill.getEffect(lvl);
 
+        // Decision range MUST match the skill's actual WZ hitbox. If we decide to heal based on a
+        // looser SUPPORT_RANGE but fx.applyTo() iterates only members inside the heal bbox, a party
+        // member outside the bbox but inside SUPPORT_RANGE would never receive HP and the bot would
+        // re-cast every tick forever. Anchor both self- and party-checks to fx.calculateBoundingBox.
+        Rectangle healBounds = fx.hasBoundingBox()
+                ? fx.calculateBoundingBox(bot.getPosition(), bot.isFacingLeft())
+                : null;
         boolean selfNeedsHeal = needsHeal(bot);
-        boolean partyNeedsHeal = selfNeedsHeal || hasNearbyPartyMemberNeedingHeal(bot);
+        boolean partyNeedsHeal = selfNeedsHeal || hasPartyMemberInBoundsNeedingHeal(bot, healBounds);
         List<Monster> undeadTargets = getUndeadMobsInHealRange(bot, fx);
         if (!partyNeedsHeal && undeadTargets.isEmpty()) return false;
 
@@ -532,11 +539,21 @@ class BotCombatManager {
         attack.numAttacked = undeadTargets.size();
         attack.numAttackedAndDamage = (undeadTargets.size() << 4) | 1;
         attack.speed = fallbackAttackData.speed();
-        attack.stance = 0;
-        attack.display = 0;
+        // Real cleric Heal packet (captured in monitored-packets-cleric-heal-only.log) encodes:
+        //   direction byte = bodyActionId("alert2") = 41 (0x29) — makes other clients render the
+        //                    caster in the magic-casting "alert2" pose rather than stance 0 (idle
+        //                    frame 0) which looked like walking-in-place.
+        //   stance    byte = facingLeft ? 0x80 : 0x00 — close-range facing mask. Ranged/magic
+        //                    attacks on this server's non-Heal paths use clientAttackStanceId for
+        //                    this byte, but the live packet clearly uses the close-range mask, so
+        //                    we mimic that layout via mimicCloseRangePacketFields.
         boolean facingLeft = bot.isFacingLeft();
-        attack.direction = facingLeft ? -128 : 0;
-        attack.rangedirection = facingLeft ? -128 : 0;
+        BotAttackExecutionProvider.CloseRangePacketFields castFields =
+                BotAttackExecutionProvider.mimicCloseRangePacketFields("alert2", "alert2", facingLeft);
+        attack.display = castFields.display();
+        attack.direction = castFields.bodyActionId();
+        attack.stance = castFields.facingMask();
+        attack.rangedirection = castFields.facingMask();
         attack.ranged = false;
         attack.magic = damageProfile.magicAttack();
         attack.targets = new HashMap<>();
@@ -1707,8 +1724,35 @@ class BotCombatManager {
         return false;
     }
 
-    private static boolean hasNearbyPartyMemberNeedingHeal(Character bot) {
-        for (Character target : getNearbyPartyMembers(bot)) {
+    /**
+     * True when any party member inside the heal skill's WZ bounding box is below the heal
+     * threshold. Using the skill bounds (not cfg.SUPPORT_RANGE) avoids the infinite-cast loop that
+     * occurs when a member sits inside the looser support range but outside the actual heal hitbox:
+     * applyTo() would never include them, so their HP never recovers and the decision fires again.
+     *
+     * <p>Falls back to the legacy SUPPORT_RANGE box if the skill has no WZ bounding box, which is
+     * defensive — Cleric.HEAL always has lt/rb, but other heal-like skills added later might not.
+     */
+    private static boolean hasPartyMemberInBoundsNeedingHeal(Character bot, Rectangle healBounds) {
+        Point botPos = bot.getPosition();
+        for (Character target : bot.getPartyMembersOnSameMap()) {
+            if (target == null || target.getId() == bot.getId() || !target.isAlive()) {
+                continue;
+            }
+            Point memberPos = target.getPosition();
+            if (healBounds != null) {
+                if (!healBounds.contains(memberPos)) {
+                    continue;
+                }
+            } else {
+                if (Math.abs(memberPos.y - botPos.y) > cfg.SUPPORT_VERTICAL_RANGE) {
+                    continue;
+                }
+                double rangeSq = (double) cfg.SUPPORT_RANGE * cfg.SUPPORT_RANGE;
+                if (memberPos.distanceSq(botPos) > rangeSq) {
+                    continue;
+                }
+            }
             if (needsHeal(target)) {
                 return true;
             }
