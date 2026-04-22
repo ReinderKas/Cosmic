@@ -152,9 +152,10 @@ class BotCombatManager {
         public int   SUPPORT_VERTICAL_RANGE = 220;
         public int   SUPPORT_REBUFF_CD_MS = 3_000;
         // Heal until every member in range (including the cleric itself) is above this HP ratio.
-        // No decision cooldown: cadence is enforced by the skill's animation lock via
-        // entry.attackCooldownMs, so the bot re-casts only as fast as a legit client could.
+        // Cadence: animation lock (attackCooldownMs) then HEAL_MOVE_WINDOW_MS walk window.
+        // Heal is also gated by moveWindowMs > 0, so it cannot fire mid-attack-movement-window.
         public float SUPPORT_HEAL_TARGET_RATIO = 0.90f;
+        public int   HEAL_MOVE_WINDOW_MS = 600;
     }
 
     static Config cfg = new Config();
@@ -475,7 +476,7 @@ class BotCombatManager {
      * the heal animation play (matches real player behaviour when Heal is pressed with no mob in range).
      */
     static boolean tickSupportHealing(BotEntry entry, Character bot) {
-        if (entry.attackCooldownMs > 0) return false;
+        if (entry.attackCooldownMs > 0 || entry.moveWindowMs > 0) return false;
         if (!entry.supportHealsEnabled) return false;
         if (!entry.following && !entry.grinding) return false;
         if (entry.healSkillId == 0 || bot.skillIsCooling(entry.healSkillId)) return false;
@@ -516,6 +517,10 @@ class BotCombatManager {
         // does when a player presses Heal with no mob in range.
         sendHealAttack(entry.healSkillId, lvl, bot, undeadTargets, fallbackAttackData, skillTiming);
         markAlerted(entry);
+        entry.moveWindowMs = Math.max(entry.moveWindowMs, cfg.HEAL_MOVE_WINDOW_MS);
+        // Stop walk-in-place: broadcast STAND→ALERT immediately on the heal tick.
+        entry.lastDesiredDirection = 0;
+        BotMovementManager.broadcastMovement(entry);
         return true;
     }
 
