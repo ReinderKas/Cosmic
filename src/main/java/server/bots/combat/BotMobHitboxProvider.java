@@ -23,7 +23,16 @@ public final class BotMobHitboxProvider {
     private static final Logger log = LoggerFactory.getLogger(BotMobHitboxProvider.class);
     private static final BotMobHitboxProvider instance = new BotMobHitboxProvider();
 
-    private final Map<Integer, Rectangle> standBoundsByMobId = new ConcurrentHashMap<>();
+    // Sentinel stored in the cache when a mob has no usable hitbox frame. Using a sentinel rather
+    // than leaving the key unmapped prevents repeated XML re-parsing and re-logging on every tick
+    // for mobs we already know are unresolvable.
+    private static final Rectangle UNRESOLVED_BOUNDS = new Rectangle(Integer.MIN_VALUE, 0, 0, 0);
+
+    // Frame group fallback chain: flying mobs expose fly/0 instead of stand/0; body-attack-only
+    // mobs may only have hit1/0. Covers every common Mob.wz frame that carries an lt/rb pair.
+    private static final String[] FRAME_GROUP_FALLBACK = {"stand", "move", "fly", "hit1", "attack1", "attack2"};
+
+    private final Map<Integer, Rectangle> boundsByMobId = new ConcurrentHashMap<>();
     private volatile Path cachedMobRoot = null;
 
     public static BotMobHitboxProvider getInstance() {
@@ -40,8 +49,8 @@ public final class BotMobHitboxProvider {
 
     public Rectangle getMobBounds(int mobId, Point position, boolean facingLeft) {
         ensureCurrentMobRoot();
-        Rectangle modelBounds = standBoundsByMobId.computeIfAbsent(mobId, this::loadStandBounds);
-        if (modelBounds == null) {
+        Rectangle modelBounds = boundsByMobId.computeIfAbsent(mobId, this::loadMobBounds);
+        if (modelBounds == UNRESOLVED_BOUNDS) {
             return null;
         }
 
@@ -55,54 +64,53 @@ public final class BotMobHitboxProvider {
             return;
         }
 
-        synchronized (standBoundsByMobId) {
+        synchronized (boundsByMobId) {
             if (cachedMobRoot != null && cachedMobRoot.equals(currentMobRoot)) {
                 return;
             }
-            standBoundsByMobId.clear();
+            boundsByMobId.clear();
             cachedMobRoot = currentMobRoot;
         }
     }
 
-    private Rectangle loadStandBounds(int mobId) {
+    private Rectangle loadMobBounds(int mobId) {
         Path mobFile = WZFiles.MOB.getFile().resolve(String.format("%07d.img.xml", mobId));
         if (!Files.isRegularFile(mobFile)) {
-            return null;
+            log.debug("Bot mob hitbox: no WZ file for mob {} — caching miss", mobId);
+            return UNRESOLVED_BOUNDS;
         }
 
         Document document = parseXmlDocument(mobFile);
         if (document == null) {
-            return null;
+            return UNRESOLVED_BOUNDS;
         }
 
-        Rectangle bounds = loadStandBounds(document.getDocumentElement());
+        Rectangle bounds = loadFrameBounds(document.getDocumentElement());
         if (bounds == null) {
-            log.debug("Bot mob hitbox: no stand/0 lt-rb bounds for mob {}", mobId);
+            log.debug("Bot mob hitbox: no lt/rb bounds on any of {} for mob {} — caching miss",
+                    String.join(",", FRAME_GROUP_FALLBACK), mobId);
+            return UNRESOLVED_BOUNDS;
         }
         return bounds;
     }
 
-    private Rectangle loadStandBounds(Element root) {
+    private Rectangle loadFrameBounds(Element root) {
         Element linkedRoot = resolveLinkedRoot(root);
-        Element standFrame = findNamedChild(linkedRoot, "stand");
-        if (standFrame != null) {
-            standFrame = findNamedChild(standFrame, "0");
-        }
-
-        if (standFrame == null) {
-            Element move = findNamedChild(linkedRoot, "move");
-            if (move != null) {
-                standFrame = findNamedChild(move, "0");
+        for (String frameGroup : FRAME_GROUP_FALLBACK) {
+            Element group = findNamedChild(linkedRoot, frameGroup);
+            if (group == null) {
+                continue;
+            }
+            Element frame = findNamedChild(group, "0");
+            if (frame == null) {
+                continue;
+            }
+            Rectangle bounds = toBounds(findNamedChild(frame, "lt"), findNamedChild(frame, "rb"));
+            if (bounds != null) {
+                return bounds;
             }
         }
-
-        if (standFrame == null) {
-            return null;
-        }
-
-        Element lt = findNamedChild(standFrame, "lt");
-        Element rb = findNamedChild(standFrame, "rb");
-        return toBounds(lt, rb);
+        return null;
     }
 
     private Element resolveLinkedRoot(Element root) {

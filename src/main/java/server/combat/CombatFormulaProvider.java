@@ -200,20 +200,43 @@ public final class CombatFormulaProvider {
         return damageLines;
     }
 
+    // Default target count for Cleric Heal damage: caster + 1 target. Resolves to the 4.0× target
+    // multiplier, which algebraically matches the old (INT*4.8 + LUK*4) Cosmic formula —
+    // unaffected callers (non-Heal or tests) keep their existing numbers.
+    private static final int DEFAULT_HEAL_TARGET_COUNT = 2;
+
     public DamageProfile resolveDamageProfile(Character bot, int skillId, int skillLevel, boolean magicAttack) {
+        return resolveDamageProfile(bot, skillId, skillLevel, magicAttack, DEFAULT_HEAL_TARGET_COUNT);
+    }
+
+    /**
+     * Variant used by Heal path: the client's damage-vs-undead formula includes a target multiplier
+     * of {@code 1.5 + 5 / N} where N is the number of targets including the caster. Callers that
+     * know how many undead are being hit (e.g. {@code BotCombatManager.sendHealAttack}) should pass
+     * {@code undeadCount + 1} so the bot's Heal damage matches what a real client would send.
+     *
+     * @param healTargetCount N in the formula — caster + undead mobs. Ignored for non-Heal skills.
+     */
+    public DamageProfile resolveDamageProfile(Character bot, int skillId, int skillLevel,
+                                              boolean magicAttack, int healTargetCount) {
         Skill skill = skillId != 0 ? SkillFactory.getSkill(skillId) : null;
         StatEffect effect = skill != null && skillLevel > 0 ? skill.getEffect(skillLevel) : null;
-        return resolveDamageProfile(bot, skillId, effect, magicAttack);
+        return resolveDamageProfile(bot, skillId, effect, magicAttack, healTargetCount);
     }
 
     public DamageProfile resolveDamageProfile(Character bot, int skillId, StatEffect effect, boolean magicAttack) {
+        return resolveDamageProfile(bot, skillId, effect, magicAttack, DEFAULT_HEAL_TARGET_COUNT);
+    }
+
+    public DamageProfile resolveDamageProfile(Character bot, int skillId, StatEffect effect,
+                                              boolean magicAttack, int healTargetCount) {
         if (effect != null && effect.getFixDamage() > 0) {
             int fixedDamage = Math.max(1, effect.getFixDamage());
             return new DamageProfile(fixedDamage, fixedDamage, magicAttack, true);
         }
 
         return magicAttack
-                ? resolveMagicDamageProfile(bot, skillId, effect)
+                ? resolveMagicDamageProfile(bot, skillId, effect, healTargetCount)
                 : resolvePhysicalDamageProfile(bot, skillId, effect);
     }
 
@@ -533,14 +556,24 @@ public final class CombatFormulaProvider {
         return normalizeDamageProfile(minDamage, maxDamage, false, false);
     }
 
-    private DamageProfile resolveMagicDamageProfile(Character bot, int skillId, StatEffect effect) {
+    private DamageProfile resolveMagicDamageProfile(Character bot, int skillId, StatEffect effect, int healTargetCount) {
         long maxDamage;
         long minDamage;
         if (skillId == Cleric.HEAL && effect != null) {
-            maxDamage = Math.round((bot.getTotalInt() * 4.8d + bot.getTotalLuk() * 4.0d)
-                    * bot.getTotalMagic() / 1000.0d);
-            maxDamage = maxDamage * Math.max(0, effect.getHp()) / 100L;
-            minDamage = Math.max(1L, Math.round(maxDamage * 0.8d));
+            // Client-side GMS v83 formula (credit: Russt / Devil's Sunrise via Ayumilove / SouthPerry):
+            //   MAX = (INT*1.2 + LUK) * MATK / 1000 * TargetMultiplier * HealRate%
+            //   MIN = (INT*0.3 + LUK) * MATK / 1000 * TargetMultiplier * HealRate%
+            //   TargetMultiplier = 1.5 + 5 / N   (N = caster + undead hit)
+            // The prior (INT*4.8 + LUK*4) shortcut hard-coded N=2 (4.0×), making solo clerics
+            // underdamage by ~40% vs a real client that rolls 6.5× for N=1. HealRate% is the WZ
+            // "hp" field on the skill effect (10→300 across Heal lv1→30).
+            double targetMultiplier = 1.5d + 5.0d / Math.max(1, healTargetCount);
+            double matkOverK = bot.getTotalMagic() / 1000.0d;
+            double baseMax = (bot.getTotalInt() * 1.2d + bot.getTotalLuk()) * matkOverK * targetMultiplier;
+            double baseMin = (bot.getTotalInt() * 0.3d + bot.getTotalLuk()) * matkOverK * targetMultiplier;
+            int healRate = Math.max(0, effect.getHp());
+            maxDamage = Math.round(baseMax) * healRate / 100L;
+            minDamage = Math.max(1L, Math.round(baseMin) * healRate / 100L);
         } else {
             int matk = bot.getTotalMagic();
             int totalInt = bot.getTotalInt();

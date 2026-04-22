@@ -1369,8 +1369,12 @@ public class BotManager {
         BotCombatManager.tickActionLock(entry);
         if (runAiTick) {
             BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
-            BotCombatManager.tickBuffs(entry, bot);
+            // Support healing is top priority — runs before buffs so that a bot below the heal
+            // threshold casts Heal before a rebuff uses up this tick's action window. If it fires,
+            // entry.attackCooldownMs is set to the heal animation lock and tickActionLocked() will
+            // return true, causing the caller to skip attack logic this tick.
             BotCombatManager.tickSupportHealing(entry, bot);
+            BotCombatManager.tickBuffs(entry, bot);
             BotBuffManager.tick(entry, bot);
         }
         return tickActionLocked(entry);

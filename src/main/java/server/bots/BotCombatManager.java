@@ -143,9 +143,10 @@ class BotCombatManager {
         public int   SUPPORT_RANGE = 400;
         public int   SUPPORT_VERTICAL_RANGE = 220;
         public int   SUPPORT_REBUFF_CD_MS = 3_000;
-        public int   SUPPORT_HEAL_CD_MS = 2_000;
-        public float SUPPORT_HEAL_RATIO = 0.75f;
-        public int   SUPPORT_HEAL_MISSING_HP = 250;
+        // Heal until every member in range (including the cleric itself) is above this HP ratio.
+        // No decision cooldown: cadence is enforced by the skill's animation lock via
+        // entry.attackCooldownMs, so the bot re-casts only as fast as a legit client could.
+        public float SUPPORT_HEAL_TARGET_RATIO = 0.90f;
     }
 
     static Config cfg = new Config();
@@ -452,27 +453,36 @@ class BotCombatManager {
         return GameConstants.isInJobTree(skill.getId(), bot.getJob().getId()) ? 2 : 1;
     }
 
-    static void tickSupportHealing(BotEntry entry, Character bot) {
-        if (entry.attackCooldownMs > 0) return;
-        if (!entry.supportHealsEnabled) return;
-        if (!entry.following && !entry.grinding) return;
-        if (entry.healSkillId == 0 || bot.skillIsCooling(entry.healSkillId)) return;
-
-        long now = System.currentTimeMillis();
-        if (now < entry.nextSupportHealAt) return;
+    /**
+     * Healing is the cleric bot's top priority: runs before any attack decision (see BotManager tick)
+     * and casts whenever the bot itself OR any nearby party member is below
+     * {@link Config#SUPPORT_HEAL_TARGET_RATIO}. There is no decision-side cooldown — the only
+     * throttle is {@code entry.attackCooldownMs}, which we set from the skill's animation timing so
+     * consecutive casts match what a legit client would send (~600ms between Heal packets per the
+     * captured monitored-packets-cleric-heal-only.log reference).
+     *
+     * <p>The cast packet is broadcast even when no undead targets are in range so other clients see
+     * the heal animation play (matches real player behaviour when Heal is pressed with no mob in range).
+     */
+    static boolean tickSupportHealing(BotEntry entry, Character bot) {
+        if (entry.attackCooldownMs > 0) return false;
+        if (!entry.supportHealsEnabled) return false;
+        if (!entry.following && !entry.grinding) return false;
+        if (entry.healSkillId == 0 || bot.skillIsCooling(entry.healSkillId)) return false;
 
         Skill skill = SkillFactory.getSkill(entry.healSkillId);
         int lvl = bot.getSkillLevel(skill);
-        if (lvl <= 0) return;
+        if (lvl <= 0) return false;
         StatEffect fx = skill.getEffect(lvl);
 
-        boolean partyNeedsHeal = hasNearbyPartyMemberNeedingHeal(bot);
+        boolean selfNeedsHeal = needsHeal(bot);
+        boolean partyNeedsHeal = selfNeedsHeal || hasNearbyPartyMemberNeedingHeal(bot);
         List<Monster> undeadTargets = getUndeadMobsInHealRange(bot, fx);
-        if (!partyNeedsHeal && undeadTargets.isEmpty()) return;
+        if (!partyNeedsHeal && undeadTargets.isEmpty()) return false;
 
-        if (!fx.canPaySkillCost(bot) || !fx.applyTo(bot)) return;
+        if (!fx.canPaySkillCost(bot) || !fx.applyTo(bot)) return false;
 
-        entry.nextSupportHealAt = now + cfg.SUPPORT_HEAL_CD_MS;
+        long now = System.currentTimeMillis();
         BotAttackExecutionProvider.BasicAttackData fallbackAttackData =
                 BotAttackExecutionProvider.buildBasicAttackData(bot, bot.getPosition());
         String action = BotAttackExecutionProvider.resolveSkillAttackAction(bot, skill, lvl,
@@ -484,9 +494,18 @@ class BotCombatManager {
             bot.addCooldown(entry.healSkillId, now, fx.getCooldown() * 1000L);
         }
 
-        if (!undeadTargets.isEmpty()) {
-            sendHealAttack(entry.healSkillId, lvl, bot, undeadTargets, fallbackAttackData, skillTiming);
-        }
+        // Always send the attack/cast packet so the animation plays even when there are no undead
+        // to hit — the packet carries an empty targets map in that case, which is what a real client
+        // does when a player presses Heal with no mob in range.
+        sendHealAttack(entry.healSkillId, lvl, bot, undeadTargets, fallbackAttackData, skillTiming);
+        return true;
+    }
+
+    private static boolean needsHeal(Character chr) {
+        if (chr == null || !chr.isAlive()) return false;
+        int maxHp = chr.getCurrentMaxHp();
+        if (maxHp <= 0) return false;
+        return chr.getHp() < Math.round(maxHp * cfg.SUPPORT_HEAL_TARGET_RATIO);
     }
 
     /**
@@ -500,8 +519,12 @@ class BotCombatManager {
             BotAttackExecutionProvider.BasicAttackData fallbackAttackData,
             BotAttackExecutionProvider.SkillAttackTiming skillTiming) {
         AttackRoute route = BotAttackExecutionProvider.determineSkillRoute(bot, healSkillId);
+        // N in Russt's target multiplier is caster + damaged targets. When no undead are in range
+        // the damage profile is unused (numAttacked=0) but we still pass 1 to avoid a divide-by-zero
+        // surprise if the profile gets reused elsewhere.
+        int healTargetCount = Math.max(1, undeadTargets.size() + 1);
         CombatFormulaProvider.DamageProfile damageProfile = CombatFormulaProvider.getInstance()
-                .resolveDamageProfile(bot, healSkillId, lvl, true);
+                .resolveDamageProfile(bot, healSkillId, lvl, true, healTargetCount);
         AbstractDealDamageHandler.AttackInfo attack = new AbstractDealDamageHandler.AttackInfo();
         attack.skill = healSkillId;
         attack.skilllevel = lvl;
@@ -1686,18 +1709,10 @@ class BotCombatManager {
 
     private static boolean hasNearbyPartyMemberNeedingHeal(Character bot) {
         for (Character target : getNearbyPartyMembers(bot)) {
-            int maxHp = target.getCurrentMaxHp();
-            if (maxHp <= 0) {
-                continue;
-            }
-
-            int missingHp = maxHp - target.getHp();
-            if (missingHp >= cfg.SUPPORT_HEAL_MISSING_HP
-                    && target.getHp() <= Math.round(maxHp * cfg.SUPPORT_HEAL_RATIO)) {
+            if (needsHeal(target)) {
                 return true;
             }
         }
-
         return false;
     }
 
