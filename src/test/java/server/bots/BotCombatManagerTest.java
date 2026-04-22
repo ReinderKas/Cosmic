@@ -10,6 +10,8 @@ import client.inventory.WeaponType;
 import constants.game.CharacterStance;
 import constants.skills.Archer;
 import constants.skills.Beginner;
+import constants.skills.Cleric;
+import constants.skills.Magician;
 import constants.skills.Warrior;
 import net.packet.Packet;
 import org.junit.jupiter.api.Test;
@@ -30,6 +32,7 @@ import java.util.Collections;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -43,6 +46,7 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import tools.HexTool;
 
 class BotCombatManagerTest {
     @Test
@@ -84,6 +88,25 @@ class BotCombatManagerTest {
         String action = BotAttackExecutionProvider.resolveSkillAttackAction(null, skill, 1, WeaponType.BOW);
 
         assertEquals("doublefire", action);
+    }
+
+    @Test
+    void shouldMatchRealMagicGuardSpecialMovePacketLayout() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+
+        byte[] packet = BotCombatManager.buildSupportSpecialMovePacket(bot, Magician.MAGIC_GUARD, 20, 0x009195A5);
+
+        assertArrayEquals(HexTool.toBytes("5B 00 A5 95 91 00 6A 88 1E 00 14 00 00"), packet);
+    }
+
+    @Test
+    void shouldMatchRealBlessSpecialMovePacketLayout() {
+        Character bot = mockBot(new Point(0x155D, 0x01C6), mock(MapleMap.class), 20_000, null);
+        when(bot.isFacingLeft()).thenReturn(true);
+
+        byte[] packet = BotCombatManager.buildSupportSpecialMovePacket(bot, Cleric.BLESS, 9, 0x00919AAF);
+
+        assertArrayEquals(HexTool.toBytes("5B 00 AF 9A 91 00 4C 1C 23 00 09 5D 15 C6 01 80 00 00"), packet);
     }
 
     @Test
@@ -474,6 +497,7 @@ class BotCombatManagerTest {
         when(bot.getMapId()).thenReturn(0);
         when(bot.getJob()).thenReturn(Job.BEGINNER);
         when(bot.getLevel()).thenReturn(200);
+        when(bot.isFacingLeft()).thenReturn(false);
         when(bot.getTotalMoveSpeedStat()).thenReturn(100);
         when(bot.getTotalJumpStat()).thenReturn(100);
         when(bot.getTotalWdef()).thenReturn(0);

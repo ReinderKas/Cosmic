@@ -2,6 +2,7 @@ package server.bots;
 
 import client.BuffStat;
 import client.Character;
+import client.Client;
 import client.Skill;
 import client.SkillFactory;
 import client.inventory.InventoryType;
@@ -28,8 +29,15 @@ import constants.skills.Spearman;
 import constants.skills.SuperGM;
 import constants.skills.ThunderBreaker;
 import constants.skills.WindArcher;
+import io.netty.buffer.Unpooled;
+import net.PacketHandler;
+import net.PacketProcessor;
 import net.server.PlayerBuffValueHolder;
 import net.server.channel.handlers.AbstractDealDamageHandler;
+import net.opcodes.RecvOpcode;
+import net.packet.ByteBufInPacket;
+import net.packet.ByteBufOutPacket;
+import net.packet.InPacket;
 import server.StatEffect;
 import server.bots.combat.BotAttackDataProvider;
 import server.bots.combat.BotDefenseDataProvider;
@@ -1584,12 +1592,21 @@ class BotCombatManager {
     }
 
     private static boolean castSupportSkill(BotEntry entry, Character bot, Skill skill, StatEffect fx, long now) {
+        int skillLevel = bot.getSkillLevel(skill);
+        if (skillLevel <= 0) {
+            noteSkillBuffDecision(entry, "missing skill level for " + skillLabel(skill.getId()));
+            return false;
+        }
+        if (!bot.isAlive()) {
+            noteSkillBuffDecision(entry, "can't cast while dead: " + skillLabel(skill.getId()));
+            return false;
+        }
         if (!fx.canPaySkillCost(bot)) {
             noteSkillBuffDecision(entry, "can't pay cost for " + skillLabel(skill.getId()));
             return false;
         }
-        if (!fx.applyTo(bot, null)) {
-            noteSkillBuffDecision(entry, "apply failed for " + skillLabel(skill.getId()));
+        if (!dispatchSupportSpecialMove(bot, skill, skillLevel)) {
+            noteSkillBuffDecision(entry, "special move failed for " + skillLabel(skill.getId()));
             return false;
         }
 
@@ -1599,16 +1616,56 @@ class BotCombatManager {
         }
         BotAttackExecutionProvider.BasicAttackData fallbackAttackData =
                 BotAttackExecutionProvider.buildBasicAttackData(bot, bot.getPosition());
-        String action = BotAttackExecutionProvider.resolveSkillAttackAction(bot, skill, bot.getSkillLevel(skill),
+        String action = BotAttackExecutionProvider.resolveSkillAttackAction(bot, skill, skillLevel,
                 BotAttackExecutionProvider.getEquippedWeaponType(bot));
         BotAttackExecutionProvider.SkillAttackTiming skillTiming =
                 BotAttackExecutionProvider.resolveSkillAttackTiming(skill, action, bot, fallbackAttackData);
         int animMs = skill.getAnimationTime() > 0 ? skill.getAnimationTime() : 1000;
         entry.attackCooldownMs = Math.max(entry.attackCooldownMs, Math.max(skillTiming.cooldownMs(), animMs));
-        if (fx.getCooldown() > 0) {
-            bot.addCooldown(skill.getId(), now, fx.getCooldown() * 1000L);
-        }
         noteSkillBuffDecision(entry, "cast " + skillLabel(skill.getId()));
+        return true;
+    }
+
+    // Real v83 self-buff SPECIAL_MOVE captures show two shapes:
+    // - self-only buffs like Magic Guard / Invincible: timestamp, skillId, skillLevel, 00 00
+    // - party support buffs like Bless: timestamp, skillId, skillLevel, pos(x,y), facingMask, 00 00
+    // Bot buffs must mimic those client parameters and then run through the normal SpecialMoveHandler.
+    static byte[] buildSupportSpecialMovePacket(Character bot, int skillId, int skillLevel, int packetTimestamp) {
+        ByteBufOutPacket packet = new ByteBufOutPacket();
+        packet.writeShort(RecvOpcode.SPECIAL_MOVE.getValue());
+        packet.writeInt(packetTimestamp);
+        packet.writeInt(skillId);
+        packet.writeByte(skillLevel);
+        if (isPartySupportSkill(skillId)) {
+            Point position = bot.getPosition();
+            packet.writePos(position != null ? position : new Point(0, 0));
+            packet.writeByte(bot.isFacingLeft() ? 0x80 : 0x00);
+            packet.writeShort(0);
+        } else {
+            packet.writeShort(0);
+        }
+        return packet.getBytes();
+    }
+
+    private static boolean dispatchSupportSpecialMove(Character bot, Skill skill, int skillLevel) {
+        Client client = bot.getClient();
+        if (client == null) {
+            return false;
+        }
+
+        byte[] packetBytes = buildSupportSpecialMovePacket(
+                bot,
+                skill.getId(),
+                skillLevel,
+                net.server.Server.getInstance().getCurrentTimestamp());
+        InPacket packet = new ByteBufInPacket(Unpooled.wrappedBuffer(packetBytes));
+        short packetId = packet.readShort();
+        PacketHandler handler = PacketProcessor.getProcessor(bot.getWorld(), client.getChannel()).getHandler(packetId);
+        if (handler == null || !handler.validateState(client)) {
+            return false;
+        }
+
+        handler.handlePacket(packet, client);
         return true;
     }
 
