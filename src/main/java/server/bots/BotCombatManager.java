@@ -19,6 +19,7 @@ import constants.skills.Corsair;
 import constants.skills.DawnWarrior;
 import constants.skills.Fighter;
 import constants.skills.GM;
+import constants.skills.Hunter;
 import constants.skills.Marksman;
 import constants.skills.NightWalker;
 import constants.skills.Priest;
@@ -159,6 +160,12 @@ class BotCombatManager {
             Rogue.KEEN_EYES,
             WindArcher.EYE_OF_AMAZON,
             NightWalker.KEEN_EYES
+    );
+    // Skills whose WZ bbox describes an explosion around the strike point (primary target),
+    // not a sweep around the caster. Anchor the planner's hitBox at the target for these,
+    // matching how StatEffect handles NightWalker.POISON_BOMB (see StatEffect line 1089).
+    private static final Set<Integer> STRIKE_POINT_ANCHORED_AOE_SKILL_IDS = Set.of(
+            Hunter.ARROW_BOMB
     );
     private static final Set<Integer> PARTY_SUPPORT_SKILL_IDS = Set.of(
             Assassin.HASTE,
@@ -733,18 +740,26 @@ class BotCombatManager {
             return null;
         }
         AttackRoute route = BotAttackExecutionProvider.determineSkillRoute(bot, entry.aoeSkillId);
-        Rectangle hitBox = calculateSkillHitBox(effect, bot, primaryTarget, route);
+        Rectangle hitBox = calculateSkillHitBox(effect, bot, primaryTarget, route, entry.aoeSkillId);
         if (hitBox == null) {
             return null;
         }
 
-        primaryTarget = resolveEffectivePrimary(bot, primaryTarget, hitBox);
+        // For strike-point-anchored explosions (e.g. Arrow Bomb) the bbox is already centered on
+        // the primary target; shifting primary to the closest-in-hitBox would move the packet's
+        // "strike point" away from the actual hit location. Skip resolveEffectivePrimary for them.
+        if (!isStrikePointAnchoredAoeSkill(entry.aoeSkillId)) {
+            primaryTarget = resolveEffectivePrimary(bot, primaryTarget, hitBox);
+        }
         List<Monster> targets = collectTargetsInHitBox(bot, primaryTarget, hitBox, Math.max(1, effect.getMobCount()));
         if (targets.size() < BotCombatManager.cfg.AOE_MOB_THRESHOLD) {
             return null;
         }
 
         int attackCount = Math.max(1, effect.getAttackCount());
+        if (!beatsSingleTargetScore(bot, entry, effect, attackCount, targets.size())) {
+            return null;
+        }
         WeaponType weaponType = BotAttackExecutionProvider.getEquippedWeaponType(bot);
         if (!BotAttackExecutionProvider.canUseRangedAttackRoute(route, weaponType, bot.getPosition(), primaryTarget.getPosition())) {
             return null;
@@ -785,7 +800,7 @@ class BotCombatManager {
             return null;
         }
         AttackRoute route = BotAttackExecutionProvider.determineSkillRoute(bot, entry.attackSkillId);
-        Rectangle hitBox = calculateSkillHitBox(effect, bot, primaryTarget, route);
+        Rectangle hitBox = calculateSkillHitBox(effect, bot, primaryTarget, route, entry.attackSkillId);
         if (hitBox == null) {
             return null;
         }
@@ -820,13 +835,20 @@ class BotCombatManager {
                 fallbackAttackData.speed(), skillTiming.hitDelayMs(), skillTiming.cooldownMs());
     }
 
-    private static Rectangle calculateSkillHitBox(StatEffect effect, Character bot, Monster primaryTarget, AttackRoute route) {
+    private static Rectangle calculateSkillHitBox(StatEffect effect, Character bot, Monster primaryTarget, AttackRoute route, int skillId) {
         boolean facingLeft = primaryTarget.getPosition().x < bot.getPosition().x;
         if (effect.hasBoundingBox()) {
-            return effect.calculateBoundingBox(bot.getPosition(), facingLeft);
+            Point anchor = isStrikePointAnchoredAoeSkill(skillId)
+                    ? primaryTarget.getPosition()
+                    : bot.getPosition();
+            return effect.calculateBoundingBox(anchor, facingLeft);
         }
 
         return fallbackSkillHitBox(effect, bot, facingLeft, route);
+    }
+
+    static boolean isStrikePointAnchoredAoeSkill(int skillId) {
+        return STRIKE_POINT_ANCHORED_AOE_SKILL_IDS.contains(skillId);
     }
 
     static Rectangle fallbackCloseRangeSkillHitBox(StatEffect effect, Character bot, boolean facingLeft) {
@@ -960,6 +982,30 @@ class BotCombatManager {
         return Math.max(1, Math.max(effect.getAttackCount(), effect.getBulletCount()));
     }
 
+    /**
+     * True iff the AoE skill's expected total damage (damage% × hits × targets) beats
+     * the bot's best single-target option (best of configured attack skill or basic 100%).
+     * Used to gate AoE selection when only a small cluster is in range.
+     */
+    private static boolean beatsSingleTargetScore(Character bot, BotEntry entry, StatEffect aoeEffect,
+                                                  int aoeAttackCount, int targetCount) {
+        int aoeDamage = Math.max(0, aoeEffect.getDamage());
+        long aoeScore = (long) aoeDamage * Math.max(1, aoeAttackCount) * Math.max(1, targetCount);
+        long singleScore = 100L; // basic attack: 100% damage × 1 line
+        if (entry.attackSkillId != 0) {
+            Skill skill = SkillFactory.getSkill(entry.attackSkillId);
+            int level = skill == null ? 0 : bot.getSkillLevel(skill);
+            if (level > 0) {
+                StatEffect fx = skill.getEffect(level);
+                if (fx != null) {
+                    singleScore = Math.max(singleScore,
+                            (long) Math.max(0, fx.getDamage()) * effectiveHitCount(fx));
+                }
+            }
+        }
+        return aoeScore > singleScore;
+    }
+
     private static List<ScoredGrindTarget> scoreGrindTargets(BotEntry entry,
                                                              Character bot,
                                                              Point botPos,
@@ -1054,7 +1100,7 @@ class BotCombatManager {
             return false;
         }
 
-        Rectangle hitBox = calculateSkillHitBox(effect, bot, target, route);
+        Rectangle hitBox = calculateSkillHitBox(effect, bot, target, route, entry.attackSkillId);
         if (hitBox == null || !doesHitBoxIntersectMonster(hitBox, target)) {
             return false;
         }
