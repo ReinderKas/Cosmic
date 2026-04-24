@@ -1302,7 +1302,9 @@ public class BotManager {
                     }
                     if (!entry.inAir) return;
                 } else if (!entry.inAir
-                        && BotCombatManager.isTargetJumpable(entry.movementProfile, attackPlan.isCloseRangeRoute(), botPos, tp)) {
+                        && BotCombatManager.isTargetJumpable(entry.movementProfile, attackPlan.isCloseRangeRoute(), botPos, tp)
+                        && grindWeaponType != WeaponType.BOW && grindWeaponType != WeaponType.CROSSBOW
+                        && grindWeaponType != WeaponType.WAND && grindWeaponType != WeaponType.STAFF) {
                     // Target is above but within jump height — jump toward it
                     BotMovementManager.initiateJump(entry, bot, tp.x - botPos.x);
                     return;
