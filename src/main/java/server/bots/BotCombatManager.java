@@ -546,7 +546,7 @@ class BotCombatManager {
      * the heal animation play (matches real player behaviour when Heal is pressed with no mob in range).
      */
     static boolean tickSupportHealing(BotEntry entry, Character bot) {
-        if (entry.attackCooldownMs > 0) return false;
+        if (entry.attackCooldownMs > 0 || (entry.moveWindowMs > 0 && !entry.inAir)) return false;
         if (!entry.supportHealsEnabled) return false;
         if (!entry.following && !entry.grinding) return false;
         if (entry.healSkillId == 0 || bot.skillIsCooling(entry.healSkillId)) return false;

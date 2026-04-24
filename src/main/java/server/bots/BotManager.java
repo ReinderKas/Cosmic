@@ -1206,6 +1206,21 @@ public class BotManager {
                 if (followRetreat) {
                     targetPos = selectGrindNavigationTarget(entry, botPos, followTargetPos);
                     entry.degenAttackDone = false;
+                } else if (entry.inAir) {
+                    // Mid-air (from a jump): attack bypasses moveWindowMs; attackCooldownMs still gates
+                    BotCombatManager.AttackPlan ap = BotCombatManager.planAttack(entry, bot, followTarget);
+                    if (BotCombatManager.isTargetInAttackRange(ap, bot, followTarget)) {
+                        BotCombatManager.attackMonster(entry, bot, ap);
+                        if (ap.isCloseRangeRoute() && BotCombatManager.isRangedAmmoWeapon(followWeaponType)) {
+                            entry.degenAttackDone = true;
+                        }
+                    }
+                } else if (followWeaponType != WeaponType.BOW && followWeaponType != WeaponType.CROSSBOW
+                        && followWeaponType != WeaponType.WAND && followWeaponType != WeaponType.STAFF
+                        && BotCombatManager.isTargetJumpable(entry.movementProfile, true, botPos, followTargetPos)) {
+                    // Target is above but within jump height — jump regardless of moveWindowMs
+                    BotMovementManager.initiateJump(entry, bot, followTargetPos.x - botPos.x);
+                    return;
                 } else if (entry.moveWindowMs <= 0) {
                     BotCombatManager.AttackPlan ap = BotCombatManager.planAttack(entry, bot, followTarget);
                     if (BotCombatManager.isTargetInAttackRange(ap, bot, followTarget)) {
@@ -1214,8 +1229,7 @@ public class BotManager {
                         entry.moveWindowMs = followDx > BotMovementManager.cfg.FOLLOW_DIST * 3 ? 1000
                                            : followDx > BotMovementManager.cfg.FOLLOW_DIST     ? 200
                                            : 0;
-                        if (ap.isCloseRangeRoute()
-                                && BotCombatManager.isRangedAmmoWeapon(followWeaponType)) {
+                        if (ap.isCloseRangeRoute() && BotCombatManager.isRangedAmmoWeapon(followWeaponType)) {
                             entry.degenAttackDone = true;
                         }
                         if (!entry.inAir) return;
@@ -1286,21 +1300,23 @@ public class BotManager {
                 if (!shouldRetreatForRangedSpacing && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)
                         && (!couponSeeking || entry.moveWindowMs <= 0)) {
                     // In range — attack if grounded, or during ascent of a jump
+                    int prevCooldown = entry.attackCooldownMs;
                     BotCombatManager.attackMonster(entry, bot, attackPlan);
+                    boolean attacked = entry.attackCooldownMs != prevCooldown;
                     // After attacking in coupon-seek mode, add a movement window based on
                     // distance to the coupon so the bot walks toward it between attacks.
-                    if (couponSeeking && entry.kpq.navTarget != null) {
+                    if (attacked && couponSeeking && entry.kpq.navTarget != null) {
                         int couponDx = Math.abs(botPos.x - entry.kpq.navTarget.x);
                         entry.moveWindowMs = couponDx > BotMovementManager.cfg.FOLLOW_DIST * 3 ? 1000
                                            : couponDx > BotMovementManager.cfg.FOLLOW_DIST     ? 200
                                            : 0;
                     }
                     // If a ranged bot just did a degenerate close-range hit, force retreat next tick
-                    if (attackPlan.isCloseRangeRoute()
+                    if (attacked && attackPlan.isCloseRangeRoute()
                             && BotCombatManager.isRangedAmmoWeapon(grindWeaponType)) {
                         entry.degenAttackDone = true;
                     }
-                    if (!entry.inAir) return;
+                    if (attacked && !entry.inAir) return;
                 } else if (!entry.inAir
                         && BotCombatManager.isTargetJumpable(entry.movementProfile, attackPlan.isCloseRangeRoute(), botPos, tp)
                         && grindWeaponType != WeaponType.BOW && grindWeaponType != WeaponType.CROSSBOW
