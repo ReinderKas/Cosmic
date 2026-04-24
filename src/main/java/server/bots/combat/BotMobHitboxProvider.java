@@ -28,9 +28,10 @@ public final class BotMobHitboxProvider {
     // for mobs we already know are unresolvable.
     private static final Rectangle UNRESOLVED_BOUNDS = new Rectangle(Integer.MIN_VALUE, 0, 0, 0);
 
-    // Frame group fallback chain: flying mobs expose fly/0 instead of stand/0; body-attack-only
-    // mobs may only have hit1/0. Covers every common Mob.wz frame that carries an lt/rb pair.
-    private static final String[] FRAME_GROUP_FALLBACK = {"stand", "move", "fly", "hit1", "attack1", "attack2"};
+    // Frame group fallback chain: body-pose groups only. Attack/hit frames can embed weapon
+    // swing extents (e.g. mob 8500003's attack1 lt/rb covers a 130x100 weapon arc), so using
+    // those would inflate the body rect. Flying mobs expose fly/0 instead of stand/0.
+    private static final String[] FRAME_GROUP_FALLBACK = {"stand", "move", "fly"};
 
     private final Map<Integer, Rectangle> boundsByMobId = new ConcurrentHashMap<>();
     private volatile Path cachedMobRoot = null;
