@@ -293,6 +293,7 @@ class BotMovementManager {
     static void tickAirborne(BotEntry entry, Point targetPos) {
         long startedAt = System.nanoTime();
         try {
+            entry.swimming = false;
             BotPhysicsEngine.tickMotionTimers(entry);
 
             Character bot = entry.bot;
@@ -382,9 +383,21 @@ class BotMovementManager {
                 && entry.navEdge.launchStepX != 0);
     }
 
+    static void tickSwimming(BotEntry entry, Point targetPos) {
+        long startedAt = System.nanoTime();
+        try {
+            BotPhysicsEngine.tickMotionTimers(entry);
+            BotPhysicsEngine.applySwimMotion(entry, targetPos);
+            broadcastMovement(entry);
+        } finally {
+            BotPerformanceMonitor.record("move-swim", System.nanoTime() - startedAt);
+        }
+    }
+
     static void tickGrounded(BotEntry entry, Point targetPos) {
         long startedAt = System.nanoTime();
         try {
+            entry.swimming = false;
             Character bot = entry.bot;
 
             BotPhysicsEngine.tickMotionTimers(entry);

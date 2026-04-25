@@ -12,6 +12,8 @@ public final class CharacterStance {
     public static final int PRONE_RIGHT_STANCE = 10;
     public static final int PRONE_LEFT_STANCE = 11;
     public static final int PRONE_STANCE = PRONE_RIGHT_STANCE;
+    public static final int SWIM_RIGHT_STANCE = 12;
+    public static final int SWIM_LEFT_STANCE = 13;
     public static final int LADDER_STANCE = 15;
     public static final int ROPE_STANCE = 16;
     public static final int DEAD_RIGHT_STANCE = 18;
@@ -25,7 +27,12 @@ public final class CharacterStance {
                 || stance == STAND_LEFT_STANCE
                 || stance == JUMP_LEFT_STANCE
                 || stance == PRONE_LEFT_STANCE
+                || stance == SWIM_LEFT_STANCE
                 || stance == DEAD_LEFT_STANCE;
+    }
+
+    public static boolean isSwimming(int stance) {
+        return stance == SWIM_RIGHT_STANCE || stance == SWIM_LEFT_STANCE;
     }
 
     public static boolean isStanding(int stance) {

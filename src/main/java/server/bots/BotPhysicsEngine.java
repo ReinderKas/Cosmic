@@ -44,6 +44,18 @@ final class BotPhysicsEngine {
         public int MAX_SNAP_DROP = 16;
         public int MAX_SLOPE_UP = 26;
         public int DOWN_JUMP_GRACE_MS = 350;
+
+        // Swim physics — derived from wasm Physics.cpp constants
+        // (SWIMGRAVFORCE=0.03 vs GRAVFORCE=0.14, SWIMFRICTION=0.08 per tick at 50ms = 1.6/s).
+        // Initial values are first-pass derivations; calibrate against real-client
+        // CP_USER_MOVE captures in Aqua Road and update these constants in place.
+        public float SWIM_VEL_PXS = 125.0f;          // horizontal cruise (defaults to walk speed)
+        public float SWIM_VEL_VERT_PXS = 125.0f;     // vertical cruise
+        public float SWIM_GRAVITY_PXS2 = 428.0f;     // 2000 * (0.03 / 0.14): weak downward pull underwater
+        public float SWIM_FRICTION_HZ = 1.6f;        // applied symmetrically to vx, vy each second
+        public float SWIM_ACCEL_PXS2 = 600.0f;       // how hard the bot pushes toward target (≈0.2s to cruise)
+        public float SWIM_MAX_SPEED_PXS = 250.0f;    // hard cap on either axis
+        public int SWIM_ARRIVAL_RADIUS_PX = 8;       // stop pushing when within this many px on both axes
     }
 
     record GroundMotion(int stepX, boolean lostGround) {
@@ -919,6 +931,87 @@ final class BotPhysicsEngine {
         return new Point((int) Math.round(entry.physX), (int) Math.round(entry.physY));
     }
 
+    static void applySwimMotion(BotEntry entry, Point targetPos) {
+        Character bot = entry.bot;
+        MapleMap map = bot.getMap();
+        Point pos = bot.getPosition();
+        double t = tickS();
+
+        // Desired velocity from arrival vector — zero when within arrival radius on both axes.
+        double dx = 0.0;
+        double dy = 0.0;
+        if (targetPos != null) {
+            int rx = targetPos.x - pos.x;
+            int ry = targetPos.y - pos.y;
+            int radius = cfg.SWIM_ARRIVAL_RADIUS_PX;
+            if (Math.abs(rx) > radius || Math.abs(ry) > radius) {
+                double mag = Math.sqrt((double) rx * rx + (double) ry * ry);
+                if (mag > 0.0) {
+                    dx = rx / mag * cfg.SWIM_VEL_PXS;
+                    dy = ry / mag * cfg.SWIM_VEL_VERT_PXS;
+                }
+            }
+        }
+
+        // Approach target velocity at SWIM_ACCEL_PXS2.
+        double accelStep = cfg.SWIM_ACCEL_PXS2 * t;
+        double vx = entry.hspeed + clampMagnitude(dx - entry.hspeed, accelStep);
+        double vy = entry.velY + clampMagnitude(dy - entry.velY, accelStep);
+
+        // Symmetric water drag.
+        double dragRetention = Math.max(0.0, 1.0 - cfg.SWIM_FRICTION_HZ * t);
+        vx *= dragRetention;
+        vy *= dragRetention;
+
+        // Weak gravity (bot sinks slightly when idle).
+        vy += cfg.SWIM_GRAVITY_PXS2 * t;
+
+        // Speed cap on each axis.
+        vx = Math.max(-cfg.SWIM_MAX_SPEED_PXS, Math.min(cfg.SWIM_MAX_SPEED_PXS, vx));
+        vy = Math.max(-cfg.SWIM_MAX_SPEED_PXS, Math.min(cfg.SWIM_MAX_SPEED_PXS, vy));
+
+        double nextX = entry.physX + vx * t;
+        double nextY = entry.physY + vy * t;
+
+        // Floor clamp via foothold tree.
+        Point floor = map.getPointBelow(new Point((int) Math.round(nextX), (int) Math.round(nextY)));
+        if (floor != null && nextY > floor.y) {
+            nextY = floor.y;
+            if (vy > 0.0) {
+                vy = 0.0;
+            }
+        }
+
+        entry.hspeed = vx;
+        entry.velY = (float) vy;
+        entry.physX = nextX;
+        entry.physY = nextY;
+        entry.swimming = true;
+        entry.inAir = false;
+        entry.crouching = false;
+        entry.movementVelX = (int) Math.round(vx);
+        entry.movementVelY = (int) Math.round(vy);
+        if (targetPos != null) {
+            int rx = targetPos.x - pos.x;
+            if (rx > cfg.SWIM_ARRIVAL_RADIUS_PX) {
+                entry.facingDir = 1;
+            } else if (rx < -cfg.SWIM_ARRIVAL_RADIUS_PX) {
+                entry.facingDir = -1;
+            }
+        }
+        bot.setPosition(new Point((int) Math.round(nextX), (int) Math.round(nextY)));
+    }
+
+    private static double clampMagnitude(double value, double maxAbs) {
+        if (value > maxAbs) {
+            return maxAbs;
+        }
+        if (value < -maxAbs) {
+            return -maxAbs;
+        }
+        return value;
+    }
+
     static void applyAirSteering(BotEntry entry, int targetDx) {
         if (targetDx == 0) return;
         double accel = targetDx > 0 ? cfg.AIR_STEER_ACCEL : -cfg.AIR_STEER_ACCEL;
@@ -1022,6 +1115,9 @@ final class BotPhysicsEngine {
             return entry.climbRope != null && entry.climbRope.isLadder()
                     ? CharacterStance.LADDER_STANCE
                     : CharacterStance.ROPE_STANCE;
+        }
+        if (entry.swimming) {
+            return entry.facingDir >= 0 ? CharacterStance.SWIM_RIGHT_STANCE : CharacterStance.SWIM_LEFT_STANCE;
         }
         if (entry.crouching) {
             return entry.facingDir >= 0 ? CharacterStance.PRONE_RIGHT_STANCE : CharacterStance.PRONE_LEFT_STANCE;

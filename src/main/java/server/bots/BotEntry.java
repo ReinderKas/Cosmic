@@ -42,6 +42,7 @@ public class BotEntry {
     int movementVelY = 0;
     int facingDir = 1;
     boolean crouching = false;
+    boolean swimming = false;
 
     // Rope climbing
     boolean climbing = false;

@@ -1253,6 +1253,8 @@ public class BotManager {
                 if (!pqNav.consumedTick) {
                     if (entry.climbing) {
                         BotMovementManager.tickClimbing(entry, pqNav.targetPos, runAiTick);
+                    } else if (isSwimMap(entry)) {
+                        BotMovementManager.tickSwimming(entry, pqNav.targetPos);
                     } else if (entry.inAir) {
                         BotMovementManager.tickAirborne(entry, pqNav.targetPos);
                     } else {
@@ -1279,6 +1281,9 @@ public class BotManager {
                     // No mob in seek range — drift toward the nearby coupon drop instead of idling.
                     targetPos = entry.kpq.navTarget;
                     // falls through to stepMovementCore below
+                } else if (isSwimMap(entry)) {
+                    BotMovementManager.tickSwimming(entry, targetPos);
+                    return;
                 } else if (entry.inAir) {
                     BotMovementManager.tickAirborne(entry, targetPos);
                     return;
@@ -1402,7 +1407,9 @@ public class BotManager {
         if (entry.following || entry.grinding || entry.moveTarget != null) {
             return false;
         }
-        if (entry.inAir) {
+        if (isSwimMap(entry) && !entry.climbing) {
+            BotMovementManager.tickSwimming(entry, null);
+        } else if (entry.inAir) {
             BotMovementManager.tickAirborne(entry, null);
         } else if (!entry.climbing) {
             int expectedIdleStance = BotPhysicsEngine.resolveIdleGroundStance(entry);
@@ -1582,11 +1589,17 @@ public class BotManager {
     private void tickMovementPhase(BotEntry entry, Point targetPos, boolean runAiTick) {
         if (entry.climbing) {
             BotMovementManager.tickClimbing(entry, targetPos, runAiTick);
+        } else if (isSwimMap(entry)) {
+            BotMovementManager.tickSwimming(entry, targetPos);
         } else if (entry.inAir) {
             BotMovementManager.tickAirborne(entry, targetPos);
         } else {
             BotMovementManager.tickGrounded(entry, targetPos);
         }
+    }
+
+    private static boolean isSwimMap(BotEntry entry) {
+        return entry.bot != null && entry.bot.getMap() != null && entry.bot.getMap().isSwim();
     }
 
     private void clearReachedMoveTarget(BotEntry entry) {
@@ -1650,7 +1663,9 @@ public class BotManager {
         if (entry.attackCooldownMs <= 0) {
             return false;
         }
-        if (entry.inAir) {
+        if (isSwimMap(entry) && !entry.climbing) {
+            BotMovementManager.tickSwimming(entry, null);
+        } else if (entry.inAir) {
             BotMovementManager.tickAirborne(entry, null);
         }
         return true;
