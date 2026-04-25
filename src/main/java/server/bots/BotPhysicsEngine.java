@@ -937,6 +937,21 @@ final class BotPhysicsEngine {
         Point pos = bot.getPosition();
         double t = tickS();
 
+        // First tick after entering swim mode: rebase the integrator on the bot's
+        // authoritative position and discard land-mode velocity carried in from the
+        // prior map / grounded state.
+        if (!entry.swimming) {
+            entry.physX = pos.x;
+            entry.physY = pos.y;
+            entry.hspeed = 0.0;
+            entry.velY = 0f;
+            entry.airVelX = 0;
+            entry.airSteerVelX = 0.0;
+            entry.fixedAirArc = false;
+            entry.downJumpPending = false;
+            entry.downJumpGracePeriodMS = 0L;
+        }
+
         // Desired velocity from arrival vector — zero when within arrival radius on both axes.
         double dx = 0.0;
         double dy = 0.0;
