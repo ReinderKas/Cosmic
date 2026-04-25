@@ -367,25 +367,26 @@ class BotEquipManager {
     /** Returns the equipped slot(s) that match the given slot name from chat. Empty array = unknown. */
     static short[] slotsFromName(String name) {
         return switch (name.trim().toLowerCase().replaceAll("\\s+", "")) {
-            case "weapon", "wep" -> new short[]{-11};
-            case "shield", "offhand" -> new short[]{-10};
-            case "cape" -> new short[]{-9};
             case "hat", "helm", "helmet" -> new short[]{-1};
-            case "top", "shirt" -> new short[]{-8};
-            case "bottom", "pants" -> new short[]{-5};
-            case "ear", "earring", "earrings" -> new short[]{-4}; // untested
+            case "face", "faceacc", "faceaccessory" -> new short[]{-2};
+            case "eye", "eyeacc", "eyeaccessory", "eyepiece" -> new short[]{-3};
+            case "ear", "earring", "earrings" -> new short[]{-4};
+            case "top", "shirt", "overall" -> new short[]{-5};
+            case "bottom", "pants" -> new short[]{-6};
             case "shoes", "boots" -> new short[]{-7};
-            case "glove", "gloves" -> new short[]{-6};
-            case "face", "faceacc", "faceaccessory" -> new short[]{-3};
-            case "eye", "eyeacc", "eyeaccessory", "eyepiece" -> new short[]{-2};
+            case "glove", "gloves" -> new short[]{-8};
+            case "cape" -> new short[]{-9};
+            case "shield", "offhand" -> new short[]{-10};
+            case "weapon", "wep" -> new short[]{-11};
             case "ring" -> RING_SLOTS.clone();
             case "ring1" -> new short[]{-12};
             case "ring2" -> new short[]{-13};
             case "ring3" -> new short[]{-15};
             case "ring4" -> new short[]{-16};
+            case "petwear" -> new short[]{-14};
             case "pendant" -> new short[]{-17};
-            case "medal" -> new short[]{-20};
-            case "belt" -> new short[]{-21};
+            case "medal" -> new short[]{-21};
+            case "belt" -> new short[]{-22};
             default -> new short[0];
         };
     }
