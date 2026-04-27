@@ -294,6 +294,94 @@ public final class CombatFormulaProvider {
         }
     }
 
+    /**
+     * Deterministic counterpart to {@link #makeTarget}: estimates the total damage the bot should
+     * deal to one monster after character modifiers, elemental effects, accuracy, crits, Shadow
+     * Partner, and monster defense. Used by bot planning so skill choice is based on expected output
+     * instead of raw skill percentages.
+     */
+    public double estimateExpectedDamage(Character bot, Monster monster, int hits, int skillId,
+                                         DamageProfile damageProfile) {
+        int normalizedHits = Math.max(0, hits);
+        if (normalizedHits == 0 || damageProfile == null) {
+            return 0.0d;
+        }
+        if (damageProfile.alwaysHit()) {
+            return averageDamage(damageProfile.minDamage(), damageProfile.maxDamage()) * normalizedHits;
+        }
+
+        long rawMin = applyCharacterDamageModifiers(damageProfile.minDamage(), bot, skillId);
+        long rawMax = applyCharacterDamageModifiers(damageProfile.maxDamage(), bot, skillId);
+        boolean elementalResetActive = bot.getBuffedValue(BuffStat.ELEMENTAL_RESET) != null;
+        rawMax = applySkillElementalMultiplier(rawMax, skillId, monster, elementalResetActive);
+        rawMin = applySkillElementalMultiplier(rawMin, skillId, monster, elementalResetActive);
+        if (skillId != 0 && !elementalResetActive && monster != null) {
+            Skill elemSkill = SkillFactory.getSkill(skillId);
+            if (elemSkill != null && elemSkill.getElement() != Element.NEUTRAL
+                    && monster.getElementalEffectiveness(elemSkill.getElement()) == ElementalEffectiveness.STRONG) {
+                rawMax = Math.max(1, rawMax / 2);
+                rawMin = Math.max(1, rawMin / 2);
+            }
+        }
+        rawMax = applyWkChargeElementalBonus(rawMax, bot, monster);
+        rawMin = applyWkChargeElementalBonus(rawMin, bot, monster);
+
+        int modMax = (int) Math.min(Integer.MAX_VALUE, rawMax);
+        int modMin = (int) Math.min(modMax, Math.max(1, (int) rawMin));
+        int[] adjustedDamage = applyMonsterDefense(bot, monster, modMin, modMax, damageProfile.magicAttack());
+        double hitChance = calculateMobHitChance(bot, monster, damageProfile.magicAttack());
+        boolean shadowPartner = normalizedHits > 1 && bot.getBuffEffect(BuffStat.SHADOWPARTNER) != null;
+        if (damageProfile.magicAttack()) {
+            if (shadowPartner) {
+                int mainHits = normalizedHits / 2;
+                int partnerHits = normalizedHits - mainHits;
+                double mainAverage = averageDamage(adjustedDamage[0], adjustedDamage[1]);
+                double partnerAverage = averageDamage(Math.max(1, Math.min(adjustedDamage[1] / 2, adjustedDamage[0] / 2)),
+                        Math.max(1, adjustedDamage[1] / 2));
+                return hitChance * (mainAverage * mainHits + partnerAverage * partnerHits);
+            }
+            return hitChance * averageDamage(adjustedDamage[0], adjustedDamage[1]) * normalizedHits;
+        }
+
+        CritProfile crit = resolveCritProfile(bot);
+        if (skillId == Buccaneer.BARRAGE || skillId == ThunderBreaker.BARRAGE) {
+            double total = 0.0d;
+            for (int j = 0; j < normalizedHits; j++) {
+                int scaledMin = adjustedDamage[0];
+                int scaledMax = adjustedDamage[1];
+                if (j > 3) {
+                    int factor = 1 << (j - 3);
+                    scaledMax = (int) Math.min(Integer.MAX_VALUE, (long) adjustedDamage[1] * factor);
+                    scaledMin = (int) Math.min(scaledMax, (long) adjustedDamage[0] * factor);
+                }
+                total += expectedPhysicalLineDamage(scaledMin, scaledMax, hitChance, crit);
+            }
+            return total;
+        }
+        if (shadowPartner) {
+            int mainHits = normalizedHits / 2;
+            int partnerHits = normalizedHits - mainHits;
+            int partnerMax = Math.max(1, adjustedDamage[1] / 2);
+            int partnerMin = Math.max(1, Math.min(partnerMax, adjustedDamage[0] / 2));
+            return expectedPhysicalLineDamage(adjustedDamage[0], adjustedDamage[1], hitChance, crit) * mainHits
+                    + expectedPhysicalLineDamage(partnerMin, partnerMax, hitChance, crit) * partnerHits;
+        }
+        return expectedPhysicalLineDamage(adjustedDamage[0], adjustedDamage[1], hitChance, crit) * normalizedHits;
+    }
+
+    private double expectedPhysicalLineDamage(int minDamage, int maxDamage, double hitChance, CritProfile crit) {
+        double average = averageDamage(minDamage, maxDamage);
+        double critChance = Math.max(0.0d, Math.min(1.0d, crit.critChance()));
+        double critMultiplier = Math.max(1.0d, crit.critMultiplier());
+        return hitChance * average * (1.0d + critChance * (critMultiplier - 1.0d));
+    }
+
+    private double averageDamage(int minDamage, int maxDamage) {
+        int normalizedMin = Math.max(0, minDamage);
+        int normalizedMax = Math.max(normalizedMin, maxDamage);
+        return (normalizedMin + normalizedMax) / 2.0d;
+    }
+
     private AbstractDealDamageHandler.AttackTarget rollWithShadowPartnerPhysical(
             int hits, int[] adjustedDamage, double hitChance, CritProfile crit, int normalizedHitDelay) {
         int mainHits = hits / 2;

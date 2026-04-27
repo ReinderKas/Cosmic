@@ -425,7 +425,7 @@ class BotCombatManager {
         int bestAtkHits = 0;
         int bestAtkPriority = Integer.MIN_VALUE;
         int bestAtkDamage = Integer.MIN_VALUE;
-        int bestAoeScore = 0;
+        long bestAoeScore = 0;
 
         for (Skill skill : bot.getSkills().keySet()) {
             int lvl = bot.getSkillLevel(skill);
@@ -443,7 +443,7 @@ class BotCombatManager {
 
             if (fx.getDamage() > 0 && !fx.isOverTime()) {  // damage > 0 identifies damaging skills
                 if (mobs >= 2) {
-                    int score = mobs * atk;
+                    long score = (long) Math.max(0, fx.getDamage()) * Math.max(1, atk) * Math.max(1, mobs);
                     if (score > bestAoeScore) {
                         bestAoeScore = score;
                         entry.aoeSkillId = skill.getId();
@@ -751,27 +751,68 @@ class BotCombatManager {
     static AttackPlan planAttack(BotEntry entry, Character bot, Monster target) {
         long startedAt = System.nanoTime();
         try {
+            List<AttackPlan> candidates = new ArrayList<>(3);
+
             AttackPlan aoeAttack = planAoeAttack(entry, bot, target);
             if (aoeAttack != null) {
-                return aoeAttack;
+                candidates.add(aoeAttack);
             }
 
             AttackPlan skillAttack = planSingleTargetSkill(entry, bot, target);
             if (skillAttack != null) {
-                return skillAttack;
+                candidates.add(skillAttack);
             }
 
-            BotAttackExecutionProvider.BasicAttackData basicAttackData = buildBasicAttackData(bot, target);
-            Monster effective = resolveEffectivePrimary(bot, target, basicAttackData.hitBox());
-            if (effective != target) {
-                basicAttackData = buildBasicAttackData(bot, effective);
-            }
-            return new AttackPlan(0, 0, 1, basicAttackData.hitBox(), List.of(effective), basicAttackData.route(),
-                    basicAttackData.display(), basicAttackData.direction(), basicAttackData.rangedDirection(), basicAttackData.stance(),
-                    basicAttackData.speed(), basicAttackData.hitDelayMs(), basicAttackData.cooldownMs());
+            candidates.add(planBasicAttack(bot, target));
+            return selectHighestDamagePlan(bot, candidates);
         } finally {
             BotPerformanceMonitor.record("combat-plan", System.nanoTime() - startedAt);
         }
+    }
+
+    private static AttackPlan planBasicAttack(Character bot, Monster target) {
+        BotAttackExecutionProvider.BasicAttackData basicAttackData = buildBasicAttackData(bot, target);
+        Monster effective = resolveEffectivePrimary(bot, target, basicAttackData.hitBox());
+        if (effective != target) {
+            basicAttackData = buildBasicAttackData(bot, effective);
+        }
+        return new AttackPlan(0, 0, 1, basicAttackData.hitBox(), List.of(effective), basicAttackData.route(),
+                basicAttackData.display(), basicAttackData.direction(), basicAttackData.rangedDirection(), basicAttackData.stance(),
+                basicAttackData.speed(), basicAttackData.hitDelayMs(), basicAttackData.cooldownMs());
+    }
+
+    private static AttackPlan selectHighestDamagePlan(Character bot, List<AttackPlan> candidates) {
+        AttackPlan best = null;
+        double bestDamage = Double.NEGATIVE_INFINITY;
+        for (AttackPlan candidate : candidates) {
+            double damage = estimatePlanDamage(bot, candidate);
+            if (best == null
+                    || damage > bestDamage
+                    || (Double.compare(damage, bestDamage) == 0 && isBetterTieBreak(candidate, best))) {
+                best = candidate;
+                bestDamage = damage;
+            }
+        }
+        return best;
+    }
+
+    private static boolean isBetterTieBreak(AttackPlan candidate, AttackPlan currentBest) {
+        if (candidate.cooldownMs != currentBest.cooldownMs) {
+            return candidate.cooldownMs < currentBest.cooldownMs;
+        }
+        return candidate.skillId < currentBest.skillId;
+    }
+
+    private static double estimatePlanDamage(Character bot, AttackPlan attackPlan) {
+        CombatFormulaProvider.DamageProfile damageProfile = CombatFormulaProvider.getInstance().resolveDamageProfile(
+                bot, attackPlan.skillId, attackPlan.skillLevel,
+                attackPlan.route == AttackRoute.MAGIC);
+        double total = 0.0d;
+        for (Monster target : attackPlan.targets) {
+            total += CombatFormulaProvider.getInstance().estimateExpectedDamage(bot, target, attackPlan.numDamage,
+                    attackPlan.skillId, damageProfile);
+        }
+        return total;
     }
 
     static boolean isTargetInAttackRange(AttackPlan attackPlan, Character bot, Monster target) {
@@ -900,9 +941,6 @@ class BotCombatManager {
         }
 
         int attackCount = Math.max(1, effect.getAttackCount());
-        if (!beatsSingleTargetScore(bot, entry, effect, attackCount, targets.size())) {
-            return null;
-        }
         WeaponType weaponType = BotAttackExecutionProvider.getEquippedWeaponType(bot);
         if (!BotAttackExecutionProvider.canUseRangedAttackRoute(route, weaponType, bot.getPosition(), primaryTarget.getPosition())) {
             return null;

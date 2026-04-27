@@ -4,6 +4,7 @@ import client.BuffStat;
 import client.Character;
 import client.Job;
 import client.Skill;
+import client.SkillFactory;
 import client.inventory.Inventory;
 import client.inventory.InventoryType;
 import client.inventory.WeaponType;
@@ -144,6 +145,37 @@ class BotCombatManagerTest {
 
         assertEquals(Warrior.POWER_STRIKE, entry.attackSkillId);
         assertEquals(Warrior.SLASH_BLAST, entry.aoeSkillId);
+    }
+
+    @Test
+    void shouldChooseSingleTargetSkillWhenMobDefenseCollapsesLowDamageAoeLines() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mockBot(new Point(100, 200), map, 20_000, null);
+        Skill powerStrike = skillWithAttack(Warrior.POWER_STRIKE, 1, 1, 260);
+        Skill slashBlast = skillWithAttack(Warrior.SLASH_BLAST, 6, 6, 20);
+        Monster primary = mockMob(new Point(140, 200), 9300100);
+        Monster secondary = mockMob(new Point(150, 200), 9300101);
+        when(primary.getWdef()).thenReturn(500);
+        when(secondary.getWdef()).thenReturn(500);
+        when(map.getAllMonsters()).thenReturn(List.of(primary, secondary));
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skill.getId() == powerStrike.getId() || skill.getId() == slashBlast.getId() ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.attackSkillId = powerStrike.getId();
+        entry.aoeSkillId = slashBlast.getId();
+
+        try (MockedStatic<SkillFactory> skillFactory = Mockito.mockStatic(SkillFactory.class)) {
+            skillFactory.when(() -> SkillFactory.getSkill(powerStrike.getId())).thenReturn(powerStrike);
+            skillFactory.when(() -> SkillFactory.getSkill(slashBlast.getId())).thenReturn(slashBlast);
+
+            BotCombatManager.AttackPlan plan = BotCombatManager.planAttack(entry, bot, primary);
+
+            assertEquals(Warrior.POWER_STRIKE, plan.skillId);
+            assertEquals(List.of(primary), plan.targets);
+        }
     }
 
     @Test
@@ -505,6 +537,11 @@ class BotCombatManagerTest {
         when(bot.getTotalDex()).thenReturn(4);
         when(bot.getTotalInt()).thenReturn(4);
         when(bot.getTotalLuk()).thenReturn(4);
+        when(bot.getTotalWatk()).thenReturn(100);
+        when(bot.getEnergyBar()).thenReturn(0);
+        when(bot.getAllBuffs()).thenReturn(Collections.emptyList());
+        when(bot.calculateMaxBaseDamage(anyInt())).thenReturn(1_000);
+        when(bot.calculateMinBaseDamage(anyInt())).thenReturn(500);
         when(bot.getInventory(InventoryType.EQUIPPED)).thenReturn(equipped);
         when(equipped.getItem((short) -11)).thenReturn(null);
         when(equipped.iterator()).thenReturn(Collections.emptyIterator());
@@ -518,9 +555,13 @@ class BotCombatManagerTest {
         Monster mob = mock(Monster.class);
         when(mob.getPosition()).thenReturn(new Point(position));
         when(mob.getId()).thenReturn(id);
+        when(mob.getObjectId()).thenReturn(id);
         when(mob.getPADamage()).thenReturn(1_000);
         when(mob.getLevel()).thenReturn(1);
         when(mob.getAccuracy()).thenReturn(9_999);
+        when(mob.getAvoidability()).thenReturn(0);
+        when(mob.getWdef()).thenReturn(0);
+        when(mob.getMdef()).thenReturn(0);
         when(mob.isAlive()).thenReturn(true);
         return mob;
     }
@@ -533,6 +574,7 @@ class BotCombatManagerTest {
         when(effect.getDamage()).thenReturn(damage);
         when(effect.getDuration()).thenReturn(0);
         when(effect.getMpCon()).thenReturn((short) 1);
+        when(effect.canPaySkillCost(any(Character.class))).thenReturn(true);
         skill.addLevelEffect(effect);
         return skill;
     }
