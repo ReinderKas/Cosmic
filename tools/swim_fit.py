@@ -127,6 +127,10 @@ def main():
     upheld_rows = load_log(os.path.join(LOG_DIR, "monitored-packets-swim-burst-upheld.log"))
     downheld_rows = load_log(os.path.join(LOG_DIR, "monitored-packets-swim-downheld.log"))
     upheldonly_rows = load_log(os.path.join(LOG_DIR, "monitored-packets-swim-upheld.log"))
+    # toleft logs add LEFT-held swim samples (more burst arcs).
+    # toleft = LEFT held only; toleft-upheld = LEFT+UP held.
+    toleft_rows = load_log(os.path.join(LOG_DIR, "monitored-packets-swim-toleft.log"))
+    toleft_up_rows = load_log(os.path.join(LOG_DIR, "monitored-packets-swim-toleft-upheld.log"))
 
     # Build dataset: each row is (label, vy0, dur_seconds, vy_endpoint, dy)
     # Carefully extract burst-arc segments from packets.
@@ -185,8 +189,10 @@ def main():
     upheld_arcs = extract_burst_arcs(upheld_rows, "upheld")
     downheld_terms = extract_steady_terminals(downheld_rows, "downheld")
     upheldonly_arcs = extract_burst_arcs(upheldonly_rows, "upheld")
-    print(f"burst arcs: {len(burst_arcs)}")
-    print(f"upheld arcs: {len(upheld_arcs) + len(upheldonly_arcs)}")
+    toleft_arcs = extract_burst_arcs(toleft_rows, "burst")
+    toleft_up_arcs = extract_burst_arcs(toleft_up_rows, "upheld")
+    print(f"burst arcs: {len(burst_arcs) + len(toleft_arcs)}")
+    print(f"upheld arcs: {len(upheld_arcs) + len(upheldonly_arcs) + len(toleft_up_arcs)}")
     print(f"downheld terminals: {len(downheld_terms)}")
 
     print("\n=== Sample burst arcs ===")
@@ -209,6 +215,10 @@ def main():
     for a in upheld_arcs:
         rows_dataset.append(("upheld", a["vy0"], a["dur"], a["vy_end"], None))
     for a in upheldonly_arcs:
+        rows_dataset.append(("upheld", a["vy0"], a["dur"], a["vy_end"], None))
+    for a in toleft_arcs:
+        rows_dataset.append(("burst", a["vy0"], a["dur"], a["vy_end"], None))
+    for a in toleft_up_arcs:
         rows_dataset.append(("upheld", a["vy0"], a["dur"], a["vy_end"], None))
 
     # Steady-state terminal observations as zero-derivative constraints:

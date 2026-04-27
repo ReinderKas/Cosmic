@@ -122,6 +122,7 @@ public class BotManager {
             "\\btransfer\\s+(\\S+)(?:\\s+to)?\\s+(\\S+)\\b", Pattern.CASE_INSENSITIVE);
     private static final int MIN_PREFIX_TARGET_LENGTH = 2;
     private static final int MAX_NUMERIC_TARGET_SLOT = 5;
+    private static final int PLATFORM_EDGE_INSET_PX = 12;
 
     record BotTransferCommand(String botName, String targetName) {}
 
@@ -1063,7 +1064,19 @@ public class BotManager {
                         }
                         return new Point(nearestRope.minX, ownerPos.y);
                     } else {
-                        int clampedX = Math.max(ownerRegion.minX, Math.min(ownerRegion.maxX, targetX));
+                        // Inset by a small margin so the bot doesn't aim at the
+                        // exact platform edge — owner's hit-region extends past
+                        // the foothold endpoints, but the bot needs a real
+                        // standing surface under its feet, and the integrator
+                        // routinely overshoots edges by 1-2 px in swim maps.
+                        int edgeMargin = PLATFORM_EDGE_INSET_PX;
+                        int minX = ownerRegion.minX;
+                        int maxX = ownerRegion.maxX;
+                        if (maxX - minX > 2 * edgeMargin) {
+                            minX += edgeMargin;
+                            maxX -= edgeMargin;
+                        }
+                        int clampedX = Math.max(minX, Math.min(maxX, targetX));
                         return ownerRegion.pointAt(clampedX);
                     }
                 }
