@@ -1866,6 +1866,14 @@ public class BotManager {
             BotMovementManager.tickSwimming(entry, null);
         } else if (entry.inAir) {
             BotMovementManager.tickAirborne(entry, null);
+        } else if (!entry.climbing) {
+            // Ground physics must keep ticking during attack lock so prior walk momentum decays
+            // via friction, walk-offs trigger falls, and broadcastMovement updates stance from
+            // WALK→STAND. Without this the client extrapolates the last walk packet for the
+            // entire animation lock and the bot visibly "walks in place" until cooldown ends.
+            // External forces (mob knockback) replace this state via applyAirKnockback /
+            // beginKnockback before this tick runs, so passing null target is safe.
+            BotMovementManager.tickGrounded(entry, null);
         }
         return true;
     }
