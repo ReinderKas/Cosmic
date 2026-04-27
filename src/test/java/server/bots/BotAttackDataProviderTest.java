@@ -54,8 +54,7 @@ class BotAttackDataProviderTest {
         assertTrue(rawActionDurationMs > 0);
         assertTrue(rawActionHitDelayMs >= 0);
         assertEquals(adjustedDelay(rawActionHitDelayMs), timing.hitDelayMs());
-        assertEquals(Math.max(BotMovementManager.delayAfterCurrentTick(adjustedDelay(rawActionDurationMs)), 590),
-                timing.cooldownMs());
+        assertEquals(Math.max(adjustedDelay(rawActionDurationMs), 590), timing.cooldownMs());
     }
 
     @Test
@@ -74,8 +73,24 @@ class BotAttackDataProviderTest {
         assertTrue(rawStanceDurationMs > 0);
         assertTrue(rawStanceHitDelayMs > 0);
         assertEquals(adjustedDelay(rawStanceHitDelayMs), timing.hitDelayMs());
-        assertEquals(BotMovementManager.delayAfterCurrentTick(adjustedDelay(rawStanceDurationMs)),
-                timing.cooldownMs());
+        assertEquals(adjustedDelay(rawStanceDurationMs), timing.cooldownMs());
+    }
+
+    @Test
+    void shouldUseFullRegularAttackCooldownForSkillsSharingBasicAttackAnimation() {
+        BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
+        int rawShootDurationMs = provider.getBodyStanceDurationMs("shoot1");
+        int rawClawDurationMs = provider.getBodyStanceDurationMs("swingO1");
+
+        BotAttackExecutionProvider.SkillAttackTiming doubleShotTiming =
+                BotAttackExecutionProvider.resolveSkillAttackTiming("shoot1", null, 0, 4, 0, 0);
+        BotAttackExecutionProvider.SkillAttackTiming luckySevenTiming =
+                BotAttackExecutionProvider.resolveSkillAttackTiming("swingO1", null, 0, 4, 0, 0);
+
+        assertTrue(rawShootDurationMs > 0);
+        assertTrue(rawClawDurationMs > 0);
+        assertEquals(adjustedDelay(rawShootDurationMs), doubleShotTiming.cooldownMs());
+        assertEquals(adjustedDelay(rawClawDurationMs), luckySevenTiming.cooldownMs());
     }
 
     private static int adjustedDelay(int rawDelayMs) {

@@ -333,7 +333,7 @@ class BotCombatManagerTest {
                 BotAttackExecutionProvider.resolveSkillAttackTiming(520, 2, 120, 0);
 
         assertEquals(173, timing.hitDelayMs());
-        assertEquals(BotMovementManager.delayAfterCurrentTick(347), timing.cooldownMs());
+        assertEquals(347, timing.cooldownMs());
     }
 
     @Test

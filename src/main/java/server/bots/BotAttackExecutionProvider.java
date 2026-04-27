@@ -485,7 +485,11 @@ final class BotAttackExecutionProvider {
     }
 
     private static int toCooldownMs(int attackDelayMillis) {
-        return BotMovementManager.delayAfterCurrentTick(Math.max(0, attackDelayMillis));
+        // Attack cooldown is assigned after BotCombatManager.tickActionLock() has already
+        // consumed this server tick. Do not subtract TICK_MS here, or the next AI pass can
+        // start a new attack on the same tick the previous animation expires, skipping the
+        // short stand/recovery frame a real client shows between attacks.
+        return Math.max(0, attackDelayMillis);
     }
 
     private static int defaultHitDelayMs(int animationDelayMs) {
