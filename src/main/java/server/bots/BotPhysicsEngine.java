@@ -60,27 +60,22 @@ final class BotPhysicsEngine {
         // via scipy differential_evolution. Quadratic drag term tested but
         // converged to zero. Re-run after collecting more packet captures.
         //
-        // Best fit (residual SS ≈ 62k, ~25 px/s typical error per sample):
-        //   g = 794.5, k = 3.335 /s, UP_thrust = 508.7
-        //   UP-held terminal sink  = 86 px/s   (matches "slow descent")
-        //   no-key terminal sink   = 238 px/s   (model overshoots obs 140
-        //                                        — likely IDB CalcFloat
-        //                                        has v-dependent term not
-        //                                        captured by linear drag)
-        //   DOWN-held terminal cap = 210 px/s   (enforced by sinkCap; fit
-        //                                        DOWN_thrust = 0 = no
-        //                                        additional thrust term)
-        public float SWIM_GRAVITY_PXS2 = 940.0f;
-        public float SWIM_FRICTION_HZ = 3.28f;
+        // Packet terminal sinks from monitored-packets-swim{,-upheld,-downheld}.log:
+        //   no-key  = 140 px/s, UP-held = 42 px/s, DOWN-held = 210 px/s.
+        // Keep these as explicit caps; the fitted acceleration/drag model only
+        // controls how quickly the bot approaches the packet-observed terminal.
+        public float SWIM_GRAVITY_PXS2 = 590.0f;
+        public float SWIM_FRICTION_HZ = 4.21f;
         public float SWIM_ACCEL_PXS2 = 600.0f;       // horizontal accel (not yet calibrated)
         public float SWIM_MAX_SPEED_PXS = 800.0f;
         public int SWIM_ARRIVAL_RADIUS_PX = 8;
 
         public float SWIM_JUMP_BURST_PXS = 1000.0f;
-        public float SWIM_UP_THRUST_PXS2 = 602.0f;
-        public float SWIM_DOWN_THRUST_PXS2 = 0.0f;
+        public float SWIM_UP_THRUST_PXS2 = 412.0f;
+        public float SWIM_DOWN_THRUST_PXS2 = 295.0f;
+        public float SWIM_FREE_MAX_SINK_PXS = 140.0f; // observed no-key terminal
         public float SWIM_DOWN_MAX_SPEED_PXS = 210.0f; // observed DOWN-held terminal
-        public float SWIM_UP_MAX_SINK_PXS = 100.0f;    // 86 fit + margin
+        public float SWIM_UP_MAX_SINK_PXS = 42.0f;     // observed UP-held terminal
         // Cooldown reflects observed swim-jump cadence. Jump@CVecCtrl @
         // 0x9b2202 calls JustJump with no engine cooldown, but in practice
         // the swim-burst animation gates the next effective jump to ~500ms.
@@ -655,14 +650,28 @@ final class BotPhysicsEngine {
         // Movement layer expresses *intent only* in water.
         if (bot.getMap() != null && bot.getMap().isSwim()) {
             airVelX = 0;
-            // Walk-jump impulse (~555) gets damped flat by swim drag/gravity
-            // before the bot leaves the platform. Use the full swim burst so
-            // ground takeoff in water actually clears the floor.
-            float burst = cfg.SWIM_JUMP_BURST_PXS;
-            if (entry.movementProfile != null) {
-                burst *= (float) entry.movementProfile.speedMultiplier();
-            }
-            launchAirborne(entry, bot, bot.getPosition(), -burst, airVelX, false);
+            // Ground jump in water uses the regular jump impulse, but once the
+            // character leaves the foothold the value is in swim px/s units.
+            // Do not route this through launchAirborne's packet velocity
+            // conversion: that path expects px/tick and emits a huge one-tick
+            // velocity when given swim px/s.
+            Point position = bot.getPosition();
+            entry.climbing = false;
+            entry.climbRope = null;
+            entry.inAir = true;
+            entry.swimming = true;
+            entry.crouching = false;
+            entry.physX = position.x;
+            entry.physY = position.y;
+            entry.velY = -profileOrBase(entry.movementProfile).jumpSpeedPxs();
+            stopGroundMotion(entry);
+            entry.climbUpIntent = false;
+            entry.airVelX = 0;
+            entry.airSteerVelX = 0.0;
+            entry.fixedAirArc = false;
+            entry.downJumpPending = false;
+            setMovementVelocity(entry, 0, Math.round(entry.velY));
+            syncCharacterState(entry);
             return;
         }
         launchAirborne(entry, bot, bot.getPosition(), -jumpForcePerTick(entry.movementProfile), airVelX, false);
@@ -1076,7 +1085,7 @@ final class BotPhysicsEngine {
         double sinkCap = switch (Integer.signum(entry.swimVerticalHold)) {
             case -1 -> cfg.SWIM_UP_MAX_SINK_PXS;
             case  1 -> cfg.SWIM_DOWN_MAX_SPEED_PXS;
-            default -> cfg.SWIM_MAX_SPEED_PXS;
+            default -> cfg.SWIM_FREE_MAX_SINK_PXS;
         };
         vy = Math.max(-cfg.SWIM_MAX_SPEED_PXS, Math.min(sinkCap, vy));
 
