@@ -1025,12 +1025,14 @@ public class BotManager {
                 return Math.abs(below.y - ownerPos.y) <= Math.abs(above.y - ownerPos.y) ? below : above;
             }
         }
-        // Swim maps: when no platform within snapRange, fall back to the raw
-        // owner position (mid-water target) instead of clampedOnOwnerRegion.
-        // The latter snaps Y to the nearest floor below owner, which on open-
-        // water Aqua Road sections is hundreds of pixels down — bot would
-        // sink to a floor instead of swimming up to the owner.
-        if (map != null && map.isSwim()) {
+        // Swim maps: when owner is themselves swimming (mid-water) and no
+        // platform is within snapRange, target the raw owner position so the
+        // bot swims up to mid-water. If owner is grounded on a platform but
+        // we couldn't snap-match it (e.g. very tall stack), keep the normal
+        // clampedOnOwnerRegion behaviour — bot should land on a real floor,
+        // not hover in water under a grounded owner.
+        if (map != null && map.isSwim()
+                && owner != null && CharacterStance.isSwimming(owner.getStance())) {
             return new Point(followBase.x, ownerPos.y);
         }
         return clampedOnOwnerRegion(followBase.x, owner, ownerPos, map);

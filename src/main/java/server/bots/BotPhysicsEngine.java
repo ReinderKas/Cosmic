@@ -53,24 +53,34 @@ final class BotPhysicsEngine {
         //   - Angel.idb: CalcFloat@CVecCtrl @ 0x9b2c3c (swim integrator),
         //     JustJump@CVecCtrl @ 0x9b1d3d (swim jump impulse)
         public float SWIM_VEL_PXS = 140.0f;          // Physics.img swimSpeed
-        public float SWIM_GRAVITY_PXS2 = 428.0f;     // TODO: re-derive from CalcFloat (current value is a stand-in)
-        public float SWIM_FRICTION_HZ = 1.6f;        // TODO: re-derive from CalcFloat
-        public float SWIM_ACCEL_PXS2 = 600.0f;       // TODO: derive — Physics.img swimForce=120000 is force per mass per ms², needs full integrator trace
-        public float SWIM_MAX_SPEED_PXS = 250.0f;    // hard cap on either axis
-        public int SWIM_ARRIVAL_RADIUS_PX = 8;       // stop pushing horizontally inside this band
+        // Constants below are output of an automated least-squares fitter
+        // (`tools/swim_fit.py`) — not hand-tuned. Decodes all swim packet
+        // logs (burst, burst-upheld, upheld, downheld) into 34 (vy0, dur,
+        // vy_end) tuples and fits a linear-drag model dv/dt = g_eff - k·v
+        // via scipy differential_evolution. Quadratic drag term tested but
+        // converged to zero. Re-run after collecting more packet captures.
+        //
+        // Best fit (residual SS ≈ 62k, ~25 px/s typical error per sample):
+        //   g = 794.5, k = 3.335 /s, UP_thrust = 508.7
+        //   UP-held terminal sink  = 86 px/s   (matches "slow descent")
+        //   no-key terminal sink   = 238 px/s   (model overshoots obs 140
+        //                                        — likely IDB CalcFloat
+        //                                        has v-dependent term not
+        //                                        captured by linear drag)
+        //   DOWN-held terminal cap = 210 px/s   (enforced by sinkCap; fit
+        //                                        DOWN_thrust = 0 = no
+        //                                        additional thrust term)
+        public float SWIM_GRAVITY_PXS2 = 795.0f;
+        public float SWIM_FRICTION_HZ = 3.335f;
+        public float SWIM_ACCEL_PXS2 = 600.0f;       // horizontal accel (not yet calibrated)
+        public float SWIM_MAX_SPEED_PXS = 800.0f;
+        public int SWIM_ARRIVAL_RADIUS_PX = 8;
 
-        // Discrete swim controls (steer L/R, JUMP burst, UP/DOWN held).
-        // Swim jump impulse derived from JustJump@CVecCtrl @ 0x9b1d3d:
-        //   walk_jump = stat[+0x84] × physcfg[+0x58] × speedScale
-        //   swim_jump = stat[+0x6c] × physcfg[+0x48] × speedScale × 5.0
-        // Physics.img declaration order: physcfg[+0x48]=swimSpeed=140,
-        // physcfg[+0x58]=flySpeed=200 (verified via rope branch's
-        // physcfg[+0x70]=jumpSpeed=555 producing the known 277 px/s rope kick).
-        // Stat factors cancel, so swim/walk ratio = (140 × 5) / 200 = 3.5;
-        // swim_jump_pxs = 555 × 3.5 = 1942.5.
-        public float SWIM_JUMP_BURST_PXS = 1942.5f;
-        public float SWIM_DOWN_MAX_SPEED_PXS = 480.0f; // DOWN held: faster than natural terminal
-        public float SWIM_UP_MAX_SINK_PXS = 40.0f;    // UP held: slow descent (matches "press UP to hover")
+        public float SWIM_JUMP_BURST_PXS = 1000.0f;
+        public float SWIM_UP_THRUST_PXS2 = 509.0f;
+        public float SWIM_DOWN_THRUST_PXS2 = 0.0f;
+        public float SWIM_DOWN_MAX_SPEED_PXS = 210.0f; // observed DOWN-held terminal
+        public float SWIM_UP_MAX_SINK_PXS = 100.0f;    // 86 fit + margin
         // Cooldown reflects observed swim-jump cadence. Jump@CVecCtrl @
         // 0x9b2202 calls JustJump with no engine cooldown, but in practice
         // the swim-burst animation gates the next effective jump to ~500ms.
@@ -1032,8 +1042,18 @@ final class BotPhysicsEngine {
         vx *= dragRetention;
         vy *= dragRetention;
 
-        // Apply gravity (always full strength; intent affects only the cap).
+        // Apply gravity (always full strength).
         vy += cfg.SWIM_GRAVITY_PXS2 * t;
+
+        // Continuous UP/DOWN thrust matches the v83 vForce model: pressing UP
+        // doesn't just lower the sink cap, it continuously accelerates the
+        // character upward. Without this the bot's burst trajectory falls
+        // far short of a real player's "burst + hold UP" reach.
+        if (entry.swimVerticalHold < 0) {
+            vy -= cfg.SWIM_UP_THRUST_PXS2 * t;
+        } else if (entry.swimVerticalHold > 0) {
+            vy += cfg.SWIM_DOWN_THRUST_PXS2 * t;
+        }
 
         // Horizontal cap.
         vx = Math.max(-cfg.SWIM_MAX_SPEED_PXS, Math.min(cfg.SWIM_MAX_SPEED_PXS, vx));

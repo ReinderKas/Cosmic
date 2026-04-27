@@ -401,6 +401,12 @@ class BotMovementManager {
      * No continuous velocity steering — physics integrates the intents.
      */
     private static void computeSwimIntents(BotEntry entry, Point targetPos) {
+        // Capture last vertical hold for hysteresis. Without sticky-middle,
+        // a target sinking faster than the bot's UP-terminal sink rate causes
+        // dy to oscillate across the LEVEL_BAND boundary every tick — bot
+        // alternates UP-hold (slow sink) and free-sink, visibly stuttering.
+        int prevVerticalHold = entry.swimVerticalHold;
+
         // Default to "no input": bot drifts under swim gravity.
         entry.swimMoveDir = 0;
         entry.swimVerticalHold = 0;
@@ -429,25 +435,40 @@ class BotMovementManager {
         if (dx >  hRadius) entry.swimMoveDir =  1;
         else if (dx < -hRadius) entry.swimMoveDir = -1;
 
-        // Vertical intent.
-        //   dy < 0          → fire JUMP burst (cooldown-gated) + UP hold; lets bot overshoot
-        //                     above the target and land naturally under swim gravity
-        //   dy in [0, level] → UP hold (maintain altitude — bot drifts down to floor naturally)
-        //   level < dy <= down → no hold (free sink)
-        //   dy > down          → DOWN hold (fast sink)
+        // Arrival band: bot is essentially on top of the target both axes.
+        // Hold UP just to maintain altitude, no burst, no horizontal push —
+        // prevents the jump/sink oscillation when bot overshoots target by a
+        // few px (was: any dy<0 fired a 1000+ px/s burst, then bot fell back
+        // through level, repeat).
+        int levelBand = BotPhysicsEngine.cfg.SWIM_LEVEL_BAND_PX;
+        if (Math.abs(dx) <= hRadius && Math.abs(dy) <= levelBand) {
+            entry.swimMoveDir = 0;
+            entry.swimVerticalHold = -1;
+            return;
+        }
+
+        // Vertical intent with hysteresis around band boundaries. The middle
+        // band (LEVEL < dy <= DOWN) is "sticky" — we keep whichever hold was
+        // active last tick so the bot doesn't flip-flop between UP and free
+        // sink as dy crosses LEVEL_BAND each frame while chasing a target
+        // that sinks faster than UP-terminal.
         long now = System.currentTimeMillis();
-        if (dy < 0 && now >= entry.swimNextJumpAtMs) {
-            // Target is above the bot — UP hold alone can't fight gravity, so
-            // burst-jump above the target level and let physics land naturally.
+        int jumpTrigger = BotPhysicsEngine.cfg.SWIM_JUMP_TRIGGER_DY_PX;
+        int downBand = BotPhysicsEngine.cfg.SWIM_DOWN_BAND_PX;
+        if (dy <= -jumpTrigger && now >= entry.swimNextJumpAtMs) {
             entry.swimJumpRequested = true;
             entry.swimNextJumpAtMs = now + BotPhysicsEngine.cfg.SWIM_JUMP_COOLDOWN_MS;
             entry.swimVerticalHold = -1;
-        } else if (dy <= BotPhysicsEngine.cfg.SWIM_LEVEL_BAND_PX) {
-            entry.swimVerticalHold = -1;       // at or above level → hold UP
-        } else if (dy <= BotPhysicsEngine.cfg.SWIM_DOWN_BAND_PX) {
-            entry.swimVerticalHold = 0;        // slightly below → free sink
+        } else if (dy <= levelBand) {
+            entry.swimVerticalHold = -1;        // clearly above target → UP
+        } else if (dy > downBand) {
+            entry.swimVerticalHold = 1;         // clearly far below → DOWN
         } else {
-            entry.swimVerticalHold = 1;        // far below → DOWN hold
+            // Middle band: persist last hold to avoid stutter. If we were
+            // sinking (free or DOWN), keep that — UP would just slow our
+            // descent and let target pull further away. If we were UP-holding
+            // and now drifted past LEVEL, switch to free sink so we catch up.
+            entry.swimVerticalHold = prevVerticalHold > 0 ? 1 : 0;
         }
     }
 
