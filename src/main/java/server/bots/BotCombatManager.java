@@ -822,6 +822,16 @@ class BotCombatManager {
         return isBasicAttackInRange(bot.getPosition(), target.getPosition());
     }
 
+    static boolean canUseAttackPlanNow(BotEntry entry, WeaponType weaponType, AttackPlan attackPlan) {
+        if (entry == null || attackPlan == null) {
+            return false;
+        }
+        if (!entry.inAir) {
+            return true;
+        }
+        return !isAirborneRangedAttackBlockedWeapon(weaponType) || attackPlan.route != AttackRoute.RANGED;
+    }
+
     static boolean isTargetJumpable(BotMovementProfile movementProfile, boolean closeRangeRoute, Point botPos, Point targetPos) {
         if (!closeRangeRoute || botPos == null || targetPos == null) {
             return false;
@@ -850,6 +860,9 @@ class BotCombatManager {
             return;
         }
         if (attackPlan.skillId != 0 && !canUseSkill(bot, attackPlan.skillId, attackPlan.skillLevel)) {
+            return;
+        }
+        if (!canUseAttackPlanNow(entry, BotAttackExecutionProvider.getEquippedWeaponType(bot), attackPlan)) {
             return;
         }
 
@@ -1844,6 +1857,12 @@ class BotCombatManager {
     static boolean isRangedAmmoWeapon(WeaponType weaponType) {
         return weaponType == WeaponType.BOW || weaponType == WeaponType.CROSSBOW
                 || weaponType == WeaponType.CLAW || weaponType == WeaponType.GUN;
+    }
+
+    static boolean isAirborneRangedAttackBlockedWeapon(WeaponType weaponType) {
+        return weaponType == WeaponType.BOW
+                || weaponType == WeaponType.CROSSBOW
+                || weaponType == WeaponType.GUN;
     }
 
     /**

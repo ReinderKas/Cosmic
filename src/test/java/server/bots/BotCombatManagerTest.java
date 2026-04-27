@@ -12,6 +12,7 @@ import constants.game.CharacterStance;
 import constants.skills.Archer;
 import constants.skills.Beginner;
 import constants.skills.Cleric;
+import constants.skills.Hunter;
 import constants.skills.Magician;
 import constants.skills.Warrior;
 import net.packet.Packet;
@@ -410,6 +411,27 @@ class BotCombatManagerTest {
     @Test
     void shouldRejectJumpAttackForNonCloseRangeRoutes() {
         assertFalse(BotCombatManager.isTargetJumpable(false, new Point(100, 200), new Point(170, 135)));
+    }
+
+    @Test
+    void shouldRejectAirborneRangedAttackPlansForWeaponsThatCannotJumpShoot() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.inAir = true;
+        BotCombatManager.AttackPlan rangedBowPlan = new BotCombatManager.AttackPlan(
+                Hunter.ARROW_BOMB, 1, 1, new Rectangle(100, 150, 300, 100),
+                List.of(mockMob(new Point(180, 200), 9300200)), BotCombatManager.AttackRoute.RANGED,
+                0, 11, 11, 11, 4, 300, 600);
+        BotCombatManager.AttackPlan closePlan = new BotCombatManager.AttackPlan(
+                0, 0, 1, new Rectangle(100, 150, 80, 70),
+                List.of(mockMob(new Point(120, 200), 9300201)), BotCombatManager.AttackRoute.CLOSE,
+                4, 1, 1, 0, 4, 300, 600);
+
+        assertFalse(BotCombatManager.canUseAttackPlanNow(entry, WeaponType.BOW, rangedBowPlan));
+        assertFalse(BotCombatManager.canUseAttackPlanNow(entry, WeaponType.CROSSBOW, rangedBowPlan));
+        assertFalse(BotCombatManager.canUseAttackPlanNow(entry, WeaponType.GUN, rangedBowPlan));
+        assertTrue(BotCombatManager.canUseAttackPlanNow(entry, WeaponType.CLAW, rangedBowPlan));
+        assertTrue(BotCombatManager.canUseAttackPlanNow(entry, WeaponType.BOW, closePlan));
     }
 
     @Test
