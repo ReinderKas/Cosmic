@@ -84,6 +84,10 @@ class BotMovementManager {
 
         public int JUMP_Y_THRESH = 30;
         public int TELEPORT_DIST = 4000;
+        // Tighter teleport trigger when the bot has slipped outside the map's VR rectangle.
+        // Long falls below VRBottom never collide with anything and otherwise wait until the
+        // 4000 Manhattan threshold; this lets us recover sooner once we know the bot is OOB.
+        public int OOB_TELEPORT_DIST = 600;
         public int FOLLOW_Y_CAP = 200; // max vertical distance for Y-snapped follow target
     }
 

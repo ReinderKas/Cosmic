@@ -1385,7 +1385,8 @@ public class BotManager {
                 } else if (entry.inAir) {
                     // Mid-air (from a jump): attack bypasses moveWindowMs; attackCooldownMs still gates
                     BotCombatManager.AttackPlan ap = BotCombatManager.planAttack(entry, bot, followTarget);
-                    if (BotCombatManager.isTargetInAttackRange(ap, bot, followTarget)) {
+                    if (BotCombatManager.canUseAttackPlanNow(entry, followWeaponType, ap)
+                            && BotCombatManager.isTargetInAttackRange(ap, bot, followTarget)) {
                         BotCombatManager.attackMonster(entry, bot, ap);
                         if (ap.isCloseRangeRoute() && BotCombatManager.isRangedAmmoWeapon(followWeaponType)) {
                             entry.degenAttackDone = true;
@@ -1479,6 +1480,7 @@ public class BotManager {
             if (!entry.climbing) {
                 boolean couponSeeking = BotPqHooks.isCouponSeeking(entry);
                 if (!shouldRetreatForRangedSpacing && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)
+                        && BotCombatManager.canUseAttackPlanNow(entry, grindWeaponType, attackPlan)
                         && (!couponSeeking || entry.moveWindowMs <= 0)) {
                     // In range — attack if grounded, or during ascent of a jump
                     int prevCooldown = entry.attackCooldownMs;
@@ -1619,10 +1621,26 @@ public class BotManager {
 
     private boolean recoverTeleportDistance(BotEntry entry, Character bot, Point targetPos) {
         Point botPos = bot.getPosition();
-        if (Math.abs(botPos.x - targetPos.x) + Math.abs(botPos.y - targetPos.y)
-                <= BotMovementManager.cfg.TELEPORT_DIST) {
-            return false;
+        int manhattan = Math.abs(botPos.x - targetPos.x) + Math.abs(botPos.y - targetPos.y);
+        if (manhattan > BotMovementManager.cfg.TELEPORT_DIST) {
+            return executeRecoveryTeleport(entry, bot, targetPos);
         }
+        // Out-of-bounds recovery: airborne physics has no VR-bottom hard stop, so a bot that
+        // slips below the floor (or past the side walls in rare cases) keeps free-falling
+        // indefinitely until the 4000 Manhattan fallback catches it. That can leave the bot
+        // out of the map for several seconds with the owner still on the same screen
+        // (manhattan < 4000). Trigger a tighter teleport once we can prove the bot is
+        // outside the map's VR rectangle.
+        Rectangle area = bot.getMap() == null ? null : bot.getMap().getMapArea();
+        if (area != null && area.width > 0 && area.height > 0
+                && !area.contains(botPos)
+                && manhattan > BotMovementManager.cfg.OOB_TELEPORT_DIST) {
+            return executeRecoveryTeleport(entry, bot, targetPos);
+        }
+        return false;
+    }
+
+    private boolean executeRecoveryTeleport(BotEntry entry, Character bot, Point targetPos) {
         Point spawn = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(targetPos.x, targetPos.y - 1));
         if (spawn == null) {
             spawn = targetPos;
