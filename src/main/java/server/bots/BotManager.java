@@ -1290,6 +1290,17 @@ public class BotManager {
     // -------------------------------------------------------------------------
 
     private void tick(int ownerCharId, int botCharId) {
+        long startedAt = BotPerformanceMonitor.enabled() ? System.nanoTime() : 0L;
+        try {
+            tickCore(ownerCharId, botCharId);
+        } finally {
+            if (startedAt != 0L) {
+                BotPerformanceMonitor.record("tick-total", System.nanoTime() - startedAt);
+            }
+        }
+    }
+
+    private void tickCore(int ownerCharId, int botCharId) {
         BotEntry entry = getBotEntry(ownerCharId, botCharId);
         if (entry == null) return;
         if (entry.skipDelayMs > 0) {
