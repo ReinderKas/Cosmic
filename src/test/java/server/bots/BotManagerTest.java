@@ -265,6 +265,43 @@ class BotManagerTest {
     }
 
     @Test
+    void shouldUseShopTargetAsPrimaryWhileResupplying() {
+        MapleMap map = createEmptyTestMap(910000026);
+        Character owner = mockMovingBot(new Point(50, 100), map);
+        Character bot = mockMovingBot(new Point(100, 100), map);
+        BotEntry entry = new BotEntry(bot, owner, null);
+        entry.following = true;
+        entry.shopVisitPending = true;
+        entry.shopNpcPos = new Point(900, 100);
+        entry.shopTargetPos = new Point(850, 100);
+
+        BotManager.TargetSnapshot snapshot = BotManager.getInstance().captureTargetSnapshot(entry);
+
+        assertEquals(new Point(850, 100), snapshot.primaryTargetPos());
+        assertEquals("shop-target", snapshot.primaryTargetSource());
+    }
+
+    @Test
+    void shouldCancelShopVisitWhenOwnerIssuesFollow() {
+        MapleMap map = createEmptyTestMap(910000027);
+        Character owner = mockMovingBot(new Point(50, 100), map);
+        Character bot = mockMovingBot(new Point(100, 100), map);
+        BotEntry entry = new BotEntry(bot, owner, null);
+        entry.shopVisitPending = true;
+        entry.shopSequenceActive = true;
+        entry.shopNpcPos = new Point(900, 100);
+        entry.shopTargetPos = new Point(850, 100);
+
+        BotManager.getInstance().issueFollowOwner(entry);
+
+        assertFalse(entry.shopVisitPending);
+        assertFalse(entry.shopSequenceActive);
+        assertNull(entry.shopNpcPos);
+        assertNull(entry.shopTargetPos);
+        assertTrue(entry.following);
+    }
+
+    @Test
     void shouldKeepTenMinutePotShareBackoffSeparateForHpAndMp() throws Exception {
         BotManager manager = BotManager.getInstance();
         MapleMap map = mock(MapleMap.class);

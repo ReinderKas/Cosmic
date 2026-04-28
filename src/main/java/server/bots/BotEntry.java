@@ -118,6 +118,8 @@ public class BotEntry {
     volatile Point shopTargetPos = null;
     int shopApproachDelayMs = 0;
     boolean shopSequenceActive = false;
+    long shopVisitStartedAtMs = 0L;
+    long shopSequenceStartedAtMs = 0L;
 
     // Damage taken
     long deadUntil = 0;

@@ -1188,6 +1188,10 @@ public class BotManager {
         FormationState formation = formationStateFor(entry);
         Point followBasePos = new Point(rawFollowAnchorPos.x + entry.followOffsetX, rawFollowAnchorPos.y);
         Point followTargetPos = resolveFollowTargetPos(followBasePos, followAnchor, rawFollowAnchorPos, formation.snapRange(), bot.getMap());
+        Point rawShopTargetPos = entry.shopVisitPending
+                ? (entry.shopTargetPos != null ? entry.shopTargetPos : entry.shopNpcPos)
+                : null;
+        Point shopTargetPos = rawShopTargetPos == null ? null : new Point(rawShopTargetPos);
         Point moveTargetPos = entry.moveTarget == null ? null : new Point(entry.moveTarget);
         Monster activeGrindTarget = entry.grindTarget != null
                 && entry.grindTarget.isAlive()
@@ -1197,7 +1201,10 @@ public class BotManager {
         Point grindTargetPos = activeGrindTarget == null ? null : new Point(activeGrindTarget.getPosition());
         Point primaryTargetPos;
         String primaryTargetSource;
-        if (moveTargetPos != null) {
+        if (shopTargetPos != null) {
+            primaryTargetPos = shopTargetPos;
+            primaryTargetSource = "shop-target";
+        } else if (moveTargetPos != null) {
             primaryTargetPos = moveTargetPos;
             primaryTargetSource = "move-target";
         } else if (grindTargetPos != null) {
@@ -1356,8 +1363,10 @@ public class BotManager {
             return;
         }
 
-        // Map change and teleport checks only apply when following a live anchor
-        if (syncFollowMap(entry, bot, followAnchor)) {
+        // Map change and teleport checks only apply when following a live anchor.
+        // Shop visits are intentional same-map detours and must not be pulled back
+        // to the owner while walking to the NPC.
+        if (!entry.shopVisitPending && syncFollowMap(entry, bot, followAnchor)) {
             return;
         }
         // Teleport if hopelessly far — applies to both follow and grind (catches falling off map)
@@ -1384,9 +1393,19 @@ public class BotManager {
             return;
         }
 
-        // Shop visit: navigate to approach point before resuming normal flow
-        if (BotShopManager.tickShopVisit(entry, bot)) {
+        // Shop visit: navigate to approach point before resuming normal flow.
+        // Keep this ahead of follow/combat/grind logic so resupply movement is not
+        // coupled to owner proximity.
+        if (entry.shopVisitPending) {
+            boolean consumed = BotShopManager.tickShopVisit(entry, bot);
             targetPos = entry.shopTargetPos != null ? entry.shopTargetPos : entry.shopNpcPos;
+            if (!consumed && entry.shopApproachDelayMs > 0) {
+                return;
+            }
+            if (targetPos != null) {
+                stepMovementCore(entry, targetPos, runAiTick);
+            }
+            return;
         }
 
         // Follow mode: attack monsters already in attack range without chasing
@@ -1658,6 +1677,7 @@ public class BotManager {
             return;
         }
         clearScriptTasks(entry);
+        BotShopManager.cancelShopVisit(entry);
         startMoveTo(entry, dest, precise);
     }
 
@@ -1685,6 +1705,7 @@ public class BotManager {
             return;
         }
         clearScriptTasks(entry);
+        BotShopManager.cancelShopVisit(entry);
         startFollow(entry, target);
     }
 
@@ -1710,6 +1731,7 @@ public class BotManager {
             return;
         }
         clearScriptTasks(entry);
+        BotShopManager.cancelShopVisit(entry);
         startGrind(entry);
     }
 
@@ -1727,6 +1749,7 @@ public class BotManager {
             return;
         }
         clearScriptTasks(entry);
+        BotShopManager.cancelShopVisit(entry);
         startStop(entry);
     }
 
@@ -1981,7 +2004,7 @@ public class BotManager {
     }
 
     private boolean tickIdleEntry(BotEntry entry, Character bot) {
-        if (entry.following || entry.grinding || entry.moveTarget != null) {
+        if (entry.following || entry.grinding || entry.moveTarget != null || entry.shopVisitPending) {
             return false;
         }
         if (isSwimMap(entry) && entry.inAir && !entry.climbing) {
@@ -2082,7 +2105,7 @@ public class BotManager {
             return;
         }
 
-        if (owner != null && syncFollowMap(entry, bot, owner)) {
+        if (owner != null && !entry.shopVisitPending && syncFollowMap(entry, bot, owner)) {
             return;
         }
         if (recoverTeleportDistance(entry, bot, targetPos)) {
@@ -2102,9 +2125,17 @@ public class BotManager {
             return;
         }
 
-        // Shop visit: navigate to approach point before resuming normal flow
-        if (BotShopManager.tickShopVisit(entry, bot)) {
+        // Shop visit: navigate to approach point before resuming normal flow.
+        if (entry.shopVisitPending) {
+            boolean consumed = BotShopManager.tickShopVisit(entry, bot);
             targetPos = entry.shopTargetPos != null ? entry.shopTargetPos : entry.shopNpcPos;
+            if (!consumed && entry.shopApproachDelayMs > 0) {
+                return;
+            }
+            if (targetPos != null) {
+                stepMovementCore(entry, targetPos, runAiTick);
+            }
+            return;
         }
 
         if (tryFollowIdleMovementFastPath(entry, bot, targetPos, entry.lastTickAtMs)) {

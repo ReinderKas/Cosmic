@@ -30,6 +30,8 @@ final class BotShopManager {
     private static final int SHOP_APPROACH_DELAY_MAX_MS = 5001;
     private static final int SHOP_STEP_DELAY_MIN_MS = 3000;
     private static final int SHOP_STEP_DELAY_MAX_MS = 6001;
+    private static final long SHOP_VISIT_TIMEOUT_MS = 90_000L;
+    private static final long SHOP_SEQUENCE_TIMEOUT_MS = 45_000L;
     private static final int POT_TRIGGER_THRESHOLD = 4; // 80% of target (5) for early trigger
     private static final int POT_TARGET_THRESHOLD = 5; // full target when buying at shop
     private static final int AMMO_TRIGGER_THRESHOLD = 4; // 80% of target (5) for early trigger
@@ -100,6 +102,8 @@ final class BotShopManager {
         entry.shopNpcPos = match.npcPos;
         entry.shopTargetPos = pickShopApproachPoint(match.npcPos, bot);
         entry.shopApproachDelayMs = (int) BotManager.randMs(0, SHOP_APPROACH_DELAY_MAX_MS);
+        entry.shopVisitStartedAtMs = System.currentTimeMillis();
+        entry.shopSequenceStartedAtMs = 0L;
     }
 
     static boolean tickShopVisit(BotEntry entry, Character bot) {
@@ -107,6 +111,17 @@ final class BotShopManager {
             return false;
         }
         if (entry.shopNpcPos == null) {
+            clearShopState(entry);
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        if (entry.shopVisitStartedAtMs > 0 && now - entry.shopVisitStartedAtMs > SHOP_VISIT_TIMEOUT_MS) {
+            clearShopState(entry);
+            return false;
+        }
+        if (entry.shopSequenceActive
+                && entry.shopSequenceStartedAtMs > 0
+                && now - entry.shopSequenceStartedAtMs > SHOP_SEQUENCE_TIMEOUT_MS) {
             clearShopState(entry);
             return false;
         }
@@ -120,8 +135,9 @@ final class BotShopManager {
         if (botPos.distanceSq(target) <= (long) SHOP_ARRIVE_DIST * SHOP_ARRIVE_DIST) {
             if (!entry.shopSequenceActive) {
                 entry.shopSequenceActive = true;
+                entry.shopSequenceStartedAtMs = System.currentTimeMillis();
                 Point npcPos = entry.shopNpcPos;
-                BotManager.after(stepDelayMs(), () -> executePurchases(entry, bot, npcPos));
+                scheduleShopStep(entry, () -> executePurchases(entry, bot, npcPos));
             }
             return true;
         }
@@ -232,7 +248,7 @@ final class BotShopManager {
         }
 
         PurchaseSequence next = sequence.actions().get(index).run(sequence, shop);
-        BotManager.after(stepDelayMs(), () -> runPurchaseStep(next, index + 1));
+        scheduleShopStep(sequence.entry(), () -> runPurchaseStep(next, index + 1));
     }
 
     private static void finishPurchaseSequence(PurchaseSequence sequence) {
@@ -256,7 +272,7 @@ final class BotShopManager {
             BotManager.getInstance().botSay(sequence.bot(), "bought " + String.join(", ", sequence.bought()));
             BotPotionManager.setupAutopotForBot(sequence.bot());
             BotCombatManager.tickAmmoCheck(sequence.entry(), sequence.bot());
-            BotManager.after(stepDelayMs(), finish);
+            scheduleShopStep(sequence.entry(), finish);
             return;
         }
 
@@ -462,16 +478,36 @@ final class BotShopManager {
                 && findNpcNear(bot, npcPos) != null;
     }
 
+    static void cancelShopVisit(BotEntry entry) {
+        clearShopState(entry);
+    }
+
     private static void clearShopState(BotEntry entry) {
         entry.shopVisitPending = false;
         entry.shopNpcPos = null;
         entry.shopTargetPos = null;
         entry.shopApproachDelayMs = 0;
         entry.shopSequenceActive = false;
+        entry.shopVisitStartedAtMs = 0L;
+        entry.shopSequenceStartedAtMs = 0L;
     }
 
     private static long stepDelayMs() {
         return BotManager.randMs(SHOP_STEP_DELAY_MIN_MS, SHOP_STEP_DELAY_MAX_MS);
+    }
+
+    private static void scheduleShopStep(BotEntry entry, Runnable step) {
+        BotManager.after(stepDelayMs(), () -> {
+            if (!entry.shopVisitPending) {
+                return;
+            }
+            try {
+                step.run();
+            } catch (RuntimeException exception) {
+                clearShopState(entry);
+                throw exception;
+            }
+        });
     }
 
     private static Point pickShopApproachPoint(Point npcPos, Character bot) {
