@@ -318,6 +318,66 @@ class BotManagerTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void shouldLetOwnerPotRequestsBypassShareCooldowns() throws Exception {
+        BotManager manager = BotManager.getInstance();
+        Character owner = mock(Character.class);
+        Character bot = mock(Character.class);
+        BotEntry entry = new BotEntry(bot, owner, null);
+
+        when(owner.getId()).thenReturn(79);
+        when(owner.getTrade()).thenReturn(null);
+
+        Map<Integer, List<BotEntry>> bots = (Map<Integer, List<BotEntry>>) field(BotManager.class, "bots").get(manager);
+        Map<Integer, Long> sharedCooldown = (Map<Integer, Long>) field(BotPotionManager.class, "potShareCooldownUntil").get(null);
+        Map<Integer, Long> hpBackoff = (Map<Integer, Long>) field(BotPotionManager.class, "potShareHpBackoffUntil").get(null);
+
+        bots.put(owner.getId(), List.of());
+        sharedCooldown.put(owner.getId(), Long.MAX_VALUE);
+        hpBackoff.put(owner.getId(), Long.MAX_VALUE);
+        try {
+            assertEquals(BotPotionManager.OwnerPotShareResult.NO_DONOR,
+                    BotPotionManager.offerPotShareToOwner(entry, true),
+                    "manual owner requests should still attempt donor lookup while automatic share cooldowns are active");
+        } finally {
+            bots.remove(owner.getId());
+            sharedCooldown.remove(owner.getId());
+            hpBackoff.remove(owner.getId());
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldLetOwnerAmmoRequestsBypassShareCooldowns() throws Exception {
+        BotManager manager = BotManager.getInstance();
+        Character owner = mock(Character.class);
+        Character bot = mock(Character.class);
+        BotEntry entry = new BotEntry(bot, owner, null);
+
+        when(owner.getId()).thenReturn(80);
+        when(owner.getMapId()).thenReturn(1000);
+        when(owner.getTrade()).thenReturn(null);
+
+        Map<Integer, List<BotEntry>> bots = (Map<Integer, List<BotEntry>>) field(BotManager.class, "bots").get(manager);
+        Map<Integer, Long> sharedCooldown = (Map<Integer, Long>) field(BotAmmoManager.class, "ammoShareCooldownUntil").get(null);
+        Map<String, Long> backoff = (Map<String, Long>) field(BotAmmoManager.class, "ammoShareBackoffUntil").get(null);
+        String backoffKey = owner.getId() + ":" + WeaponType.BOW.name();
+
+        bots.put(owner.getId(), List.of());
+        sharedCooldown.put(owner.getId(), Long.MAX_VALUE);
+        backoff.put(backoffKey, Long.MAX_VALUE);
+        try {
+            assertEquals(BotAmmoManager.OwnerAmmoShareResult.NO_DONOR,
+                    BotAmmoManager.offerAmmoShareToOwner(entry, WeaponType.BOW),
+                    "manual owner ammo requests should still attempt donor lookup while automatic share cooldowns are active");
+        } finally {
+            bots.remove(owner.getId());
+            sharedCooldown.remove(owner.getId());
+            backoff.remove(backoffKey);
+        }
+    }
+
+    @Test
     void shouldPreferNonAmmoUsersWhenSharingArrows() throws Exception {
         BotManager manager = BotManager.getInstance();
         Character owner = mock(Character.class);

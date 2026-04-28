@@ -82,30 +82,25 @@ final class BotAmmoManager {
         return true;
     }
 
-    static boolean offerAmmoShareToOwner(BotEntry entry, WeaponType weaponType) {
+    enum OwnerAmmoShareResult {
+        OFFERED,
+        NO_DONOR,
+        BLOCKED
+    }
+
+    static OwnerAmmoShareResult offerAmmoShareToOwner(BotEntry entry, WeaponType weaponType) {
         Character owner = entry.owner;
         if (owner == null || owner.getTrade() != null || !canRequestShare(weaponType)) {
-            return false;
+            return OwnerAmmoShareResult.BLOCKED;
         }
-
-        long now = System.currentTimeMillis();
-        String backoffKey = owner.getId() + ":" + weaponType.name();
-        if (now < ammoShareBackoffUntil.getOrDefault(backoffKey, 0L)) {
-            return false;
-        }
-        if (now < ammoShareCooldownUntil.getOrDefault(owner.getId(), 0L)) {
-            return false;
-        }
-        ammoShareCooldownUntil.put(owner.getId(), now + 30_000L);
 
         AmmoDonorPlan plan = selectAmmoDonorForRecipient(owner, weaponType);
         if (plan == null) {
-            ammoShareBackoffUntil.put(backoffKey, now + 10 * 60_000L);
-            return false;
+            return OwnerAmmoShareResult.NO_DONOR;
         }
 
         scheduleAmmoShare(plan, owner, weaponType, BotManager.randMs(900, 1400));
-        return true;
+        return OwnerAmmoShareResult.OFFERED;
     }
 
     static AmmoDonorPlan selectAmmoDonor(BotEntry needyEntry, Character needyBot, WeaponType needyWeaponType) {

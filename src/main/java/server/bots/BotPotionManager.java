@@ -285,19 +285,8 @@ final class BotPotionManager {
             return OwnerPotShareResult.BLOCKED;
         }
 
-        long now = System.currentTimeMillis();
-        Map<Integer, Long> categoryBackoff = forHp ? potShareHpBackoffUntil : potShareMpBackoffUntil;
-        if (now < categoryBackoff.getOrDefault(owner.getId(), 0L)) {
-            return OwnerPotShareResult.BLOCKED;
-        }
-        if (now < potShareCooldownUntil.getOrDefault(owner.getId(), 0L)) {
-            return OwnerPotShareResult.BLOCKED;
-        }
-        potShareCooldownUntil.put(owner.getId(), now + 30_000L);
-
         PotDonorPlan plan = selectPotDonor(owner, owner, null, forHp);
         if (plan == null || !plan.qualifies()) {
-            categoryBackoff.put(owner.getId(), now + 10 * 60_000L);
             return OwnerPotShareResult.NO_DONOR;
         }
 

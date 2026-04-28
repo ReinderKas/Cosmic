@@ -169,11 +169,6 @@ public class BotChatManager {
             "\\b(?:need|nned|low\\s+on|out\\s+of|running\\s+low\\s+on)\\s+(?:some\\s+)?(?:ammo|arrows?|bolts?)\\b"
             + "|\\b(?:any(?:body|one)?|someone|somebody|u|you)\\s+(?:got|have|has)\\s+(?:any\\s+|some\\s+)?(?:ammo|arrows?|bolts?)\\b",
             Pattern.CASE_INSENSITIVE);
-    private static final List<String> AMMO_SHARE_BUSY_REPLIES = List.of(
-            "can't ask for ammo rn",
-            "not a good time to ask for ammo",
-            "can't request ammo yet",
-            "give me a sec before asking for ammo");
     private static final List<String> AMMO_NOT_NEEDED_REPLIES = List.of(
             "i don't use shareable arrow ammo rn",
             "i don't need arrows or bolts rn",
@@ -190,6 +185,17 @@ public class BotChatManager {
             "we're not holding extra %s pots, thought you packed supplies",
             "can't find spare %s pots. maybe time to restock?",
             "almost dry on %s pots too, don't look at me");
+    private static final List<String> OWNER_AMMO_SHORTAGE_REPLIES = List.of(
+            "almost out of ammo too, i thought u were our shopper?",
+            "i checked, nobody has spare ammo. that's kinda your department lol",
+            "we're low on ammo too, boss",
+            "no spare ammo in the squad rn",
+            "everyone's light on ammo, might need a shop run",
+            "i'd help, but we're all thin on ammo",
+            "no one has enough ammo to share rn",
+            "we're not holding extra ammo, thought you packed supplies",
+            "can't find spare ammo. maybe time to restock?",
+            "almost dry on ammo too, don't look at me");
     private static final Pattern SUPPORT_ON_PATTERN = Pattern.compile(
             "\\b(support\\s+(me|us|party)|support\\s+on|auto\\s+support)\\b",
             Pattern.CASE_INSENSITIVE);
@@ -1442,7 +1448,6 @@ public class BotChatManager {
     private static void handleNeedAmmoCommand(BotEntry entry) {
         Character owner = entry.owner;
         if (owner == null) {
-            queueBotSay(entry, "can't check your ammo rn");
             return;
         }
         WeaponType weaponType = BotAttackExecutionProvider.getEquippedWeaponType(owner);
@@ -1450,14 +1455,9 @@ public class BotChatManager {
             queueBotSay(entry, BotManager.randomReply(AMMO_NOT_NEEDED_REPLIES));
             return;
         }
-        if (BotAmmoManager.offerAmmoShareToOwner(entry, weaponType)) {
-            queueBotSay(entry, BotManager.randomReply(List.of(
-                    "checking who has spare ammo",
-                    "ok, asking for ammo",
-                    "one sec, finding ammo",
-                    "lemme see who has extra ammo")));
-        } else {
-            queueBotSay(entry, BotManager.randomReply(AMMO_SHARE_BUSY_REPLIES));
+        BotAmmoManager.OwnerAmmoShareResult result = BotAmmoManager.offerAmmoShareToOwner(entry, weaponType);
+        if (result == BotAmmoManager.OwnerAmmoShareResult.NO_DONOR) {
+            queueBotSay(entry, BotManager.randomReply(OWNER_AMMO_SHORTAGE_REPLIES));
         }
     }
 

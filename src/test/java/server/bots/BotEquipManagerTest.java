@@ -2,6 +2,7 @@ package server.bots;
 
 import client.Character;
 import client.Job;
+import client.inventory.Equip;
 import client.inventory.WeaponType;
 import constants.skills.Crusader;
 import constants.skills.DragonKnight;
@@ -140,5 +141,16 @@ class BotEquipManagerTest {
 
         assertTrue(BotEquipManager.isWeaponCompatible(bot, WeaponType.CLAW));
         assertFalse(BotEquipManager.isWeaponCompatible(bot, WeaponType.DAGGER_OTHER));
+    }
+
+    @Test
+    void mageUsefulGearScoreIgnoresDexAndValuesInt() {
+        Equip dexOverall = mock(Equip.class);
+        when(dexOverall.getDex()).thenReturn((short) 10);
+        Equip intOverall = mock(Equip.class);
+        when(intOverall.getInt()).thenReturn((short) 5);
+
+        assertTrue(BotEquipManager.usefulStatSum(intOverall, Job.MAGICIAN)
+                > BotEquipManager.usefulStatSum(dexOverall, Job.MAGICIAN));
     }
 }

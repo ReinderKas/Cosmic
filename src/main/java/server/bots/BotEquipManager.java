@@ -615,14 +615,17 @@ class BotEquipManager {
             sim = bestSim;
         }
 
+        if (isMageJob(sim.job())) {
+            return new EquipScore(magicScore(sim), defScore(candidate), usefulStatSum(candidate, sim.job()));
+        }
         if (simWt == null) {
-            return new EquipScore(0, defScore(candidate), statSum(candidate));
+            return new EquipScore(0, defScore(candidate), usefulStatSum(candidate, sim.job()));
         }
         int dmg = damageWith(sim, ii, simWt, mobProfile);
         // DPS scaling: scale by the cycle of the weapon currently in the simulated state.
         int cycleMs = simWeapon != null ? weaponCycleMs(simWeapon.getItemId()) : 0;
         if (cycleMs > 0) dmg = (int) (dmg * 1000.0 / cycleMs);
-        return new EquipScore(dmg, defScore(candidate), statSum(candidate));
+        return new EquipScore(dmg, defScore(candidate), usefulStatSum(candidate, sim.job()));
     }
 
     private static int compareScores(EquipScore left, EquipScore right) {
@@ -707,11 +710,26 @@ class BotEquipManager {
 
     private static int defScore(Equip e)  { return e != null ? e.getWdef() + e.getMdef() : 0; }
 
-    private static int statSum(Equip e) {
+    static int usefulStatSum(Equip e, Job job) {
         if (e == null) return 0;
+        if (isMageJob(job)) {
+            return e.getInt() * 4 + e.getMatk() * 5 + e.getLuk()
+                    + e.getMdef() + e.getHp() + e.getMp();
+        }
         return e.getStr() + e.getDex() + e.getInt() + e.getLuk()
              + e.getWatk() + e.getMatk() + e.getWdef() + e.getMdef()
              + e.getAcc() + e.getAvoid() + e.getSpeed() + e.getHp() + e.getMp();
+    }
+
+    private static int magicScore(StatSnapshot sim) {
+        return sim.magic() * 100 + sim.int_();
+    }
+
+    private static boolean isMageJob(Job job) {
+        return job == Job.MAGICIAN
+                || job == Job.FP_WIZARD || job == Job.FP_MAGE || job == Job.FP_ARCHMAGE
+                || job == Job.IL_WIZARD || job == Job.IL_MAGE || job == Job.IL_ARCHMAGE
+                || job == Job.CLERIC || job == Job.PRIEST || job == Job.BISHOP;
     }
 
     private static boolean isRingSlot(short slot) {
@@ -891,14 +909,14 @@ class BotEquipManager {
      * {@code flatAcc} = total accuracy minus its derived (dex/luk) component, so {@link #swap}
      * can recompute total accuracy after stat changes without re-reading the live bot state.
      */
-    private record StatSnapshot(int str, int dex, int int_, int luk, int watk, int flatAcc,
+    private record StatSnapshot(int str, int dex, int int_, int luk, int watk, int magic, int flatAcc,
                                 int level, int fame, Job job) {
         static StatSnapshot of(Character bot) {
             int totalAcc = CombatFormulaProvider.getInstance().getTotalAccuracy(bot);
             int derived = (int) Math.floor(bot.getTotalDex() * 0.8d + bot.getTotalLuk() * 0.5d);
             int flatAcc = Math.max(0, totalAcc - Math.max(0, derived));
             return new StatSnapshot(bot.getTotalStr(), bot.getTotalDex(), bot.getTotalInt(),
-                    bot.getTotalLuk(), bot.getTotalWatk(), flatAcc,
+                    bot.getTotalLuk(), bot.getTotalWatk(), bot.getTotalMagic(), flatAcc,
                     bot.getLevel(), bot.getFame(), bot.getJob());
         }
 
@@ -909,6 +927,7 @@ class BotEquipManager {
                     int_ + d(added, removed, e -> (int) e.getInt()),
                     luk + d(added, removed, e -> (int) e.getLuk()),
                     watk + d(added, removed, e -> (int) e.getWatk()),
+                    magic + d(added, removed, e -> (int) e.getInt()) + d(added, removed, e -> (int) e.getMatk()),
                     flatAcc + d(added, removed, e -> (int) e.getAcc()),
                     level, fame, job);
         }
