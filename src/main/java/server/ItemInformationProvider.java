@@ -1830,6 +1830,20 @@ public class ItemInformationProvider {
         return true;
     }
 
+    /**
+     * Non-mutating wearability check used by bot equip lookahead. Same gating as
+     * {@link #canWearEquipment} but takes simulated stat totals and skips the slot/GM/wedding
+     * checks (callers do those separately) and skips {@link Equip#wear} side effects.
+     */
+    public boolean meetsEquipRequirements(Equip equip, Job job, int level, int str, int dex, int int_, int luk, int fame) {
+        if (equip == null) {
+            return false;
+        }
+        int reqLevel = getEquipLevelReq(equip.getItemId());
+        Map<String, Integer> stats = getEquipStats(equip.getItemId());
+        return EquipRequirementChecker.meetsRequirements(job, stats, level, reqLevel, dex, str, int_, luk, fame);
+    }
+
     public ArrayList<Pair<Integer, String>> getItemDataByName(String name) { // Pair<ItemID, ItemName>
         ArrayList<Pair<Integer, String>> ret = new ArrayList<>();
         for (Pair<Integer, String> itemPair : ItemInformationProvider.getInstance().getAllItems()) {
