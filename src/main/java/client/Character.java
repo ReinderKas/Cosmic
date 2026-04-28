@@ -9183,7 +9183,7 @@ public class Character extends AbstractCharacterObject {
                 if (((float) this.getHp()) / this.getCurrentMaxHp() <= autohpAlert) {
                     Item autohpItem = this.getInventory(InventoryType.USE).findById(autohpItemid);
                     if (autohpItem != null) {
-                        PetAutopotProcessor.runAutopotAction(client, autohpItem.getPosition(), autohpItemid);
+                        runAutopotAction(autohpItem.getPosition(), autohpItemid);
                     }
                 }
             }
@@ -9198,11 +9198,44 @@ public class Character extends AbstractCharacterObject {
                     Item autompItem = this.getInventory(InventoryType.USE).findById(autompItemid);
                     if (autompItem != null) {
                         this.setAutopotMpAlert(0.9f * autompAlert); // autoMP would stick to using pots at every depletion in some cases... thanks Rohenn
-                        PetAutopotProcessor.runAutopotAction(client, autompItem.getPosition(), autompItemid);
+                        runAutopotAction(autompItem.getPosition(), autompItemid);
                     }
                 }
             }
         }
+    }
+
+    private void runAutopotAction(short slot, int itemId) {
+        if (client instanceof BotClient) {
+            runBotAutopotAction(slot, itemId);
+            return;
+        }
+        PetAutopotProcessor.runAutopotAction(client, slot, itemId);
+    }
+
+    private void runBotAutopotAction(short slot, int itemId) {
+        if (!isAlive()) {
+            return;
+        }
+        Inventory useInv = getInventory(InventoryType.USE);
+        if (useInv == null) {
+            return;
+        }
+        Item item = useInv.getItem(slot);
+        if (item == null || item.getItemId() != itemId || item.getQuantity() <= 0) {
+            item = useInv.findById(itemId);
+        }
+        if (item == null || item.getQuantity() <= 0) {
+            return;
+        }
+
+        StatEffect stat = ItemInformationProvider.getInstance().getItemEffect(item.getItemId());
+        if (stat == null) {
+            return;
+        }
+
+        InventoryManipulator.removeFromSlot(client, InventoryType.USE, item.getPosition(), (short) 1, false);
+        stat.applyTo(this);
     }
 
     public void setInventory(InventoryType type, Inventory inv) {
