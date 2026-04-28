@@ -95,7 +95,9 @@ final class BotBuffManager {
 
     public static List<String> getDebugLines(BotEntry entry, Character bot) {
         List<String> lines = new ArrayList<>(2);
-        lines.add("active: " + summarizeActive(collectActiveItemBuffs(bot), 5, bot));
+        lines.add("buff " + (entry.buffConsumablesEnabled ? "on" : "off")
+                + "(" + (entry.buffCheapMode ? "cheap" : "best") + "); active: "
+                + summarizeActive(collectActiveItemBuffs(bot), 5, bot));
         lines.add("bag: " + summarizeAvailable(buildSelection(bot, entry.buffCheapMode), 5, bot));
         return lines;
     }

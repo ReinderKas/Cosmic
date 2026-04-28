@@ -1,10 +1,13 @@
 package server.bots;
 
 import client.Character;
+import client.inventory.Inventory;
+import client.inventory.InventoryType;
 import org.junit.jupiter.api.Test;
 import server.maps.FieldLimit;
 import server.maps.MapleMap;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -147,6 +150,24 @@ class BotChatManagerTest {
         assertTrue(BotChatManager.buildMesoReport(6_000).contains("6k"));
         assertTrue(BotChatManager.buildMesoReport(3_500).contains("3.5k"));
         assertTrue(BotChatManager.buildMesoReport(2_100_000).contains("2.1m"));
+    }
+
+    @Test
+    void shouldShowBuffDebugStateWithEnabledAndMode() {
+        Character bot = mock(Character.class);
+        Inventory use = mock(Inventory.class);
+        when(bot.getAllBuffs()).thenReturn(Collections.emptyList());
+        when(bot.getInventory(InventoryType.USE)).thenReturn(use);
+        when(use.getSlotLimit()).thenReturn((short) 0);
+        BotEntry entry = new BotEntry(bot, null, null);
+
+        entry.buffConsumablesEnabled = true;
+        entry.buffCheapMode = true;
+        assertEquals("buff on(cheap); active: none", BotBuffManager.getDebugLines(entry, bot).getFirst());
+
+        entry.buffConsumablesEnabled = false;
+        entry.buffCheapMode = false;
+        assertEquals("buff off(best); active: none", BotBuffManager.getDebugLines(entry, bot).getFirst());
     }
 
     @Test
