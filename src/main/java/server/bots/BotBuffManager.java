@@ -94,15 +94,7 @@ final class BotBuffManager {
     }
 
     public static List<String> getDebugLines(BotEntry entry, Character bot) {
-        List<String> lines = new ArrayList<>(3);
-        String lastAction = entry.lastBuffActionSummary;
-        if (entry.lastBuffActionAtMs > 0) {
-            long ageMs = Math.max(0L, System.currentTimeMillis() - entry.lastBuffActionAtMs);
-            lastAction += " (" + formatAge(ageMs) + " ago)";
-        }
-
-        lines.add("buff pots " + (entry.buffConsumablesEnabled ? "on" : "off")
-                + " (" + (entry.buffCheapMode ? "cheap" : "max") + "), last: " + lastAction);
+        List<String> lines = new ArrayList<>(2);
         lines.add("active: " + summarizeActive(collectActiveItemBuffs(bot), 5, bot));
         lines.add("bag: " + summarizeAvailable(buildSelection(bot, entry.buffCheapMode), 5, bot));
         return lines;

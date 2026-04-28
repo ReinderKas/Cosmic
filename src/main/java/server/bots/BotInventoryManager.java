@@ -335,6 +335,41 @@ class BotInventoryManager {
         return !collectItems(category, entry, bot).isEmpty();
     }
 
+    static int countTransferableItems(String category, BotEntry entry, Character bot) {
+        if (isMesoCategory(category)) {
+            return bot.getMeso();
+        }
+        if (category != null && category.startsWith("name:")) {
+            String fragment = category.substring(5);
+            int total = countNamedItems(fragment, bot);
+            short[] slots = BotEquipManager.slotsFromName(fragment);
+            if (slots.length > 0) {
+                Inventory equipped = bot.getInventory(InventoryType.EQUIPPED);
+                ItemInformationProvider ii = ItemInformationProvider.getInstance();
+                for (short slot : slots) {
+                    Item item = equipped.getItem(slot);
+                    if (item != null && !ii.isCash(item.getItemId())) {
+                        total++;
+                    }
+                }
+            }
+            return total;
+        }
+        return itemQuantitySum(collectItems(category, entry, bot));
+    }
+
+    private static int countNamedItems(String fragment, Character bot) {
+        return itemQuantitySum(collectNamedItems(fragment, bot));
+    }
+
+    private static int itemQuantitySum(List<Item> items) {
+        int total = 0;
+        for (Item item : items) {
+            total += item.getInventoryType() == InventoryType.EQUIP ? 1 : Math.max(0, item.getQuantity());
+        }
+        return total;
+    }
+
     static String noItemsReply(String category) {
         String what = switch (category) {
             case "mesos" -> "mesos";
@@ -638,16 +673,45 @@ class BotInventoryManager {
 
     private static List<Item> collectNamedItems(String fragment, Character bot) {
         List<Item> result = new ArrayList<>();
-        String lower = fragment.toLowerCase();
+        String normalizedFragment = normalizeItemQuery(fragment);
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
         for (InventoryType t : List.of(
                 InventoryType.EQUIP, InventoryType.USE, InventoryType.ETC, InventoryType.SETUP)) {
             collectFromBag(bot, result, t, item -> {
                 String name = ii.getName(item.getItemId());
-                return name != null && name.toLowerCase().contains(lower);
+                return name != null && normalizeItemQuery(name).contains(normalizedFragment);
             });
         }
         return result;
+    }
+
+    static String normalizeItemQuery(String text) {
+        if (text == null) {
+            return "";
+        }
+        String normalized = text.toLowerCase()
+                .replaceAll("[?!.,]+$", "")
+                .replaceAll("[^a-z0-9 '\\-]+", " ")
+                .trim()
+                .replaceAll("\\s+", " ");
+        if (normalized.isEmpty()) {
+            return "";
+        }
+        List<String> tokens = new ArrayList<>();
+        for (String token : normalized.split(" ")) {
+            tokens.add(singularizeToken(token));
+        }
+        return String.join(" ", tokens).trim();
+    }
+
+    private static String singularizeToken(String token) {
+        if (token.length() <= 3 || !token.endsWith("s")) {
+            return token;
+        }
+        if (token.endsWith("ies") && token.length() > 4) {
+            return token.substring(0, token.length() - 3) + "y";
+        }
+        return token.substring(0, token.length() - 1);
     }
 
     private static boolean hasEquippedSlotItems(Character bot, String fragment) {
@@ -869,18 +933,18 @@ class BotInventoryManager {
 
     static void dropByName(BotEntry entry, Character bot, String nameFragment) {
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
-        String lower = nameFragment.toLowerCase().trim();
+        String normalizedFragment = normalizeItemQuery(nameFragment);
         int total = 0;
         for (InventoryType type : List.of(
                 InventoryType.EQUIP, InventoryType.USE, InventoryType.ETC, InventoryType.SETUP)) {
             total += dropFromBag(bot, type, item -> {
                 String name = ii.getName(item.getItemId());
-                return name != null && name.toLowerCase().contains(lower);
+                return name != null && normalizeItemQuery(name).contains(normalizedFragment);
             });
         }
-        BotManager.getInstance().botSay(bot,
-                total > 0 ? "dropped " + total + "x '" + nameFragment + "'"
-                          : "couldn't find '" + nameFragment + "' in my bags");
+        if (total <= 0) {
+            BotManager.getInstance().botSay(bot, "couldn't find '" + nameFragment + "' in my bags");
+        }
     }
 
     // ─── Inventory info ───────────────────────────────────────────────────────

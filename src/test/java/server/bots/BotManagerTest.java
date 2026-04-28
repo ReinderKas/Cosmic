@@ -410,6 +410,14 @@ class BotManagerTest {
         assertTrue(BotChatManager.isNeedAmmoCommand("low on ammo"));
     }
 
+    @Test
+    void shouldNormalizeNamedItemCommandsAndQueries() {
+        assertEquals("warrior potion", BotInventoryManager.normalizeItemQuery("Warrior Potions?!"));
+        assertEquals("name:warrior potion", BotChatManager.matchChoiceCategory("drop warrior potions?"));
+        assertEquals("name:warrior potion", BotChatManager.matchTradeCategory("trade me warrior potions"));
+        assertEquals("warrior potion", BotChatManager.matchItemQuery("anybody got warrior potions?"));
+    }
+
     private static MapleMap createEmptyTestMap(int mapId) {
         MapleMap map = new MapleMap(mapId, 0, 0, mapId, 1.0f);
         map.setFootholds(new FootholdTree(new Point(-2000, -2000), new Point(2000, 2000)));
