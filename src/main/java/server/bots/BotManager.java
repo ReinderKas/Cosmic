@@ -95,6 +95,8 @@ public class BotManager {
 
     record TargetSnapshot(FormationState formation,
                           Point rawOwnerPos,
+                          Point followAnchorPos,
+                          String followAnchorName,
                           Point followBasePos,
                           Point followTargetPos,
                           Point moveTargetPos,
@@ -1127,7 +1129,7 @@ public class BotManager {
         return ownerFormations.getOrDefault(owner.getId(), FormationState.defaultStagger());
     }
 
-    private Character resolveFollowAnchor(BotEntry entry, Character owner) {
+    Character resolveFollowAnchor(BotEntry entry, Character owner) {
         if (owner == null) {
             return null;
         }
@@ -1177,6 +1179,7 @@ public class BotManager {
         Point fallbackPos = bot.getPosition();
         Point rawOwnerPos = owner != null ? owner.getPosition() : fallbackPos;
         Point rawFollowAnchorPos = followAnchor != null ? followAnchor.getPosition() : rawOwnerPos;
+        String followAnchorName = followAnchor != null ? followAnchor.getName() : "owner";
         FormationState formation = formationStateFor(entry);
         Point followBasePos = new Point(rawFollowAnchorPos.x + entry.followOffsetX, rawFollowAnchorPos.y);
         Point followTargetPos = resolveFollowTargetPos(followBasePos, followAnchor, rawFollowAnchorPos, formation.snapRange(), bot.getMap());
@@ -1208,6 +1211,8 @@ public class BotManager {
         return new TargetSnapshot(
                 formation,
                 new Point(rawOwnerPos),
+                new Point(rawFollowAnchorPos),
+                followAnchorName,
                 new Point(followBasePos),
                 new Point(followTargetPos),
                 moveTargetPos,

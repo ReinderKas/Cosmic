@@ -189,6 +189,8 @@ final class BotNavigationManager {
         return new BotManager.TargetSnapshot(
                 snapshot.formation(),
                 snapshot.rawOwnerPos(),
+                snapshot.followAnchorPos(),
+                snapshot.followAnchorName(),
                 snapshot.followBasePos(),
                 snapshot.followTargetPos(),
                 snapshot.moveTargetPos(),
@@ -1143,22 +1145,23 @@ final class BotNavigationManager {
         }
 
         Character owner = entry.owner;
-        if (!entry.grinding && owner != null && owner.getMap() == map) {
+        Character followAnchor = BotManager.getInstance().resolveFollowAnchor(entry, owner);
+        if (!entry.grinding && followAnchor != null && followAnchor.getMap() == map) {
             // Follow mode + owner climbing: prioritise a rope target. The follow
             // resolver may have already snapped targetPos to a rope's X, so the
             // exact equality check below would miss — explicitly look for a rope
-            // at targetPos, and fall back to the owner's own rope region if none
+            // at targetPos, and fall back to the follow anchor's own rope region if none
             // is found there. This keeps the bot climbing onto rope alongside
-            // the owner instead of clamping to the platform below the rope.
-            if (CharacterStance.isClimbing(owner.getStance())) {
+            // the anchor instead of clamping to the platform below the rope.
+            if (CharacterStance.isClimbing(followAnchor.getStance())) {
                 int ropeRegionId = graph.findRopeRegionId(targetPos);
                 if (ropeRegionId >= 0) {
                     return ropeRegionId;
                 }
-                return resolveCharacterRegionId(graph, map, owner);
+                return resolveCharacterRegionId(graph, map, followAnchor);
             }
-            if (targetPos.equals(owner.getPosition())) {
-                return resolveCharacterRegionId(graph, map, owner);
+            if (targetPos.equals(followAnchor.getPosition())) {
+                return resolveCharacterRegionId(graph, map, followAnchor);
             }
         }
 

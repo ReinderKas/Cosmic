@@ -111,6 +111,7 @@ final class BotPathLogger {
         Point steeringTargetPos = targetSnapshot.steeringTargetPos(entry);
         int botRegionId = resolveCurrentRegionId(graph, entry, botPos);
         int rawOwnerRegionId = resolveTargetRegionId(graph, entry, targetSnapshot.rawOwnerPos());
+        int followAnchorRegionId = resolveTargetRegionId(graph, entry, targetSnapshot.followAnchorPos());
         int followBaseRegionId = resolveTargetRegionId(graph, entry, targetSnapshot.followBasePos());
         int followTargetRegionId = resolveTargetRegionId(graph, entry, targetSnapshot.followTargetPos());
         int goalRegionId = resolveTargetRegionId(graph, entry, goalTargetPos);
@@ -125,8 +126,8 @@ final class BotPathLogger {
         StringBuilder sb = new StringBuilder(4096);
         appendHeader(sb, now, note);
         appendCurrentState(sb, entry, targetSnapshot, botPos, botRegionId, rawOwnerRegionId,
-                followBaseRegionId, followTargetRegionId, goalRegionId, steeringTargetPos, steeringTargetRegionId,
-                moveTargetRegionId, grindTargetRegionId, graphSnapshot);
+                followAnchorRegionId, followBaseRegionId, followTargetRegionId, goalRegionId, steeringTargetPos,
+                steeringTargetRegionId, moveTargetRegionId, grindTargetRegionId, graphSnapshot);
         appendCurrentPath(sb, entry, targetSnapshot, goalRegionId, rawOwnerRegionId, botRegionId, graph);
         appendHistory(sb);
 
@@ -190,6 +191,7 @@ final class BotPathLogger {
                                     Point botPos,
                                     int botRegionId,
                                     int rawOwnerRegionId,
+                                    int followAnchorRegionId,
                                     int followBaseRegionId,
                                     int followTargetRegionId,
                                     int goalRegionId,
@@ -201,6 +203,12 @@ final class BotPathLogger {
         sb.append("--- CURRENT STATE ---\n");
         sb.append("Bot:        ").append(pointRegionStr(botPos, botRegionId)).append("\n");
         sb.append("Owner raw:  ").append(pointRegionStr(targetSnapshot.rawOwnerPos(), rawOwnerRegionId)).append("\n");
+        if (entry.following) {
+            sb.append("Follow anchor:")
+                    .append(" ").append(targetSnapshot.followAnchorName())
+                    .append(" ").append(pointRegionStr(targetSnapshot.followAnchorPos(), followAnchorRegionId))
+                    .append("\n");
+        }
         appendMovementGraphState(sb, entry, graphSnapshot);
         sb.append("Formation:  ").append(targetSnapshot.formation().type().name().toLowerCase())
                 .append(" px=").append(targetSnapshot.formation().px())
@@ -209,7 +217,7 @@ final class BotPathLogger {
         if (entry.following || !targetSnapshot.followBasePos().equals(targetSnapshot.rawOwnerPos())) {
             sb.append("Follow base:")
                     .append(" ").append(pointRegionStr(targetSnapshot.followBasePos(), followBaseRegionId))
-                    .append("  [owner + formation offset]\n");
+                    .append("  [anchor + formation offset]\n");
         }
         if (entry.following) {
             sb.append("Follow tgt: ").append(pointRegionStr(targetSnapshot.followTargetPos(), followTargetRegionId))

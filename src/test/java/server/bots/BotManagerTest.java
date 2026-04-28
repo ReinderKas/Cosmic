@@ -2,6 +2,7 @@ package server.bots;
 
 import client.Character;
 import client.inventory.Item;
+import constants.game.CharacterStance;
 import org.junit.jupiter.api.Test;
 import server.StatEffect;
 import server.maps.Foothold;
@@ -210,6 +211,50 @@ class BotManagerTest {
         entry.observedOwnerStepX = 1;
         assertFalse(BotManager.tryFollowIdleMovementFastPath(entry, bot, new Point(100, 100), 2_100L),
                 "owner movement should force normal movement resolution");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldResolveFollowTargetRegionFromFollowAnchorInsteadOfOwner() throws Exception {
+        MapleMap map = createEmptyTestMap(910000025);
+        map.getFootholds().insert(new Foothold(new Point(0, 100), new Point(400, 100), 1));
+        map.addRope(new Rope(100, 40, 100, false));
+        BotNavigationGraphProvider.rebuildGraph(map);
+
+        Character owner = mock(Character.class);
+        when(owner.getId()).thenReturn(77);
+        when(owner.getMap()).thenReturn(map);
+        when(owner.getPosition()).thenReturn(new Point(100, 60));
+        when(owner.getStance()).thenReturn(CharacterStance.LADDER_STANCE);
+
+        Character follower = mockMovingBot(new Point(100, 60), map);
+        when(follower.getId()).thenReturn(88);
+        Character followAnchor = mockMovingBot(new Point(300, 100), map);
+        when(followAnchor.getId()).thenReturn(99);
+        when(followAnchor.getName()).thenReturn("BotB");
+        when(followAnchor.isLoggedinWorld()).thenReturn(true);
+
+        BotEntry followerEntry = new BotEntry(follower, owner, null);
+        followerEntry.following = true;
+        followerEntry.followTargetId = followAnchor.getId();
+        BotEntry anchorEntry = new BotEntry(followAnchor, owner, null);
+
+        BotManager manager = BotManager.getInstance();
+        Map<Integer, List<BotEntry>> bots = (Map<Integer, List<BotEntry>>) field(BotManager.class, "bots").get(manager);
+        bots.put(owner.getId(), List.of(followerEntry, anchorEntry));
+        try {
+            BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(map);
+            int targetRegionId = BotNavigationManager.resolveTargetRegionId(
+                    graph, followerEntry, map, new Point(300, 100));
+            BotNavigationGraph.Region targetRegion = graph.getRegion(targetRegionId);
+
+            assertNotNull(targetRegion);
+            assertFalse(targetRegion.isRopeRegion,
+                    "botA follow botB should resolve navigation against botB, not owner's rope");
+            assertEquals("BotB", manager.captureTargetSnapshot(followerEntry).followAnchorName());
+        } finally {
+            bots.remove(owner.getId());
+        }
     }
 
     @Test
