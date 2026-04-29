@@ -136,9 +136,9 @@ class BotCombatManager {
         public int   ATTACK_DOWN_MAX = 20;
         public int   ATTACK_JUMP_Y   = 130;
         public int   ATTACK_JUMP_X_EXTRA = 60;
-        public int   RANGED_DEGENERATE_RANGE_X = 140;
+        public int   RANGED_DEGENERATE_RANGE_X = 100;
         public int   RANGED_DEGENERATE_RANGE_Y = 70;
-        public int   RANGED_RETREAT_THRESHOLD_X = 100;
+        public int   RANGED_RETREAT_THRESHOLD_X = 80;
         public int   RANGED_RETREAT_DISTANCE_X = 120;
 
         // Ammo
@@ -167,7 +167,7 @@ class BotCombatManager {
 
     static Config cfg = new Config();
     // Journey client CharStats::get_range() returns Rectangle(-projectilerange, -5, -50, 50).
-    private static final int CLIENT_PROJECTILE_BASE_RANGE = 400;
+    static final int CLIENT_PROJECTILE_BASE_RANGE = 400;
     private static final int CLIENT_PROJECTILE_NEAR_INSET = 5;
     private static final int CLIENT_PROJECTILE_TOP = 50;
     private static final int CLIENT_PROJECTILE_BOTTOM = 50;

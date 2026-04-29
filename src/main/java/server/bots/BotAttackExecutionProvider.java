@@ -271,6 +271,37 @@ final class BotAttackExecutionProvider {
                 && dy <= BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_Y;
     }
 
+    /**
+     * Soft-kite: trigger a small pre-emptive step away when the target is CLOSING through
+     * the comfort band just outside retreat — prevents the bot from ever entering the
+     * degenerate range. Comfort band is [RANGED_RETREAT_THRESHOLD_X, threshold+50].
+     */
+    static boolean shouldSoftKite(WeaponType weaponType, Point botPos, Point targetPos, int previousDx) {
+        if (!isDegenerateCapableRangedWeapon(weaponType) || botPos == null || targetPos == null) {
+            return false;
+        }
+        if (previousDx < 0) {
+            return false;
+        }
+        int dx = Math.abs(targetPos.x - botPos.x);
+        int dy = Math.abs(targetPos.y - botPos.y);
+        if (dy > BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_Y) {
+            return false;
+        }
+        int kiteMin = BotCombatManager.cfg.RANGED_RETREAT_THRESHOLD_X;
+        int kiteMax = kiteMin + 50;
+        if (dx < kiteMin || dx > kiteMax) {
+            return false;
+        }
+        return dx < previousDx;
+    }
+
+    static Point softKiteTargetPosition(Character bot, Point botPos, Point targetPos) {
+        int direction = pickRetreatDirection(bot, botPos, targetPos);
+        int step = BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_X + 30;
+        return new Point(botPos.x + direction * step, botPos.y);
+    }
+
     static boolean shouldRetreatFromNearbyTarget(WeaponType weaponType, Point botPos, Point targetPos) {
         if (!isDegenerateCapableRangedWeapon(weaponType) || botPos == null || targetPos == null) {
             return false;
@@ -283,32 +314,116 @@ final class BotAttackExecutionProvider {
     }
 
     static boolean isAnyMobNearerThanTarget(Character bot, Point botPos, Point targetPos) {
+        return findCloserThreatMob(bot, botPos, targetPos) != null;
+    }
+
+    /**
+     * Returns the closest live mob breaching the retreat band that is nearer to the bot
+     * than the active target, or null if none. Same gates as {@link #isAnyMobNearerThanTarget}
+     * (bow/crossbow/claw/gun only). Used by grind mode to swap onto a crowding threat
+     * instead of fleeing the original target while shooting in the wrong direction.
+     */
+    static server.life.Monster findCloserThreatMob(Character bot, Point botPos, Point targetPos) {
         if (bot == null || botPos == null || targetPos == null) {
-            return false;
+            return null;
         }
         WeaponType wt = getEquippedWeaponType(bot);
         if (!isDegenerateCapableRangedWeapon(wt)) {
-            return false;
+            return null;
         }
         int threshX = BotCombatManager.cfg.RANGED_RETREAT_THRESHOLD_X;
         int threshY = BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_Y;
         double targetDistSq = targetPos.distanceSq(botPos);
+        server.life.Monster closest = null;
+        double closestDistSq = targetDistSq;
         for (server.life.Monster m : bot.getMap().getAllMonsters()) {
             if (!m.isAlive()) continue;
             Point mp = m.getPosition();
-            if (mp.distanceSq(botPos) >= targetDistSq) continue;
+            double mDistSq = mp.distanceSq(botPos);
+            if (mDistSq >= closestDistSq) continue;
             int dx = Math.abs(mp.x - botPos.x);
             int dy = Math.abs(mp.y - botPos.y);
             if (dx <= threshX && dy <= threshY) {
-                return true;
+                closest = m;
+                closestDistSq = mDistSq;
             }
         }
-        return false;
+        return closest;
     }
 
     static Point retreatTargetPosition(Point botPos, Point targetPos) {
-        int retreatDirection = targetPos.x >= botPos.x ? -1 : 1;
-        return new Point(botPos.x + retreatDirection * BotCombatManager.cfg.RANGED_RETREAT_DISTANCE_X, botPos.y);
+        return retreatTargetPosition(null, botPos, targetPos);
+    }
+
+    /**
+     * Cluster-aware retreat: picks a direction toward the more open side, then sweeps
+     * candidate distances within that side and lands at the X with the largest gap to
+     * any nearby mob. Falls back to the fixed-distance step when {@code bot} is null
+     * or no candidate sweep is possible.
+     */
+    static Point retreatTargetPosition(Character bot, Point botPos, Point targetPos) {
+        int direction = pickRetreatDirection(bot, botPos, targetPos);
+        int defaultStep = BotCombatManager.cfg.RANGED_RETREAT_DISTANCE_X;
+        if (bot == null || bot.getMap() == null) {
+            return new Point(botPos.x + direction * defaultStep, botPos.y);
+        }
+
+        int minStep = BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_X + 20;
+        int maxStep = defaultStep * 2;
+        int yBand = BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_Y * 2;
+        int bestX = botPos.x + direction * defaultStep;
+        long bestScore = Long.MIN_VALUE;
+        for (int step = minStep; step <= maxStep; step += 30) {
+            int candX = botPos.x + direction * step;
+            long minMobDistSq = Long.MAX_VALUE;
+            for (server.life.Monster m : bot.getMap().getAllMonsters()) {
+                if (!m.isAlive()) continue;
+                Point mp = m.getPosition();
+                int dy = Math.abs(mp.y - botPos.y);
+                if (dy > yBand) continue;
+                long dx = mp.x - candX;
+                long sq = dx * dx + (long) dy * dy;
+                if (sq < minMobDistSq) minMobDistSq = sq;
+            }
+            // Maximize gap to nearest mob; tie-break toward closer to active target so DPS lands.
+            int dxToTarget = Math.abs(targetPos.x - candX);
+            long score = minMobDistSq - dxToTarget * 10L;
+            if (score > bestScore) {
+                bestScore = score;
+                bestX = candX;
+            }
+        }
+        return new Point(bestX, botPos.y);
+    }
+
+    private static int pickRetreatDirection(Character bot, Point botPos, Point targetPos) {
+        int defaultDir = targetPos.x >= botPos.x ? -1 : 1;
+        if (bot == null || bot.getMap() == null) {
+            return defaultDir;
+        }
+        int scanWidth = BotCombatManager.cfg.ATTACK_RANGE_X * 4;
+        int scanHeight = BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_Y * 2;
+        long leftNearestSq = Long.MAX_VALUE;
+        long rightNearestSq = Long.MAX_VALUE;
+        for (server.life.Monster m : bot.getMap().getAllMonsters()) {
+            if (!m.isAlive()) continue;
+            Point mp = m.getPosition();
+            int dy = Math.abs(mp.y - botPos.y);
+            if (dy > scanHeight) continue;
+            int dx = mp.x - botPos.x;
+            int dxAbs = Math.abs(dx);
+            if (dxAbs > scanWidth) continue;
+            long distSq = (long) dx * dx + (long) dy * dy;
+            if (dx < 0) {
+                if (distSq < leftNearestSq) leftNearestSq = distSq;
+            } else if (dx > 0) {
+                if (distSq < rightNearestSq) rightNearestSq = distSq;
+            }
+        }
+        if (leftNearestSq == rightNearestSq) {
+            return defaultDir;
+        }
+        return leftNearestSq > rightNearestSq ? -1 : 1;
     }
 
     static SkillAttackTiming resolveSkillAttackTiming(Skill skill, String action, Character bot,

@@ -1232,6 +1232,9 @@ public class BotManager {
                 primaryTargetSource);
     }
 
+    private static final int RETREAT_HOLD_MS = 600;
+    private static final int RETREAT_ARRIVAL_TOLERANCE_X = 25; // 50ms tick can't land on an exact pixel
+
     static Point selectGrindNavigationTarget(BotEntry entry, Point botPos, Point combatTargetPos) {
         if (entry == null || botPos == null || combatTargetPos == null) {
             return combatTargetPos;
@@ -1242,15 +1245,145 @@ public class BotManager {
             return combatTargetPos;
         }
 
-        if (!BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(
-                BotAttackExecutionProvider.getEquippedWeaponType(bot), botPos, combatTargetPos)) {
+        long now = System.currentTimeMillis();
+        boolean retreatNeeded = BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(
+                BotAttackExecutionProvider.getEquippedWeaponType(bot), botPos, combatTargetPos);
+
+        // Hysteresis: a previously committed retreat keeps its goal until either the
+        // hold expires, the bot has effectively arrived, or the bot wandered too far
+        // from the hold pos for it to still be the right answer.
+        if (entry.retreatHoldPos != null && now < entry.retreatHoldUntilMs) {
+            int dxHold = Math.abs(entry.retreatHoldPos.x - botPos.x);
+            if (dxHold <= RETREAT_ARRIVAL_TOLERANCE_X) {
+                entry.retreatHoldUntilMs = 0L;
+                entry.retreatHoldPos = null;
+            } else if (dxHold > BotCombatManager.cfg.RANGED_RETREAT_DISTANCE_X * 2) {
+                entry.retreatHoldUntilMs = 0L;
+                entry.retreatHoldPos = null;
+            } else {
+                return new Point(entry.retreatHoldPos);
+            }
+        } else if (entry.retreatHoldPos != null) {
+            entry.retreatHoldUntilMs = 0L;
+            entry.retreatHoldPos = null;
+        }
+
+        if (!retreatNeeded) {
             return combatTargetPos;
         }
 
-        Point retreatPos = BotAttackExecutionProvider.retreatTargetPosition(botPos, combatTargetPos);
-        return shouldUseLocalCombatRetreatTarget(entry, botPos, combatTargetPos, retreatPos)
-                ? retreatPos
-                : combatTargetPos;
+        // Prefer landing on a different walkable region than the target — mobs there can't
+        // path to the bot without traversing a nav edge, while the bot can still shoot across.
+        // Empty/sparse adjacent regions score highest. Cross-region uses the nav-edge
+        // pipeline for stickiness, so no separate hysteresis is set here.
+        Point crossRegionPos = selectCrossRegionRetreatTarget(entry, botPos, combatTargetPos);
+        if (crossRegionPos != null) {
+            return crossRegionPos;
+        }
+
+        Point retreatPos = BotAttackExecutionProvider.retreatTargetPosition(bot, botPos, combatTargetPos);
+        if (shouldUseLocalCombatRetreatTarget(entry, botPos, combatTargetPos, retreatPos)) {
+            entry.retreatHoldUntilMs = now + RETREAT_HOLD_MS;
+            entry.retreatHoldPos = new Point(retreatPos);
+            return retreatPos;
+        }
+        return combatTargetPos;
+    }
+
+    /**
+     * Pick a one-edge-away region to retreat into, preferring regions that are NOT
+     * the target's region and contain the fewest mobs. Returns the edge's landing
+     * point so nav can route through the existing edge-traversal pipeline. Null
+     * means no separated region qualifies — caller falls back to in-region retreat.
+     *
+     * Scoring is simple by design (easy to eyeball in-game):
+     *   +1000  destination region has zero live mobs ("the empty platform next door")
+     *   -100*N each live mob in the destination region
+     *   -dx/10  prefer anchors closer to the target so projectiles still land
+     */
+    static Point selectCrossRegionRetreatTarget(BotEntry entry, Point botPos, Point combatTargetPos) {
+        if (entry == null || botPos == null || combatTargetPos == null) {
+            return null;
+        }
+        if (entry.climbing || entry.inAir || entry.navEdge != null) {
+            return null;
+        }
+        Character bot = entry.bot;
+        MapleMap map = bot != null ? bot.getMap() : null;
+        if (map == null || map.getFootholds() == null) {
+            return null;
+        }
+        BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(map, entry.movementProfile);
+        if (graph == null) {
+            BotNavigationGraphProvider.warmGraphAsync(map, entry.movementProfile);
+            return null;
+        }
+
+        int botRegionId = BotNavigationManager.resolveCurrentRegionId(graph, entry, map, botPos);
+        if (botRegionId < 0) {
+            return null;
+        }
+        int targetRegionId = BotNavigationManager.resolveTargetRegionId(graph, entry, map, combatTargetPos);
+
+        int projectileRange = BotCombatManager.CLIENT_PROJECTILE_BASE_RANGE
+                + BotCombatManager.passiveProjectileRangeBonus(bot);
+        int yReachable = BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_Y * 2;
+
+        BotNavigationGraph.Edge bestEdge = null;
+        int bestScore = Integer.MIN_VALUE;
+        for (BotNavigationGraph.Edge edge : graph.getOutgoing(botRegionId)) {
+            int toRegionId = edge.toRegionId;
+            if (toRegionId == botRegionId || toRegionId == targetRegionId) {
+                continue;
+            }
+            BotNavigationGraph.Region region = graph.getRegion(toRegionId);
+            if (region == null || region.isRopeRegion) {
+                continue;
+            }
+            Point anchor = edge.endPoint;
+            int dx = Math.abs(anchor.x - combatTargetPos.x);
+            int dy = Math.abs(anchor.y - combatTargetPos.y);
+            if (dx > projectileRange || dy > yReachable) {
+                continue;
+            }
+            // Don't land back inside the degenerate band — that defeats the retreat.
+            if (dx <= BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_X) {
+                continue;
+            }
+
+            int mobsInRegion = countMobsInRegion(graph, map, region);
+            int score = (mobsInRegion == 0 ? 1000 : 0) - mobsInRegion * 100 - dx / 10;
+            if (score > bestScore) {
+                bestScore = score;
+                bestEdge = edge;
+            }
+        }
+
+        return bestEdge != null ? new Point(bestEdge.endPoint) : null;
+    }
+
+    private static int countMobsInRegion(BotNavigationGraph graph,
+                                         MapleMap map,
+                                         BotNavigationGraph.Region region) {
+        int count = 0;
+        for (server.life.Monster m : map.getAllMonsters()) {
+            if (!m.isAlive()) {
+                continue;
+            }
+            Point mp = m.getPosition();
+            if (mp == null) {
+                continue;
+            }
+            // Cheap bbox prefilter — region.findRegionId does foothold lookup, more expensive.
+            if (mp.x < region.minX - 5 || mp.x > region.maxX + 5
+                    || mp.y < region.minY - 80 || mp.y > region.maxY + 80) {
+                continue;
+            }
+            if (graph.findRegionId(map, mp) == region.id) {
+                count++;
+            }
+        }
+        return count;
     }
 
     static boolean shouldUseLocalCombatRetreatTarget(BotEntry entry,
@@ -1524,14 +1657,35 @@ public class BotManager {
             }
             entry.grindTarget = target;
             Point tp = target.getPosition();
+            // Crowding swap: if a closer mob is breaching the retreat band, attack THAT mob
+            // instead of fleeing the original far target. The bot would have retreated either
+            // way (the close mob also triggers retreat), but with the right target our shots
+            // land on the actual threat instead of pointing at the far one.
+            server.life.Monster closerThreat = BotAttackExecutionProvider.findCloserThreatMob(bot, botPos, tp);
+            if (closerThreat != null && closerThreat != target) {
+                target = closerThreat;
+                entry.grindTarget = closerThreat;
+                tp = target.getPosition();
+            }
             BotCombatManager.AttackPlan attackPlan = BotCombatManager.planAttack(entry, bot, target);
             WeaponType grindWeaponType = BotAttackExecutionProvider.getEquippedWeaponType(bot);
             boolean shouldRetreatForRangedSpacing = entry.degenAttackDone
                     || BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(grindWeaponType, botPos, tp);
+            // Opportunity attack: keep firing during retreat as long as the shot would land
+            // as a true ranged hit. Suppress only inside the degenerate band, since firing
+            // there would re-trigger degenAttackDone and extend the retreat indefinitely.
+            boolean canFireWithoutDegen = grindWeaponType == null
+                    || !BotAttackExecutionProvider.shouldDegenerateRangedAttack(grindWeaponType, botPos, tp);
+            boolean attackGateOpen = !shouldRetreatForRangedSpacing || canFireWithoutDegen;
+            // Sticky cross-region retreat: pre-compute so an opportunity attack doesn't stall
+            // the traversal — bot fires AND keeps walking toward the safe vantage in the same tick.
+            Point crossRegionRetreatPos = shouldRetreatForRangedSpacing
+                    ? selectCrossRegionRetreatTarget(entry, botPos, tp)
+                    : null;
 
             if (!entry.climbing) {
                 boolean couponSeeking = BotPqHooks.isCouponSeeking(entry);
-                if (!shouldRetreatForRangedSpacing && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)
+                if (attackGateOpen && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)
                         && BotCombatManager.canUseAttackPlanNow(entry, grindWeaponType, attackPlan)
                         && (!couponSeeking || entry.moveWindowMs <= 0)) {
                     // In range — attack if grounded, or during ascent of a jump
@@ -1551,7 +1705,9 @@ public class BotManager {
                             && BotCombatManager.isRangedAmmoWeapon(grindWeaponType)) {
                         entry.degenAttackDone = true;
                     }
-                    if (attacked && !entry.inAir) return;
+                    // Don't short-circuit when a cross-region retreat is in progress — the
+                    // bot must still walk to the edge launch this tick.
+                    if (attacked && !entry.inAir && crossRegionRetreatPos == null) return;
                 } else if (!entry.inAir
                         && BotCombatManager.isTargetJumpable(entry.movementProfile, attackPlan.isCloseRangeRoute(), botPos, tp)
                         && grindWeaponType != WeaponType.BOW && grindWeaponType != WeaponType.CROSSBOW
@@ -1561,11 +1717,25 @@ public class BotManager {
                     return;
                 }
             }
+            // Soft kite: pre-emptive step away when target is closing through the comfort
+            // band just outside the retreat trigger. Only valid sample if the target hasn't
+            // changed since last tick (swap or kill resets the baseline).
+            int sampledDx = (target.getObjectId() == entry.lastTargetObjectId) ? entry.lastTargetDx : -1;
+            boolean softKite = !shouldRetreatForRangedSpacing && crossRegionRetreatPos == null
+                    && !entry.inAir && !entry.climbing
+                    && BotAttackExecutionProvider.shouldSoftKite(grindWeaponType, botPos, tp, sampledDx);
+            entry.lastTargetDx = Math.abs(tp.x - botPos.x);
+            entry.lastTargetObjectId = target.getObjectId();
+
             // Retreat positioning is a local combat adjustment, not an inter-region path target.
             // Feeding a synthetic same-Y retreat point into nav while the monster is elsewhere
             // can make rope/ladder bots path back onto the nearby foothold instead of toward
             // the monster's actual region.
-            targetPos = selectGrindNavigationTarget(entry, botPos, tp);
+            targetPos = crossRegionRetreatPos != null
+                    ? crossRegionRetreatPos
+                    : softKite
+                        ? BotAttackExecutionProvider.softKiteTargetPosition(bot, botPos, tp)
+                        : selectGrindNavigationTarget(entry, botPos, tp);
             if (entry.degenAttackDone && shouldRetreatForRangedSpacing) {
                 entry.degenAttackDone = false;
             }
@@ -1632,7 +1802,67 @@ public class BotManager {
             return false;
         }
 
-        return scrollBotToTown(entry, bot, ownerCharId);
+        return enterOwnerInactiveSafeMode(entry, bot, ownerCharId, shouldTownWarpForOwnerInactive(entry));
+    }
+
+    private boolean shouldTownWarpForOwnerInactive(BotEntry entry) {
+        MapleMap currentMap = entry != null && entry.bot != null ? entry.bot.getMap() : null;
+        return currentMap != null
+                && currentMap.getAllMonsters().stream().anyMatch(Monster::isAlive)
+                && canReturnToDifferentMap(currentMap);
+    }
+
+    private static boolean canReturnToDifferentMap(MapleMap currentMap) {
+        if (currentMap == null) {
+            return false;
+        }
+        MapleMap returnMap = currentMap.getReturnMap();
+        return returnMap != null && returnMap.getId() != currentMap.getId();
+    }
+
+    public boolean shouldOfferTownForAwayCommand(BotEntry entry) {
+        return shouldTownWarpForOwnerInactive(entry);
+    }
+
+    public boolean isFirstBotEntry(BotEntry entry) {
+        return entry != null
+                && entry.owner != null
+                && getFirstBotEntry(entry.owner.getId()) == entry;
+    }
+
+    public void issueOwnerAwaySafeModeForOwner(int ownerCharId, boolean town) {
+        for (BotEntry entry : getBotEntries(ownerCharId)) {
+            if (entry.bot == null || entry.bot.getMap() == null) {
+                continue;
+            }
+            enterOwnerInactiveSafeMode(entry, entry.bot, ownerCharId,
+                    town && shouldTownWarpForOwnerInactive(entry));
+        }
+    }
+
+    private boolean enterOwnerInactiveSafeMode(BotEntry entry, Character bot, int ownerCharId, boolean town) {
+        prepareOwnerInactiveIdle(entry, ownerCharId);
+        if (town) {
+            return scrollBotToTown(entry, bot, ownerCharId);
+        }
+
+        BotPhysicsEngine.idleOnGround(entry, bot);
+        BotMovementManager.broadcastMovement(entry);
+        entry.ownerReturnedToTown = true;
+        return false;
+    }
+
+    private void prepareOwnerInactiveIdle(BotEntry entry, int ownerCharId) {
+        clearScriptTasks(entry);
+        BotShopManager.cancelShopVisit(entry);
+        clearMode(entry);
+        entry.moveTarget = null;
+        entry.moveTargetPrecise = false;
+        entry.grindTarget = null;
+        entry.noAmmo = false;
+        entry.degenAttackDone = false;
+        entry.buffConsumablesEnabled = false;
+        townClusterAnchors.remove(ownerCharId);
     }
 
     private boolean scrollBotToTown(BotEntry entry, Character bot, int ownerCharId) {
