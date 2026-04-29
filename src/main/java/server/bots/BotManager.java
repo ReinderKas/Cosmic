@@ -142,8 +142,6 @@ public class BotManager {
 
     private record TargetedBotMatch(BotEntry entry, String commandText, String feedbackMessage) {}
 
-    private record FollowTargetMatch(Character target, String feedbackMessage) {}
-
     static BotTransferCommand matchBotTransferCommand(String message) {
         Matcher matcher = TRANSFER_PATTERN.matcher(message);
         if (!matcher.find()) {
@@ -250,9 +248,12 @@ public class BotManager {
         return new TargetedBotMatch(null, null, null);
     }
 
-    private FollowTargetMatch resolveFollowTarget(Character owner, String targetToken) {
+    private Character resolveFollowTarget(Character owner, String targetToken) {
         if (owner == null || targetToken == null || targetToken.isBlank()) {
-            return new FollowTargetMatch(null, "Can't follow that target.");
+            if (owner != null) {
+                owner.yellowMessage("Can't follow that target.");
+            }
+            return null;
         }
 
         List<Character> candidates = new ArrayList<>();
@@ -286,12 +287,13 @@ public class BotManager {
 
         for (Character candidate : candidates) {
             if (candidate.getName().equalsIgnoreCase(targetToken)) {
-                return new FollowTargetMatch(candidate, null);
+                return candidate;
             }
         }
 
         if (targetToken.length() < MIN_PREFIX_TARGET_LENGTH) {
-            return new FollowTargetMatch(null, "Follow target must use at least " + MIN_PREFIX_TARGET_LENGTH + " letters.");
+            owner.yellowMessage("Follow target must use at least " + MIN_PREFIX_TARGET_LENGTH + " letters.");
+            return null;
         }
 
         List<Character> prefixMatches = new ArrayList<>();
@@ -301,7 +303,7 @@ public class BotManager {
             }
         }
         if (prefixMatches.size() == 1) {
-            return new FollowTargetMatch(prefixMatches.get(0), null);
+            return prefixMatches.get(0);
         }
         if (prefixMatches.size() > 1) {
             StringBuilder message = new StringBuilder("Ambiguous follow target '")
@@ -313,22 +315,19 @@ public class BotManager {
                 }
                 message.append(prefixMatches.get(i).getName());
             }
-            return new FollowTargetMatch(null, message.toString());
+            owner.yellowMessage(message.toString());
+            return null;
         }
 
-        return new FollowTargetMatch(null, "Can't follow '" + targetToken + "'. Target must be a same-party character or one of your active bots.");
+        owner.yellowMessage("Can't follow '" + targetToken + "'. Target must be a same-party character or one of your active bots.");
+        return null;
     }
 
     private boolean applyFollowTargetCommand(Character owner, List<BotEntry> entries, String targetToken) {
-        FollowTargetMatch followTarget = resolveFollowTarget(owner, targetToken);
-        if (followTarget.target() == null) {
-            if (followTarget.feedbackMessage() != null) {
-                owner.yellowMessage(followTarget.feedbackMessage());
-            }
+        Character target = resolveFollowTarget(owner, targetToken);
+        if (target == null) {
             return true;
         }
-
-        Character target = followTarget.target();
         for (BotEntry entry : entries) {
             if (entry == null || entry.bot == null || entry.bot.getId() == target.getId()) {
                 continue;
