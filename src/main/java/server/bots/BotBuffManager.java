@@ -95,11 +95,14 @@ final class BotBuffManager {
 
     public static List<String> getDebugLines(BotEntry entry, Character bot) {
         List<String> lines = new ArrayList<>(2);
-        lines.add("buff " + (entry.buffConsumablesEnabled ? "on" : "off")
-                + "(" + (entry.buffCheapMode ? "cheap" : "best") + "); active: "
-                + summarizeActive(collectActiveItemBuffs(bot), 5, bot));
+        lines.add(formatDebugState(entry) + "; active: " + summarizeActive(collectActiveItemBuffs(bot), 5, bot));
         lines.add("bag: " + summarizeAvailable(buildSelection(bot, entry.buffCheapMode), 5, bot));
         return lines;
+    }
+
+    static String formatDebugState(BotEntry entry) {
+        return "buff " + (entry.buffConsumablesEnabled ? "on" : "off")
+                + "(" + (entry.buffCheapMode ? "cheap" : "best") + ")";
     }
 
     private static List<SelectedBuff> buildSelection(Character bot, boolean cheapMode) {
