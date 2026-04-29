@@ -24,6 +24,8 @@ public class BotEntry {
     volatile Character owner;
     volatile boolean following = false;
     volatile int followTargetId = 0; // 0 = owner
+    volatile boolean airshowActive = false;
+    volatile long airshowLastTrailAtMs = 0L;
     final ScheduledFuture<?> task;
     BotMovementProfile movementProfile = BotMovementProfile.base();
 

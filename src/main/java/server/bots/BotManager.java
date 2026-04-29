@@ -1303,6 +1303,7 @@ public class BotManager {
     private void tickCore(int ownerCharId, int botCharId) {
         BotEntry entry = getBotEntry(ownerCharId, botCharId);
         if (entry == null) return;
+        if (entry.airshowActive) return;
         if (entry.skipDelayMs > 0) {
             entry.skipDelayMs = BotMovementManager.tickDown(entry.skipDelayMs);
             return;
