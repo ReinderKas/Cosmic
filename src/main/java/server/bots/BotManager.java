@@ -1896,6 +1896,7 @@ public class BotManager {
         if (!tryUseReturnScroll(bot)) {
             bot.changeMap(returnMap);
         }
+        groundAfterMapChange(entry, bot);
 
         // Capture the cluster anchor at the first bot's post-warp position.
         // Subsequent bots get a random ±150px X offset around the anchor as their
