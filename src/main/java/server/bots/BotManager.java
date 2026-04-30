@@ -1657,12 +1657,17 @@ public class BotManager {
                     BotMovementManager.tickAirborne(entry, targetPos);
                     return;
                 } else {
-                    BotPhysicsEngine.idleOnGround(entry, bot);
-                    BotMovementManager.broadcastMovement(entry);
-                    return;
+                    // No mob in seek range — pick a wander direction once and walk that way until
+                    // a mob enters range. Beats standing still and lets the bot self-relocate.
+                    if (entry.wanderDirection == 0) {
+                        entry.wanderDirection = java.util.concurrent.ThreadLocalRandom.current().nextBoolean() ? 1 : -1;
+                    }
+                    targetPos = new Point(botPos.x + entry.wanderDirection * 200, botPos.y);
+                    // falls through to stepMovementCore below
                 }
             }
             entry.grindTarget = target;
+            entry.wanderDirection = 0;
             Point tp = target.getPosition();
             // Crowding swap: if a closer mob is breaching the retreat band, attack THAT mob
             // instead of fleeing the original far target. The bot would have retreated either
@@ -1723,6 +1728,17 @@ public class BotManager {
                     BotMovementManager.initiateJump(entry, bot, tp.x - botPos.x);
                     return;
                 }
+            }
+            // Stand still when in attack range and no retreat is needed. Walking toward the
+            // mob during cooldown drops dx into the retreat band, triggering a walk-away the
+            // next tick — produces a tight (~100 ms) left-right oscillation when the bot is
+            // already in firing position.
+            if (target != null && !entry.inAir && !entry.climbing
+                    && !shouldRetreatForRangedSpacing && crossRegionRetreatPos == null
+                    && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)) {
+                BotPhysicsEngine.idleOnGround(entry, bot);
+                BotMovementManager.broadcastMovement(entry);
+                return;
             }
             // Retreat positioning is a local combat adjustment, not an inter-region path target.
             // Feeding a synthetic same-Y retreat point into nav while the monster is elsewhere
