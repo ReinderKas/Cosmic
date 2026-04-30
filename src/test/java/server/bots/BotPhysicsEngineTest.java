@@ -622,6 +622,33 @@ class BotPhysicsEngineTest {
     }
 
     @Test
+    void shouldBlockGroundStepThroughBottomConnectedOpenTopWall() {
+        MapleMap map = createEmptyTestMap(910000057);
+        server.maps.FootholdTree footholds = map.getFootholds();
+        Foothold lower = new Foothold(new Point(0, 100), new Point(50, 100), 1);
+        Foothold wall = new Foothold(new Point(50, 100), new Point(50, 60), 2);
+        wall.setPrev(lower.getId());
+        footholds.insert(lower);
+        footholds.insert(wall);
+
+        assertFalse(BotPhysicsEngine.canWalkGroundStep(map, new Point(44, 100), 12),
+                "bottom-connected walls with an open top should still be collidable");
+    }
+
+    @Test
+    void shouldTreatMap193000000BottomAnchoredWallsAsCollidable() {
+        MapleMap map = BotNavigationMapLoader.loadMapGeometry(193000000);
+        BotNavigationGraphProvider.rebuildGraph(map);
+
+        java.util.Set<Integer> collidableWallIds = BotNavigationGraphProvider.getCachedCollidableWallIds(map.getId());
+
+        assertNotNull(collidableWallIds);
+        assertTrue(collidableWallIds.contains(2), "top-right shaft wall should be collidable");
+        assertTrue(collidableWallIds.contains(10), "left lower wall should be collidable");
+        assertTrue(collidableWallIds.contains(13), "bottom platform right wall should be collidable");
+    }
+
+    @Test
     void shouldKeepAirborneBotOnNearSideOfCollidableWall() {
         MapleMap map = createEmptyTestMap(910000052);
         server.maps.FootholdTree footholds = map.getFootholds();
