@@ -1397,6 +1397,12 @@ public class BotManager {
                 + BotCombatManager.passiveProjectileRangeBonus(bot);
         int yReachable = BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_Y * 2;
 
+        Point reachableRetreat = selectReachableProjectileRetreatTarget(
+                graph, map, botPos, botRegionId, targetRegionId, combatTargetPos, projectileRange, yReachable);
+        if (reachableRetreat != null) {
+            return reachableRetreat;
+        }
+
         BotNavigationGraph.Edge bestEdge = null;
         int bestScore = Integer.MIN_VALUE;
         for (BotNavigationGraph.Edge edge : graph.getOutgoing(botRegionId)) {
@@ -1431,6 +1437,132 @@ public class BotManager {
         }
 
         return bestEdge != null ? new Point(bestEdge.endPoint) : null;
+    }
+
+    private static Point selectReachableProjectileRetreatTarget(BotNavigationGraph graph,
+                                                                MapleMap map,
+                                                                Point botPos,
+                                                                int botRegionId,
+                                                                int targetRegionId,
+                                                                Point combatTargetPos,
+                                                                int projectileRange,
+                                                                int yReachable) {
+        Point bestPoint = null;
+        int bestScore = Integer.MIN_VALUE;
+        for (BotNavigationGraph.Region region : graph.regions) {
+            if (region == null || region.isRopeRegion) {
+                continue;
+            }
+            if (region.id == botRegionId || region.id == targetRegionId) {
+                continue;
+            }
+
+            Point candidate = selectProjectileRetreatPoint(region, combatTargetPos, projectileRange, yReachable);
+            if (candidate == null) {
+                continue;
+            }
+
+            List<BotNavigationGraph.Edge> path = BotNavigationManager.findPath(
+                    graph, map, botPos, botRegionId, region.id, candidate);
+            if (path.isEmpty() || pathUsesPortal(path)) {
+                continue;
+            }
+
+            int pathCost = path.stream().mapToInt(pathEdge -> pathEdge.cost).sum();
+            int mobsInRegion = countMobsInRegion(graph, map, region);
+            int dx = Math.abs(candidate.x - combatTargetPos.x);
+            int score = (mobsInRegion == 0 ? 1500 : 0) - mobsInRegion * 150 - pathCost / 10 - dx / 10;
+            if (score > bestScore) {
+                bestScore = score;
+                bestPoint = candidate;
+            }
+        }
+        return bestPoint;
+    }
+
+    private static boolean pathUsesPortal(List<BotNavigationGraph.Edge> path) {
+        for (BotNavigationGraph.Edge edge : path) {
+            if (edge.type == BotNavigationGraph.EdgeType.PORTAL) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Point selectProjectileRetreatPoint(BotNavigationGraph.Region region,
+                                                      Point combatTargetPos,
+                                                      int projectileRange,
+                                                      int yReachable) {
+        int edgeMargin = Math.min(BotMovementManager.cfg.GRIND_EDGE_MARGIN, Math.max(0, region.width() / 4));
+        int minX = Math.max(region.minX + edgeMargin, combatTargetPos.x - projectileRange);
+        int maxX = Math.min(region.maxX - edgeMargin, combatTargetPos.x + projectileRange);
+        if (minX > maxX) {
+            minX = Math.max(region.minX, combatTargetPos.x - projectileRange);
+            maxX = Math.min(region.maxX, combatTargetPos.x + projectileRange);
+        }
+        if (minX > maxX) {
+            return null;
+        }
+
+        int minShootDx = BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_X + 20;
+        int bestScore = Integer.MIN_VALUE;
+        Point bestPoint = null;
+        int[] probes = {
+                minX,
+                maxX,
+                combatTargetPos.x - minShootDx,
+                combatTargetPos.x + minShootDx,
+                (minX + maxX) / 2
+        };
+        for (int probe : probes) {
+            Point candidate = projectileRetreatCandidate(region, probe, minX, maxX,
+                    combatTargetPos, projectileRange, yReachable, minShootDx);
+            if (candidate == null) {
+                continue;
+            }
+            int dx = Math.abs(candidate.x - combatTargetPos.x);
+            int dy = Math.abs(candidate.y - combatTargetPos.y);
+            int score = -dx * 10 - dy;
+            if (score > bestScore) {
+                bestScore = score;
+                bestPoint = candidate;
+            }
+        }
+        return bestPoint;
+    }
+
+    private static Point projectileRetreatCandidate(BotNavigationGraph.Region region,
+                                                    int probeX,
+                                                    int minX,
+                                                    int maxX,
+                                                    Point combatTargetPos,
+                                                    int projectileRange,
+                                                    int yReachable,
+                                                    int minShootDx) {
+        int x = Math.max(minX, Math.min(maxX, probeX));
+        if (x < combatTargetPos.x && combatTargetPos.x - x < minShootDx) {
+            x = combatTargetPos.x - minShootDx;
+        } else if (x > combatTargetPos.x && x - combatTargetPos.x < minShootDx) {
+            x = combatTargetPos.x + minShootDx;
+        } else if (x == combatTargetPos.x) {
+            int leftX = combatTargetPos.x - minShootDx;
+            int rightX = combatTargetPos.x + minShootDx;
+            x = leftX >= minX ? leftX : rightX;
+        }
+        if (x < minX || x > maxX) {
+            return null;
+        }
+
+        Point point = region.pointAt(x);
+        int dx = Math.abs(point.x - combatTargetPos.x);
+        int dy = Math.abs(point.y - combatTargetPos.y);
+        if (dx < minShootDx
+                || dx > projectileRange
+                || dy > yReachable
+                || point.y > combatTargetPos.y + BotMovementManager.cfg.JUMP_Y_THRESH) {
+            return null;
+        }
+        return point;
     }
 
     private static int countMobsInRegion(BotNavigationGraph graph,
@@ -1754,11 +1886,20 @@ public class BotManager {
             entry.grindTarget = target;
             entry.wanderDirection = 0;
             Point tp = target.getPosition();
+            Monster rangedPriorityTarget = selectPriorityRangedAttackTarget(entry, bot, botPos, target);
+            if (rangedPriorityTarget != null && rangedPriorityTarget != target) {
+                target = rangedPriorityTarget;
+                entry.grindTarget = rangedPriorityTarget;
+                tp = target.getPosition();
+                attackPlan = null;
+            }
             // Crowding swap: if a closer mob is breaching the retreat band, attack THAT mob
             // instead of fleeing the original far target. The bot would have retreated either
             // way (the close mob also triggers retreat), but with the right target our shots
             // land on the actual threat instead of pointing at the far one.
-            server.life.Monster closerThreat = BotAttackExecutionProvider.findCloserThreatMob(bot, botPos, tp);
+            server.life.Monster closerThreat = rangedPriorityTarget == null
+                    ? BotAttackExecutionProvider.findCloserThreatMob(bot, botPos, tp)
+                    : null;
             if (closerThreat != null && closerThreat != target) {
                 target = closerThreat;
                 entry.grindTarget = closerThreat;
@@ -1769,14 +1910,17 @@ public class BotManager {
                 attackPlan = BotCombatManager.planAttack(entry, bot, target);
             }
             WeaponType grindWeaponType = BotAttackExecutionProvider.getEquippedWeaponType(bot);
+            boolean targetInDegenerateBand = BotAttackExecutionProvider.shouldDegenerateRangedAttack(grindWeaponType, botPos, tp);
+            boolean allowOneDegenerateAttack = targetInDegenerateBand && !entry.degenAttackDone && rangedPriorityTarget == null;
             boolean shouldRetreatForRangedSpacing = entry.degenAttackDone
-                    || BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(grindWeaponType, botPos, tp);
+                    || (BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(grindWeaponType, botPos, tp)
+                    && !allowOneDegenerateAttack);
             // Opportunity attack: keep firing during retreat as long as the shot would land
             // as a true ranged hit. Suppress only inside the degenerate band, since firing
             // there would re-trigger degenAttackDone and extend the retreat indefinitely.
             boolean canFireWithoutDegen = grindWeaponType == null
                     || !BotAttackExecutionProvider.shouldDegenerateRangedAttack(grindWeaponType, botPos, tp);
-            boolean attackGateOpen = !shouldRetreatForRangedSpacing || canFireWithoutDegen;
+            boolean attackGateOpen = !shouldRetreatForRangedSpacing || canFireWithoutDegen || allowOneDegenerateAttack;
             // Sticky cross-region retreat: pre-compute so an opportunity attack doesn't stall
             // the traversal — bot fires AND keeps walking toward the safe vantage in the same tick.
             Point crossRegionRetreatPos = shouldRetreatForRangedSpacing
@@ -1841,6 +1985,59 @@ public class BotManager {
         }
 
         stepMovementCore(entry, targetPos, runAiTick);
+    }
+
+    static Monster selectPriorityRangedAttackTarget(BotEntry entry,
+                                                   Character bot,
+                                                   Point botPos,
+                                                   Monster preferredTarget) {
+        if (entry == null || entry.noAmmo || bot == null || botPos == null) {
+            return null;
+        }
+
+        WeaponType weaponType = BotAttackExecutionProvider.getEquippedWeaponType(bot);
+        if (!BotCombatManager.isRangedAmmoWeapon(weaponType)) {
+            return null;
+        }
+        if (isNonDegenerateRangedAttackTarget(entry, bot, botPos, weaponType, preferredTarget)) {
+            return preferredTarget;
+        }
+
+        Monster best = null;
+        double bestDistanceSq = Double.MAX_VALUE;
+        for (Monster candidate : bot.getMap().getAllMonsters()) {
+            if (candidate == preferredTarget) {
+                continue;
+            }
+            if (!isNonDegenerateRangedAttackTarget(entry, bot, botPos, weaponType, candidate)) {
+                continue;
+            }
+            double distanceSq = candidate.getPosition().distanceSq(botPos);
+            if (distanceSq < bestDistanceSq) {
+                bestDistanceSq = distanceSq;
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
+    private static boolean isNonDegenerateRangedAttackTarget(BotEntry entry,
+                                                            Character bot,
+                                                            Point botPos,
+                                                            WeaponType weaponType,
+                                                            Monster target) {
+        if (target == null || !target.isAlive()) {
+            return false;
+        }
+        Point targetPos = target.getPosition();
+        if (BotAttackExecutionProvider.shouldDegenerateRangedAttack(weaponType, botPos, targetPos)) {
+            return false;
+        }
+        BotCombatManager.AttackPlan plan = BotCombatManager.planAttack(entry, bot, target);
+        return plan != null
+                && plan.route == BotCombatManager.AttackRoute.RANGED
+                && BotCombatManager.isTargetInAttackRange(plan, bot, target)
+                && BotCombatManager.canUseAttackPlanNow(entry, weaponType, plan);
     }
 
     private void tickAnchoredFarm(BotEntry entry, Character bot, Point botPos, boolean runAiTick) {

@@ -202,6 +202,65 @@ class BotManagerTest {
     }
 
     @Test
+    void shouldUseJumpReachablePlatformAsCrossRegionRetreat() {
+        MapleMap map = createEmptyTestMap(910000061);
+        FootholdTree footholds = map.getFootholds();
+        footholds.insert(new Foothold(new Point(0, 100), new Point(200, 100), 1));
+        footholds.insert(new Foothold(new Point(250, 100), new Point(500, 100), 2));
+        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(map);
+
+        Character bot = mock(Character.class);
+        when(bot.getMap()).thenReturn(map);
+        when(bot.getPosition()).thenReturn(new Point(300, 100));
+        when(bot.getSkills()).thenReturn(Map.of());
+        BotEntry entry = new BotEntry(bot, null, null);
+
+        Point retreat = BotManager.selectCrossRegionRetreatTarget(
+                entry,
+                new Point(300, 100),
+                new Point(330, 100));
+
+        assertNotNull(retreat);
+        assertTrue(retreat.x <= 200);
+        assertTrue(Math.abs(retreat.x - 330) > BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_X);
+
+        int startRegionId = BotNavigationManager.resolveCurrentRegionId(graph, entry, map, new Point(300, 100));
+        int retreatRegionId = BotNavigationManager.resolveTargetRegionId(graph, entry, map, retreat);
+        List<BotNavigationGraph.Edge> path = BotNavigationManager.findPath(
+                graph, map, new Point(300, 100), startRegionId, retreatRegionId, retreat);
+        assertFalse(path.isEmpty());
+        assertEquals(BotNavigationGraph.EdgeType.JUMP, path.get(0).type);
+    }
+
+    @Test
+    void shouldPreferRangedAttackTargetOverDegeneratePreferredTarget() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mock(Character.class);
+        BotEntry entry = new BotEntry(bot, null, null);
+        Point botPos = new Point(100, 100);
+        Monster closeMob = mockMob(new Point(150, 100), 9300400);
+        Monster rangedMob = mockMob(new Point(260, 100), 9300401);
+        BotCombatManager.AttackPlan rangedPlan = new BotCombatManager.AttackPlan(
+                0, 0, 1, new Rectangle(105, 50, 395, 100),
+                List.of(rangedMob), BotCombatManager.AttackRoute.RANGED,
+                0, 11, 11, 11, 4, 300, 600);
+
+        when(bot.getMap()).thenReturn(map);
+        when(map.getAllMonsters()).thenReturn(List.of(closeMob, rangedMob));
+
+        try (MockedStatic<BotAttackExecutionProvider> attacks =
+                     mockStatic(BotAttackExecutionProvider.class, org.mockito.Mockito.CALLS_REAL_METHODS);
+             MockedStatic<BotCombatManager> combat =
+                     mockStatic(BotCombatManager.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            attacks.when(() -> BotAttackExecutionProvider.getEquippedWeaponType(bot)).thenReturn(WeaponType.BOW);
+            combat.when(() -> BotCombatManager.planAttack(entry, bot, rangedMob)).thenReturn(rangedPlan);
+            combat.when(() -> BotCombatManager.isTargetInAttackRange(rangedPlan, bot, rangedMob)).thenReturn(true);
+
+            assertEquals(rangedMob, BotManager.selectPriorityRangedAttackTarget(entry, bot, botPos, closeMob));
+        }
+    }
+
+    @Test
     void shouldResetPhysicsWhenOnlineBotIsSpawnedAtOwnerPosition() {
         MapleMap map = createEmptyTestMap(910000023);
         map.getFootholds().insert(new Foothold(new Point(0, 100), new Point(200, 100), 1));
@@ -728,6 +787,15 @@ class BotManagerTest {
             return null;
         }).when(bot).setStance(anyInt());
         return bot;
+    }
+
+    private static Monster mockMob(Point position, int id) {
+        Monster mob = mock(Monster.class);
+        when(mob.getPosition()).thenReturn(new Point(position));
+        when(mob.getId()).thenReturn(id);
+        when(mob.getObjectId()).thenReturn(id);
+        when(mob.isAlive()).thenReturn(true);
+        return mob;
     }
 
     private static Character ammoBot(int id, int mapId, int arrowCount) {
