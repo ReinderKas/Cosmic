@@ -1,6 +1,7 @@
 package server.bots;
 
 import client.Character;
+import client.Job;
 import org.junit.jupiter.api.Test;
 import server.maps.FieldLimit;
 import server.maps.MapleMap;
@@ -232,6 +233,38 @@ class BotChatManagerTest {
         List<String> report = BotChatManager.buildMovementStatsReport(bot);
 
         assertEquals("speed 100% jump 100% (map forced; raw 140%/125%)", report.getFirst());
+    }
+
+    @Test
+    void shouldBuildPhysicalRangeReportFromEffectiveTotals() {
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.FIGHTER);
+        when(bot.getLevel()).thenReturn(48);
+        when(bot.getTotalWatk()).thenReturn(20);
+        when(bot.getTotalDex()).thenReturn(100);
+        when(bot.getTotalLuk()).thenReturn(40);
+        when(bot.calculateMinBaseDamage(20)).thenReturn(50);
+        when(bot.calculateMaxBaseDamage(20)).thenReturn(99);
+
+        String report = BotChatManager.buildRangeReport(bot,
+                new BotEquipManager.MapDamageProfile(100, 40, 48));
+
+        assertEquals("my dmg is 50-99, watk 20, acc 100, hit 47% vs strongest lv48 mob", report);
+    }
+
+    @Test
+    void shouldBuildMageRangeReportFromEffectiveMagicTotals() {
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.MAGICIAN);
+        when(bot.getLevel()).thenReturn(50);
+        when(bot.getTotalMagic()).thenReturn(200);
+        when(bot.getTotalInt()).thenReturn(100);
+        when(bot.getTotalLuk()).thenReturn(50);
+
+        String report = BotChatManager.buildRangeReport(bot,
+                new BotEquipManager.MapDamageProfile(100, 30, 50));
+
+        assertEquals("my dmg is 3-9, matk 200, magic acc 75, hit 26% vs strongest lv50 mob", report);
     }
 
     @Test

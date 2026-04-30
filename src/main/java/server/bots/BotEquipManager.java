@@ -750,7 +750,7 @@ class BotEquipManager {
         return sim.magic() * 100 + sim.int_();
     }
 
-    private static boolean isMageJob(Job job) {
+    static boolean isMageJob(Job job) {
         return job == Job.MAGICIAN
                 || job == Job.FP_WIZARD || job == Job.FP_MAGE || job == Job.FP_ARCHMAGE
                 || job == Job.IL_WIZARD || job == Job.IL_MAGE || job == Job.IL_ARCHMAGE

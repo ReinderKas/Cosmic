@@ -1101,10 +1101,50 @@ public class BotChatManager {
     }
 
     private static void reportRange(BotEntry entry, Character bot) {
-        int watk   = bot.getTotalWatk();
-        int maxDmg = Math.max(1, bot.calculateMaxBaseDamage(watk));
-        int minDmg = Math.max(1, bot.calculateMinBaseDamage(watk));
-        queueBotSay(entry, String.format("my dmg is %d-%d, watk %d", minDmg, maxDmg, watk));
+        queueBotSay(entry, buildRangeReport(bot));
+    }
+
+    static String buildRangeReport(Character bot) {
+        return buildRangeReport(bot, BotEquipManager.MapDamageProfile.snapshot(bot));
+    }
+
+    static String buildRangeReport(Character bot, BotEquipManager.MapDamageProfile mobProfile) {
+        CombatFormulaProvider formulas = CombatFormulaProvider.getInstance();
+        boolean magicAttack = BotEquipManager.isMageJob(bot.getJob());
+        int attackStat;
+        int accuracy;
+        int minDmg;
+        int maxDmg;
+        String attackLabel;
+        String accuracyLabel;
+
+        if (magicAttack) {
+            attackStat = bot.getTotalMagic();
+            accuracy = formulas.getTotalMagicAccuracy(bot);
+            maxDmg = (int) Math.max(1L, formulas.magicDamageBase(attackStat, bot.getTotalInt()));
+            minDmg = (int) Math.max(1L, formulas.magicDamageBaseMin(attackStat, bot.getTotalInt(), 0.1d));
+            attackLabel = "matk";
+            accuracyLabel = "magic acc";
+        } else {
+            attackStat = bot.getTotalWatk();
+            accuracy = formulas.getTotalAccuracy(bot);
+            maxDmg = Math.max(1, bot.calculateMaxBaseDamage(attackStat));
+            minDmg = Math.max(1, bot.calculateMinBaseDamage(attackStat));
+            attackLabel = "watk";
+            accuracyLabel = "acc";
+        }
+
+        String report = String.format("my dmg is %d-%d, %s %d, %s %d",
+                minDmg, maxDmg, attackLabel, attackStat, accuracyLabel, accuracy);
+        if (mobProfile == null) {
+            return report;
+        }
+
+        double hitChance = magicAttack
+                ? formulas.calculateMagicMobHitChance(accuracy, bot.getLevel(), mobProfile.mobLevel(), mobProfile.mobAvoid())
+                : formulas.calculatePhysicalMobHitChance(accuracy, bot.getLevel(), mobProfile.mobLevel(), mobProfile.mobAvoid());
+        int hitPercent = (int) Math.round(hitChance * 100.0d);
+        return String.format("%s, hit %d%% vs strongest lv%d mob", report, hitPercent, mobProfile.mobLevel());
     }
 
     private static void reportMovementStats(BotEntry entry, Character bot) {
