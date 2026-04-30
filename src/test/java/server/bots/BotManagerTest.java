@@ -183,6 +183,23 @@ class BotManagerTest {
     }
 
     @Test
+    void shouldRecoverGrindingBotToInBoundsOwnerWhenOutOfBounds() {
+        MapleMap map = createEmptyTestMap(910000052);
+        map.setMapLineBoundings(-500, 500, -500, 500);
+        map.getFootholds().insert(new Foothold(new Point(0, 100), new Point(200, 100), 1));
+        Character owner = mockMovingBot(new Point(100, 100), map);
+        Character bot = mockMovingBot(new Point(100, 1700), map);
+        BotEntry entry = new BotEntry(bot, owner, null);
+        entry.grinding = true;
+
+        BotManager.getInstance().stepMovementOnly(entry, bot.getPosition(), owner.getPosition(), true);
+
+        assertEquals(new Point(100, 100), bot.getPosition());
+        assertFalse(entry.inAir);
+        assertFalse(entry.climbing);
+    }
+
+    @Test
     void shouldNotUseLowerPlatformDropAsCrossRegionRetreat() {
         MapleMap map = createEmptyTestMap(910000060);
         FootholdTree footholds = map.getFootholds();

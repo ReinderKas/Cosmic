@@ -71,6 +71,10 @@ public class BotManager {
 
         // Owner inactivity (offline or dead) before bot scrolls/warps to nearest town and idles.
         public long OWNER_INACTIVE_TOWN_RETURN_MS = 5L * 60_000L;
+
+        // Grind recovery is looser than follow recovery so bots can work nearby platforms,
+        // but still get pulled back to a same-map party anchor if they fall far out of bounds.
+        public int GRIND_PARTY_TELEPORT_DIST_MULTIPLIER = 2;
     }
 
     /** Singleton config — replace with `cfg = new Config()` after hotswapping to reset. */
@@ -1755,6 +1759,9 @@ public class BotManager {
         if (!entry.shopVisitPending && syncFollowMap(entry, bot, followAnchor)) {
             return;
         }
+        if (recoverGrindPartyTeleportDistance(entry, bot, followAnchor)) {
+            return;
+        }
         // Teleport if hopelessly far — applies to both follow and grind (catches falling off map)
         if (recoverTeleportDistance(entry, bot, targetPos)) {
             return;
@@ -2785,6 +2792,47 @@ public class BotManager {
         return false;
     }
 
+    private boolean recoverGrindPartyTeleportDistance(BotEntry entry, Character bot, Character partyAnchor) {
+        if (entry == null || bot == null || partyAnchor == null || !entry.grinding || entry.shopVisitPending) {
+            return false;
+        }
+        if (entry.moveTarget != null || entry.farmAnchor != null) {
+            return false;
+        }
+        if (bot.getMap() == null || partyAnchor.getMap() != bot.getMap()) {
+            return false;
+        }
+
+        Point botPos = bot.getPosition();
+        Point anchorPos = partyAnchor.getPosition();
+        if (botPos == null || anchorPos == null || !isInKnownMapBounds(bot.getMap(), anchorPos)) {
+            return false;
+        }
+
+        int manhattan = Math.abs(botPos.x - anchorPos.x) + Math.abs(botPos.y - anchorPos.y);
+        int multiplier = Math.max(1, cfg.GRIND_PARTY_TELEPORT_DIST_MULTIPLIER);
+        if (manhattan > BotMovementManager.cfg.TELEPORT_DIST * multiplier) {
+            return executeRecoveryTeleport(entry, bot, anchorPos);
+        }
+
+        Rectangle area = bot.getMap().getMapArea();
+        if (hasKnownMapBounds(area)
+                && !area.contains(botPos)
+                && manhattan > BotMovementManager.cfg.OOB_TELEPORT_DIST * multiplier) {
+            return executeRecoveryTeleport(entry, bot, anchorPos);
+        }
+        return false;
+    }
+
+    private static boolean isInKnownMapBounds(MapleMap map, Point point) {
+        Rectangle area = map == null ? null : map.getMapArea();
+        return !hasKnownMapBounds(area) || area.contains(point);
+    }
+
+    private static boolean hasKnownMapBounds(Rectangle area) {
+        return area != null && area.width > 0 && area.height > 0;
+    }
+
     private boolean executeRecoveryTeleport(BotEntry entry, Character bot, Point targetPos) {
         Point spawn = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(targetPos.x, targetPos.y - 1));
         if (spawn == null) {
@@ -2829,6 +2877,10 @@ public class BotManager {
         }
 
         if (owner != null && !entry.shopVisitPending && syncFollowMap(entry, bot, owner)) {
+            return;
+        }
+        Character followAnchor = resolveFollowAnchor(entry, owner);
+        if (recoverGrindPartyTeleportDistance(entry, bot, followAnchor)) {
             return;
         }
         if (recoverTeleportDistance(entry, bot, targetPos)) {
