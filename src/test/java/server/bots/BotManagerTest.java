@@ -6,6 +6,7 @@ import client.inventory.Inventory;
 import client.inventory.InventoryType;
 import client.inventory.Item;
 import client.inventory.WeaponType;
+import client.keybind.KeyBinding;
 import constants.game.CharacterStance;
 import org.mockito.MockedStatic;
 import org.junit.jupiter.api.Test;
@@ -19,8 +20,11 @@ import testutil.Items;
 import java.awt.*;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -34,6 +38,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class BotManagerTest {
@@ -200,6 +205,49 @@ class BotManagerTest {
         assertEquals(map.getId(), entry.lastMapId);
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldCleanBotRuntimeStateWhenLeavingBotControl() throws Exception {
+        BotManager manager = BotManager.getInstance();
+        Character owner = mock(Character.class);
+        Character bot = mock(Character.class);
+        ScheduledFuture<?> task = mock(ScheduledFuture.class);
+        Map<Integer, KeyBinding> keymap = new LinkedHashMap<>();
+        keymap.put(91, new KeyBinding(2, 2000002));
+        keymap.put(92, new KeyBinding(7, 2000003));
+
+        when(owner.getId()).thenReturn(77);
+        when(bot.getId()).thenReturn(88);
+        when(bot.getKeymap()).thenReturn(keymap);
+        doAnswer(invocation -> {
+            int key = invocation.getArgument(0);
+            KeyBinding binding = invocation.getArgument(1);
+            if (binding.getType() == 0) {
+                keymap.remove(key);
+            } else {
+                keymap.put(key, binding);
+            }
+            return null;
+        }).when(bot).changeKeybinding(anyInt(), any(KeyBinding.class));
+
+        BotEntry entry = new BotEntry(bot, owner, task);
+        Map<Integer, List<BotEntry>> bots = (Map<Integer, List<BotEntry>>) field(BotManager.class, "bots").get(manager);
+        bots.put(owner.getId(), new CopyOnWriteArrayList<>(List.of(entry)));
+        try {
+            assertTrue(manager.cleanupBotRuntimeState(bot));
+
+            assertFalse(bots.containsKey(owner.getId()));
+            assertEquals(7, keymap.get(91).getType());
+            assertEquals(2000002, keymap.get(91).getAction());
+            assertEquals(7, keymap.get(92).getType());
+            assertEquals(2000003, keymap.get(92).getAction());
+            verify(task).cancel(false);
+            verify(bot).setAutopotHpAlert(0f);
+            verify(bot).setAutopotMpAlert(0f);
+        } finally {
+            bots.remove(owner.getId());
+        }
+    }
     @Test
     void shouldUseFollowIdleFastPathOnlyWhileParkedNearTarget() {
         MapleMap map = createEmptyTestMap(910000024);

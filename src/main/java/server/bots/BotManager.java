@@ -8,6 +8,7 @@ import client.inventory.InventoryType;
 import client.inventory.Item;
 import client.inventory.WeaponType;
 import client.inventory.manipulator.InventoryManipulator;
+import client.keybind.KeyBinding;
 import constants.game.CharacterStance;
 import constants.inventory.ItemConstants;
 import net.server.Server;
@@ -580,19 +581,66 @@ public class BotManager {
 
     public void removeBot(int ownerCharId) {
         List<BotEntry> entries = bots.remove(ownerCharId);
-        if (entries != null) entries.forEach(e -> e.task.cancel(false));
+        if (entries != null) {
+            entries.forEach(this::cancelBotTask);
+        }
+        ownerFormations.remove(ownerCharId);
+        townClusterAnchors.remove(ownerCharId);
     }
 
     /** Cancel and remove a bot by the bot character's own ID (used during shutdown/disconnect). */
-    public void removeBotByCharId(int botCharId) {
-        for (List<BotEntry> entries : bots.values()) {
-            entries.removeIf(e -> {
-                if (e.bot.getId() == botCharId) { e.task.cancel(false); return true; }
+    public boolean removeBotByCharId(int botCharId) {
+        boolean removed = false;
+        for (Map.Entry<Integer, List<BotEntry>> ownerEntry : bots.entrySet()) {
+            List<BotEntry> entries = ownerEntry.getValue();
+            boolean removedFromOwner = entries.removeIf(e -> {
+                if (e.bot.getId() == botCharId) {
+                    cancelBotTask(e);
+                    return true;
+                }
                 return false;
             });
+            if (removedFromOwner) {
+                removed = true;
+                if (entries.isEmpty() && bots.remove(ownerEntry.getKey(), entries)) {
+                    ownerFormations.remove(ownerEntry.getKey());
+                    townClusterAnchors.remove(ownerEntry.getKey());
+                }
+            }
+        }
+        return removed;
+    }
+
+    /** Release bot-owned runtime state before this character leaves bot control. */
+    public boolean cleanupBotRuntimeState(Character bot) {
+        if (bot == null) {
+            return false;
+        }
+
+        boolean removed = removeBotByCharId(bot.getId());
+        clearBotOnlyAutopotState(bot);
+        return removed;
+    }
+
+    private void cancelBotTask(BotEntry entry) {
+        if (entry != null && entry.task != null) {
+            entry.task.cancel(false);
         }
     }
 
+    private static void clearBotOnlyAutopotState(Character bot) {
+        bot.setAutopotHpAlert(0f);
+        bot.setAutopotMpAlert(0f);
+        normalizeAutopotKey(bot, 91);
+        normalizeAutopotKey(bot, 92);
+    }
+
+    private static void normalizeAutopotKey(Character bot, int key) {
+        KeyBinding binding = bot.getKeymap().get(key);
+        if (binding != null && binding.getType() != 7 && binding.getAction() > 0) {
+            bot.changeKeybinding(key, new KeyBinding(7, binding.getAction()));
+        }
+    }
     /** Disown a bot by name — cancels its AI tick and leaves it idle in the map. */
     public boolean dismissBot(int ownerCharId, String botName) {
         List<BotEntry> entries = bots.get(ownerCharId);

@@ -981,6 +981,9 @@ public class Character extends AbstractCharacterObject {
 
     public void newClient(Client c) {
         this.loggedIn = true;
+        if (this.client instanceof BotClient && !(c instanceof BotClient)) {
+            BotManager.getInstance().cleanupBotRuntimeState(this);
+        }
         c.setAccountName(this.client.getAccountName());//No null's for accountName
         this.setClient(c);
         this.map = c.getChannelServer().getMapFactory().getMap(getMapId());
