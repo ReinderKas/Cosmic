@@ -605,6 +605,20 @@ class BotManagerTest {
     }
 
     @Test
+    void shouldRestoreTradeWindowCopyAfterTemporarilyUnequippedItemIsAddedToTrade() {
+        BotEntry entry = new BotEntry(mock(Character.class), mock(Character.class), null);
+        Item equippedItem = new Item(1040000, (short) 1, (short) 1);
+        Item tradeWindowCopy = equippedItem.copy();
+
+        entry.pendingTradeRestoreSlots.put(equippedItem, (short) -5);
+
+        BotInventoryManager.rememberTradeWindowItemForRestore(entry, equippedItem, tradeWindowCopy);
+
+        assertFalse(entry.pendingTradeRestoreSlots.containsKey(equippedItem));
+        assertEquals((short) -5, entry.pendingTradeRestoreSlots.get(tradeWindowCopy));
+    }
+
+    @Test
     void shouldMatchNaturalSupplyRequestPhrases() {
         assertTrue(BotChatManager.isNeedPotCommand("nned pot"));
         assertTrue(BotChatManager.isNeedPotCommand("need some pots"));

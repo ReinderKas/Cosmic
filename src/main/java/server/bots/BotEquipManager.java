@@ -23,8 +23,10 @@ import constants.skills.WhiteKnight;
 import server.ItemInformationProvider;
 import server.bots.combat.BotAttackDataProvider;
 import server.combat.CombatFormulaProvider;
+import server.life.LifeFactory;
 import server.life.Monster;
 import server.life.MonsterStats;
+import server.life.SpawnPoint;
 import server.maps.MapleMap;
 
 import java.util.ArrayList;
@@ -966,26 +968,54 @@ class BotEquipManager {
     }
 
     /**
-     * Stats of the highest-level alive non-friendly mob on the bot's map. Single-mob sample
-     * tracks the toughest threat in the room rather than diluting through an average.
-     * Returns null when no map context is available (e.g. trade-driven recommendation paths)
-     * or no live mobs are present (e.g. towns) — callers fall back to raw max-base damage.
+     * Stats of the highest-level non-friendly mob on the bot's map. Includes currently
+     * alive mobs and normal spawn templates, so an equip pass that runs while the room is
+     * briefly clear still benchmarks against the map's mobs instead of raw damage.
+     * Returns null when no map context is available or no map mobs are present.
      */
-    private record MapDamageProfile(int mobWdef, int mobAvoid, int mobLevel) {
+    record MapDamageProfile(int mobWdef, int mobAvoid, int mobLevel) {
         static MapDamageProfile snapshot(Character bot) {
             if (bot == null) return null;
             MapleMap map;
             try { map = bot.getMap(); } catch (Throwable t) { return null; }
             if (map == null) return null;
+            List<MonsterStats> candidates = new ArrayList<>();
             List<Monster> mobs;
             try { mobs = map.getAllMonsters(); } catch (Throwable t) { return null; }
-            if (mobs == null || mobs.isEmpty()) return null;
+            if (mobs != null) {
+                for (Monster m : mobs) {
+                    if (m == null || !m.isAlive()) continue;
+                    MonsterStats s = m.getStats();
+                    if (s != null) candidates.add(s);
+                }
+            }
+            try {
+                for (SpawnPoint spawn : map.getMonsterSpawn()) {
+                    if (spawn == null || spawn.getDenySpawn() || spawn.getMobTime() < 0) continue;
+                    Monster template = LifeFactory.getMonster(spawn.getMonsterId());
+                    if (template != null && template.getStats() != null) {
+                        candidates.add(template.getStats());
+                    }
+                }
+            } catch (Throwable ignored) {
+                // Live mobs are enough; spawn templates are only a fallback/stabilizer.
+            }
+            return fromStats(candidates);
+        }
+
+        static MapDamageProfile fromStats(List<MonsterStats> candidates) {
+            if (candidates == null || candidates.isEmpty()) return null;
             MonsterStats picked = null;
-            for (Monster m : mobs) {
-                if (m == null || !m.isAlive()) continue;
-                MonsterStats s = m.getStats();
+            for (MonsterStats s : candidates) {
                 if (s == null || s.isFriendly()) continue;
-                if (picked == null || s.getLevel() > picked.getLevel()) picked = s;
+                if (picked == null
+                        || s.getLevel() > picked.getLevel()
+                        || (s.getLevel() == picked.getLevel() && s.getAvoidability() > picked.getAvoidability())
+                        || (s.getLevel() == picked.getLevel()
+                            && s.getAvoidability() == picked.getAvoidability()
+                            && s.getPDDamage() > picked.getPDDamage())) {
+                    picked = s;
+                }
             }
             if (picked == null) return null;
             return new MapDamageProfile(picked.getPDDamage(), picked.getAvoidability(), picked.getLevel());

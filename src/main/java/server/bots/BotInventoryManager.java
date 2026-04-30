@@ -463,6 +463,7 @@ class BotInventoryManager {
                 // Both sides confirmed — sequence complete or cancelled after bot OK
                 if (entry.pendingTradeSingleBatch) {
                     resetTradeState(entry, bot);
+                    BotEquipManager.autoEquip(bot, entry.owner, null);
                     return;
                 }
                 entry.pendingTradeItems    = null;
@@ -473,6 +474,7 @@ class BotInventoryManager {
                 // Owner cancelled after items were added (items returned to bot)
                 BotManager.getInstance().botSay(bot, "trade cancelled");
                 resetTradeState(entry, bot);
+                BotEquipManager.autoEquip(bot, entry.owner, null);
             } else {
                 // Owner declined invite
                 BotManager.getInstance().botSay(bot, "trade declined");
@@ -532,20 +534,26 @@ class BotInventoryManager {
 
             InventoryType invType = item.getInventoryType();
             Inventory inv = bot.getInventory(invType);
-            Item current  = inv.getItem(item.getPosition());
-            if (current == null || current != item) return; // slot changed, skip
+            inv.lockInventory();
+            try {
+                Item current  = inv.getItem(item.getPosition());
+                if (current == null || current != item) return; // slot changed, skip
 
-            Item tradeItem = item.copy();
-            tradeItem.setPosition((short) (idx + 1)); // trade-window slot 1-9
-            tradeItem.setQuantity(tradeQty);
+                Item tradeItem = item.copy();
+                tradeItem.setPosition((short) (idx + 1)); // trade-window slot 1-9
+                tradeItem.setQuantity(tradeQty);
 
-            if (trade.addItem(tradeItem)) {
-                InventoryManipulator.removeFromSlot(bot.getClient(),
-                        invType, item.getPosition(), tradeQty, false);
-                bot.sendPacket(PacketCreator.getTradeItemAdd((byte) 0, tradeItem));
-                if (trade.getPartner() != null) {
-                    trade.getPartner().getChr().sendPacket(PacketCreator.getTradeItemAdd((byte) 1, tradeItem));
+                if (trade.addItem(tradeItem)) {
+                    rememberTradeWindowItemForRestore(entry, item, tradeItem);
+                    InventoryManipulator.removeFromSlot(bot.getClient(),
+                            invType, item.getPosition(), tradeQty, false);
+                    bot.sendPacket(PacketCreator.getTradeItemAdd((byte) 0, tradeItem));
+                    if (trade.getPartner() != null) {
+                        trade.getPartner().getChr().sendPacket(PacketCreator.getTradeItemAdd((byte) 1, tradeItem));
+                    }
                 }
+            } finally {
+                inv.unlockInventory();
             }
             return;
         }
@@ -587,6 +595,13 @@ class BotInventoryManager {
         entry.pendingTradeBotDone  = false;
         entry.pendingTradeSingleBatch = false;
         entry.pendingPotShareBudget = 0;
+    }
+
+    static void rememberTradeWindowItemForRestore(BotEntry entry, Item inventoryItem, Item tradeItem) {
+        Short restoreSlot = entry.pendingTradeRestoreSlots.remove(inventoryItem);
+        if (restoreSlot != null) {
+            entry.pendingTradeRestoreSlots.put(tradeItem, restoreSlot);
+        }
     }
 
     static short capTradeQuantityByShareBudget(BotEntry entry, short availableQty) {

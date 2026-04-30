@@ -202,8 +202,11 @@ public class Trade {
     }
 
     public boolean addItem(Item item) {
+        if (locked.get()) {
+            return false;
+        }
         synchronized (items) {
-            if (items.size() > 9) {
+            if (locked.get() || items.size() >= 9) {
                 return false;
             }
             for (Item it : items) {

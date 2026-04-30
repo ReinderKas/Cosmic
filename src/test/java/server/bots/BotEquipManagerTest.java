@@ -11,6 +11,9 @@ import constants.skills.Pirate;
 import constants.skills.Rogue;
 import constants.skills.Spearman;
 import org.junit.jupiter.api.Test;
+import server.life.MonsterStats;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -182,5 +185,25 @@ class BotEquipManagerTest {
         double stronger = BotEquipManager.expectedDamageAfterDef(120, 80);
         assertTrue(stronger > weaker + 0.5,
                 "expected stronger > weaker by margin; got " + stronger + " vs " + weaker);
+    }
+
+    @Test
+    void mapDamageProfilePrefersHigherLevelThenAvoidability() {
+        MonsterStats weaker = new MonsterStats();
+        weaker.setLevel(48);
+        weaker.setAvoidability(10);
+        weaker.setPDDamage(120);
+
+        MonsterStats moreEvasive = new MonsterStats();
+        moreEvasive.setLevel(48);
+        moreEvasive.setAvoidability(25);
+        moreEvasive.setPDDamage(80);
+
+        BotEquipManager.MapDamageProfile profile = BotEquipManager.MapDamageProfile.fromStats(
+                List.of(weaker, moreEvasive));
+
+        assertEquals(48, profile.mobLevel());
+        assertEquals(25, profile.mobAvoid());
+        assertEquals(80, profile.mobWdef());
     }
 }
