@@ -86,12 +86,66 @@ final class BotPotionManager {
         return new int[]{hp, mp};
     }
 
+    /**
+     * Autopot selection priority, best (lowest ordinal) → worst:
+     *   1. FLAT_SINGLE — e.g. 50 HP only
+     *   2. FLAT_MIXED  — e.g. 50 HP + 50 MP
+     *   3. RATE_SINGLE — e.g. 20% HP only
+     *   4. RATE_MIXED  — e.g. 20% HP + 20% MP
+     * Within the same tier, the smaller recovery value wins (burn cheap pots first;
+     * preserve big pots for emergencies). Buff potions (statups present) are excluded.
+     */
+    enum PotionTier {
+        FLAT_SINGLE,
+        FLAT_MIXED,
+        RATE_SINGLE,
+        RATE_MIXED
+    }
+
+    /** Result of classifying an item for a slot: tier + the slot-stat magnitude used for tie-breaking. */
+    record PotionRanking(PotionTier tier, double value) {
+        boolean betterThan(PotionRanking other) {
+            if (other == null) return true;
+            int t = Integer.compare(this.tier.ordinal(), other.tier.ordinal());
+            if (t != 0) return t < 0;
+            return this.value < other.value; // smaller value preferred within tier
+        }
+    }
+
+    static PotionRanking classifyForSlot(StatEffect fx, boolean hpSlot) {
+        if (fx == null || !fx.getStatups().isEmpty()) {
+            return null;
+        }
+        int flatPrim    = Math.max(0, hpSlot ? fx.getHp()     : fx.getMp());
+        int flatOther   = Math.max(0, hpSlot ? fx.getMp()     : fx.getHp());
+        double ratePrim  = Math.max(0.0, hpSlot ? fx.getHpRate() : fx.getMpRate());
+        double rateOther = Math.max(0.0, hpSlot ? fx.getMpRate() : fx.getHpRate());
+
+        if (flatPrim == 0 && ratePrim == 0.0) {
+            return null; // does not restore the slot's stat
+        }
+
+        boolean hasFlat = flatPrim > 0 || flatOther > 0;
+        boolean hasRate = ratePrim > 0 || rateOther > 0;
+
+        if (hasFlat && !hasRate) {
+            boolean mixed = flatPrim > 0 && flatOther > 0;
+            return new PotionRanking(mixed ? PotionTier.FLAT_MIXED : PotionTier.FLAT_SINGLE, flatPrim);
+        }
+        if (hasRate && !hasFlat) {
+            boolean mixed = ratePrim > 0 && rateOther > 0;
+            return new PotionRanking(mixed ? PotionTier.RATE_MIXED : PotionTier.RATE_SINGLE, ratePrim);
+        }
+        // Hybrid flat+rate: rank as worst tier (mixed rate) so flat-only pots always win.
+        return new PotionRanking(PotionTier.RATE_MIXED, ratePrim > 0 ? ratePrim : flatPrim);
+    }
+
     static void setupAutopotForBot(Character bot) {
         ItemInformationProvider infoProvider = ItemInformationProvider.getInstance();
         int hpItemId = -1;
         int mpItemId = -1;
-        int bestHp = 0;
-        int bestMp = 0;
+        PotionRanking bestHp = null;
+        PotionRanking bestMp = null;
         for (Item item : bot.getInventory(InventoryType.USE).list()) {
             if (item.getQuantity() <= 0) {
                 continue;
@@ -107,15 +161,15 @@ final class BotPotionManager {
                 continue;
             }
 
-            int hpGain = resolveEffectiveRecoveryAmount(bot, effect, true);
-            if (hpGain > bestHp) {
-                bestHp = hpGain;
+            PotionRanking hpRank = classifyForSlot(effect, true);
+            if (hpRank != null && hpRank.betterThan(bestHp)) {
+                bestHp = hpRank;
                 hpItemId = item.getItemId();
             }
 
-            int mpGain = resolveEffectiveRecoveryAmount(bot, effect, false);
-            if (mpGain > bestMp) {
-                bestMp = mpGain;
+            PotionRanking mpRank = classifyForSlot(effect, false);
+            if (mpRank != null && mpRank.betterThan(bestMp)) {
+                bestMp = mpRank;
                 mpItemId = item.getItemId();
             }
         }
@@ -406,19 +460,4 @@ final class BotPotionManager {
         return Math.max(0, (bot.getInt() / 10) * level);
     }
 
-    private static int resolveEffectiveRecoveryAmount(Character bot, StatEffect effect, boolean hp) {
-        if (effect == null) {
-            return 0;
-        }
-        int flat = hp ? effect.getHp() : effect.getMp();
-        if (flat > 0) {
-            return flat;
-        }
-        double rate = hp ? effect.getHpRate() : effect.getMpRate();
-        if (rate <= 0) {
-            return 0;
-        }
-        int max = hp ? bot.getCurrentMaxHp() : bot.getCurrentMaxMp();
-        return (int) Math.ceil(max * rate);
-    }
 }
