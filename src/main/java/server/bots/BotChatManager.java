@@ -142,6 +142,10 @@ public class BotChatManager {
             + "|\\bdo\\s+you\\s+(crit|get\\s+crits?)\\b"
             + "|\\bwhat.?s\\s+(your|ur)\\s+crit\\b",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern POT_DEBUG_PATTERN = Pattern.compile(
+            "\\b(pot|potion|autopot)\\s*(debug|info|select(ion)?|status)\\b"
+            + "|\\bdebug\\s+(pot|potion|autopot)s?\\b",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern HELP_PATTERN = Pattern.compile(
             "\\b(help|commands?|what\\s+can\\s+you\\s+do|how\\s+do\\s+i\\s+use\\s+you)\\b",
             Pattern.CASE_INSENSITIVE);
@@ -877,6 +881,8 @@ public class BotChatManager {
             BotManager.after(BotManager.randMs(900, 1100), () -> reportDebugStats(entry, entry.bot));
         if (matchesWholeCommand(CRIT_DEBUG_PATTERN, message))
             BotManager.after(BotManager.randMs(900, 1100), () -> reportCritDebug(entry, entry.bot));
+        if (matchesWholeCommand(POT_DEBUG_PATTERN, message))
+            BotManager.after(BotManager.randMs(900, 1100), () -> reportPotDebug(entry, entry.bot));
 
         // Job advancement — check if message contains a valid job selection
         if (JOB_SELECT_PATTERN.matcher(message).find()) {
@@ -1187,6 +1193,10 @@ public class BotChatManager {
     private static void reportPotions(BotEntry entry, Character bot) {
         int[] counts = BotPotionManager.countPotions(bot);
         queueBotSay(entry, buildPotionReport(counts[0], counts[1]));
+    }
+
+    private static void reportPotDebug(BotEntry entry, Character bot) {
+        queueBotSay(entry, BotPotionManager.autopotDebugReport(bot));
     }
 
     static String buildPotionReport(int hp, int mp) {

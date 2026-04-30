@@ -60,11 +60,16 @@ final class BotPotionManager {
     private BotPotionManager() {
     }
 
-    static int[] countPotions(Character bot) {
-        List<Item> items = bot.getInventory(InventoryType.USE).list().stream()
-                .filter(item -> BotInventoryManager.isRecoveryPotion(item.getItemId()))
+    /** Single source of truth: items the bot has that count as recovery pots. */
+    static List<Item> recoveryPotions(Character bot) {
+        return bot.getInventory(InventoryType.USE).list().stream()
+                .filter(item -> item.getQuantity() > 0
+                        && BotInventoryManager.isRecoveryPotion(item.getItemId()))
                 .toList();
-        return countPotions(items, BotInventoryManager::itemEffect);
+    }
+
+    static int[] countPotions(Character bot) {
+        return countPotions(recoveryPotions(bot), BotInventoryManager::itemEffect);
     }
 
     static int[] countPotions(List<Item> items, Function<Integer, StatEffect> effectLookup) {
@@ -113,7 +118,7 @@ final class BotPotionManager {
     }
 
     static PotionRanking classifyForSlot(StatEffect fx, boolean hpSlot) {
-        if (fx == null || !fx.getStatups().isEmpty()) {
+        if (fx == null) {
             return null;
         }
         int flatPrim    = Math.max(0, hpSlot ? fx.getHp()     : fx.getMp());
@@ -140,55 +145,74 @@ final class BotPotionManager {
         return new PotionRanking(PotionTier.RATE_MIXED, ratePrim > 0 ? ratePrim : flatPrim);
     }
 
-    static void setupAutopotForBot(Character bot) {
-        ItemInformationProvider infoProvider = ItemInformationProvider.getInstance();
+    /** Pair of best autopot picks for the HP and MP slots over the bot's recovery pots. */
+    record AutopotChoice(int hpItemId, PotionRanking hpRank, int mpItemId, PotionRanking mpRank) {}
+
+    /** Shared selection used by both keybind setup and the debug report. */
+    static AutopotChoice computeAutopotChoice(Character bot) {
         int hpItemId = -1;
         int mpItemId = -1;
         PotionRanking bestHp = null;
         PotionRanking bestMp = null;
-        for (Item item : bot.getInventory(InventoryType.USE).list()) {
-            if (item.getQuantity() <= 0) {
-                continue;
-            }
-
-            StatEffect effect;
-            try {
-                effect = infoProvider.getItemEffect(item.getItemId());
-            } catch (Exception exception) {
-                continue;
-            }
+        for (Item item : recoveryPotions(bot)) {
+            StatEffect effect = BotInventoryManager.itemEffect(item.getItemId());
             if (effect == null) {
                 continue;
             }
-
             PotionRanking hpRank = classifyForSlot(effect, true);
             if (hpRank != null && hpRank.betterThan(bestHp)) {
                 bestHp = hpRank;
                 hpItemId = item.getItemId();
             }
-
             PotionRanking mpRank = classifyForSlot(effect, false);
             if (mpRank != null && mpRank.betterThan(bestMp)) {
                 bestMp = mpRank;
                 mpItemId = item.getItemId();
             }
         }
+        return new AutopotChoice(hpItemId, bestHp, mpItemId, bestMp);
+    }
 
-        if (hpItemId > 0) {
-            bot.changeKeybinding(91, new KeyBinding(2, hpItemId));
+    static void setupAutopotForBot(Character bot) {
+        AutopotChoice choice = computeAutopotChoice(bot);
+
+        if (choice.hpItemId() > 0) {
+            bot.changeKeybinding(91, new KeyBinding(2, choice.hpItemId()));
             bot.setAutopotHpAlert(BotManager.cfg.AUTOPOT_HP_THRESH);
         } else {
             bot.getKeymap().remove(91);
             bot.setAutopotHpAlert(0f);
         }
 
-        if (mpItemId > 0) {
-            bot.changeKeybinding(92, new KeyBinding(2, mpItemId));
+        if (choice.mpItemId() > 0) {
+            bot.changeKeybinding(92, new KeyBinding(2, choice.mpItemId()));
             bot.setAutopotMpAlert(BotManager.cfg.AUTOPOT_MP_THRESH);
         } else {
             bot.getKeymap().remove(92);
             bot.setAutopotMpAlert(0f);
         }
+    }
+
+    /** Owner-facing diagnostic: counts vs. selected items for each slot. */
+    static String autopotDebugReport(Character bot) {
+        int[] cnt = countPotions(bot);
+        AutopotChoice choice = computeAutopotChoice(bot);
+        ItemInformationProvider iip = ItemInformationProvider.getInstance();
+        return "pots: " + cnt[0] + " hp / " + cnt[1] + " mp"
+                + " | hp slot: " + describeChoice(iip, choice.hpItemId(), choice.hpRank())
+                + " | mp slot: " + describeChoice(iip, choice.mpItemId(), choice.mpRank());
+    }
+
+    private static String describeChoice(ItemInformationProvider iip, int itemId, PotionRanking rank) {
+        if (itemId <= 0 || rank == null) {
+            return "none";
+        }
+        String name = iip.getName(itemId);
+        if (name == null) name = String.valueOf(itemId);
+        String value = rank.tier().name().startsWith("FLAT_")
+                ? String.valueOf((int) rank.value())
+                : String.format("%.0f%%", rank.value() * 100);
+        return name + " (" + rank.tier().name() + "/" + value + ")";
     }
 
     static String grindStartMessage(Character bot) {
