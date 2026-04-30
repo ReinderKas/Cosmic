@@ -210,6 +210,9 @@ public class BotEntry {
     // "Move here" target — bot navigates to this fixed point, then idles until cleared
     Point moveTarget = null;
     boolean moveTargetPrecise = false; // true when triggered by "move here" — uses tight stop dist
+    // "Farm here" anchor — bot returns to this fixed point and only takes local attacks.
+    Point farmAnchor = null;
+    int farmAnchorMapId = -1;
 
     // Buff consumables (toggleable; cheap = weakest buff of each type, max = strongest)
     boolean buffConsumablesEnabled = false;

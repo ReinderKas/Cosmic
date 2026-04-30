@@ -46,7 +46,10 @@ public class BotChatManager {
             Pattern.CASE_INSENSITIVE);
 
     private static final Pattern MOVE_HERE_PATTERN = Pattern.compile(
-            "\\b(move\\s+(here|there)|go\\s+(here|there)|here|move)\\b",
+            "(?:move\\s+(?:here|there)|go\\s+(?:here|there)|here|move)(?:\\s+(?:now|pls|please))?",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern FARM_HERE_PATTERN = Pattern.compile(
+            "(?:farm|grind|hunt|train)\\s+here(?:\\s+(?:now|pls|please))?",
             Pattern.CASE_INSENSITIVE);
 
     private static final Pattern STOP_PATTERN = Pattern.compile(
@@ -745,7 +748,15 @@ public class BotChatManager {
             return;
         }
 
-        if (MOVE_HERE_PATTERN.matcher(message).find()) {
+        if (isFarmHereCommand(message)) {
+            Point dest = entry.owner != null ? new Point(entry.owner.getPosition()) : null;
+            if (dest != null) {
+                BotManager.after(BotManager.randMs(1000, 1500), () -> {
+                    BotManager.getInstance().issueFarmHere(entry, dest);
+                    BotManager.getInstance().botSay(entry.bot, BotManager.randomReply(MOVE_HERE_REPLIES));
+                });
+            }
+        } else if (isMoveHereCommand(message)) {
             Point dest = entry.owner != null ? new Point(entry.owner.getPosition()) : null;
             if (dest != null) {
                 BotManager.after(BotManager.randMs(1000, 1500), () -> {
@@ -753,14 +764,14 @@ public class BotChatManager {
                     BotManager.getInstance().botSay(entry.bot, BotManager.randomReply(MOVE_HERE_REPLIES));
                 });
             }
-        } else if (FOLLOW_PATTERN.matcher(message).find()) {
+        } else if (isFollowCommand(message)) {
             BotManager.after(BotManager.randMs(1500, 2000), () -> {
                 BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem);
                 BotManager.getInstance().botSay(entry.bot, BotManager.randomReply(FOLLOW_REPLIES));
                 BotPotionManager.checkPotShareOnModeStart(entry, entry.bot);
                 BotManager.after(BotManager.randMs(250, 750), () -> BotManager.getInstance().issueFollowOwner(entry));
             });
-        } else if (GRIND_PATTERN.matcher(message).find()) {
+        } else if (isGrindCommand(message)) {
             BotManager.after(BotManager.randMs(1500, 2000), () -> {
                 BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem);
                 BotPotionManager.setupAutopotForBot(entry.bot);
@@ -771,7 +782,7 @@ public class BotChatManager {
                     checkBotStatus(entry, entry.bot);
                 });
             });
-        } else if (STOP_PATTERN.matcher(message).find()) {
+        } else if (isStopCommand(message)) {
             BotManager.after(BotManager.randMs(900, 1100), () -> {
                 BotManager.getInstance().issueStop(entry);
                 BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem);
@@ -1358,6 +1369,26 @@ public class BotChatManager {
 
     static boolean isApRespecCommand(String message) {
         return AP_RESPEC_PATTERN.matcher(message).find();
+    }
+
+    static boolean isFarmHereCommand(String message) {
+        return matchesWholeCommand(FARM_HERE_PATTERN, message);
+    }
+
+    static boolean isMoveHereCommand(String message) {
+        return matchesWholeCommand(MOVE_HERE_PATTERN, message);
+    }
+
+    static boolean isFollowCommand(String message) {
+        return matchesWholeCommand(FOLLOW_PATTERN, message);
+    }
+
+    static boolean isGrindCommand(String message) {
+        return matchesWholeCommand(GRIND_PATTERN, message);
+    }
+
+    static boolean isStopCommand(String message) {
+        return matchesWholeCommand(STOP_PATTERN, message);
     }
 
     private static void handleApBuildSelection(BotEntry entry, String message) {

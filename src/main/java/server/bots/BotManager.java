@@ -111,6 +111,7 @@ public class BotManager {
                           Point followBasePos,
                           Point followTargetPos,
                           Point moveTargetPos,
+                          Point farmAnchorPos,
                           Point grindTargetPos,
                           Point primaryTargetPos,
                           String primaryTargetSource) {
@@ -122,6 +123,8 @@ public class BotManager {
             return entry.navTargetPos != null ? "nav-waypoint" : primaryTargetSource;
         }
     }
+
+    private record LocalOpportunityAttackResult(boolean consumedTick, Point targetPos) {}
 
     private static final Pattern DISMISS_PATTERN = Pattern.compile(
             "\\b(dismiss|disown|release)\\s+(\\S+)\\b", Pattern.CASE_INSENSITIVE);
@@ -1241,6 +1244,9 @@ public class BotManager {
                 : null;
         Point shopTargetPos = rawShopTargetPos == null ? null : new Point(rawShopTargetPos);
         Point moveTargetPos = entry.moveTarget == null ? null : new Point(entry.moveTarget);
+        Point farmAnchorPos = entry.farmAnchor == null || entry.farmAnchorMapId != bot.getMapId()
+                ? null
+                : new Point(entry.farmAnchor);
         Monster activeGrindTarget = entry.grindTarget != null
                 && entry.grindTarget.isAlive()
                 && entry.grindTarget.getMap() == bot.getMap()
@@ -1255,6 +1261,9 @@ public class BotManager {
         } else if (moveTargetPos != null) {
             primaryTargetPos = moveTargetPos;
             primaryTargetSource = "move-target";
+        } else if (farmAnchorPos != null) {
+            primaryTargetPos = farmAnchorPos;
+            primaryTargetSource = "farm-anchor";
         } else if (grindTargetPos != null) {
             primaryTargetPos = grindTargetPos;
             primaryTargetSource = "grind-target";
@@ -1276,6 +1285,7 @@ public class BotManager {
                 new Point(followBasePos),
                 new Point(followTargetPos),
                 moveTargetPos,
+                farmAnchorPos,
                 grindTargetPos,
                 new Point(primaryTargetPos),
                 primaryTargetSource);
@@ -1594,6 +1604,7 @@ public class BotManager {
         Point ownerPos = targetSnapshot.rawOwnerPos();
         updateObservedOwnerMotion(entry, ownerPos);
         entry.lastOwnerPos = new Point(ownerPos); // raw owner pos before formation offset/snap — used by path logger
+        clearFarmAnchorOnMapChange(entry, bot);
         Point targetPos = targetSnapshot.primaryTargetPos();
         clearFollowActionMoveWindowIfSettled(entry, botPos, targetSnapshot);
 
@@ -1652,55 +1663,24 @@ public class BotManager {
         }
 
         // Follow mode: attack monsters already in attack range without chasing
-        if (entry.following && !entry.noAmmo && runAiTick && !entry.climbing
+        if (entry.following && runAiTick && !entry.climbing
                 && followAnchor != null
                 && bot.getMapId() == followAnchor.getMapId()
                 && Math.abs(botPos.x - followAnchor.getPosition().x) <= BotMovementManager.cfg.FOLLOW_DIST * 5) {
-            Monster followTarget = BotCombatManager.findFollowAttackTarget(entry, bot);
-            if (followTarget != null) {
-                Point followTargetPos = followTarget.getPosition();
-                WeaponType followWeaponType = BotAttackExecutionProvider.getEquippedWeaponType(bot);
-                boolean followRetreat = entry.degenAttackDone
-                        || BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(followWeaponType, botPos, followTargetPos)
-                        || BotAttackExecutionProvider.isAnyMobNearerThanTarget(bot, botPos, followTargetPos);
-                if (followRetreat) {
-                    targetPos = selectGrindNavigationTarget(entry, botPos, followTargetPos);
-                    entry.degenAttackDone = false;
-                } else if (entry.inAir) {
-                    // Mid-air (from a jump): attack bypasses moveWindowMs; attackCooldownMs still gates
-                    BotCombatManager.AttackPlan ap = BotCombatManager.planAttack(entry, bot, followTarget);
-                    if (BotCombatManager.canUseAttackPlanNow(entry, followWeaponType, ap)
-                            && BotCombatManager.isTargetInAttackRange(ap, bot, followTarget)) {
-                        BotCombatManager.attackMonster(entry, bot, ap);
-                        if (ap.isCloseRangeRoute() && BotCombatManager.isRangedAmmoWeapon(followWeaponType)) {
-                            entry.degenAttackDone = true;
-                        }
-                    }
-                } else if (followWeaponType != WeaponType.BOW && followWeaponType != WeaponType.CROSSBOW
-                        && followWeaponType != WeaponType.WAND && followWeaponType != WeaponType.STAFF
-                        && BotCombatManager.isTargetJumpable(entry.movementProfile, true, botPos, followTargetPos)) {
-                    // Target is above but within jump height — jump regardless of moveWindowMs
-                    BotMovementManager.initiateJump(entry, bot, followTargetPos.x - botPos.x);
-                    return;
-                } else if (entry.moveWindowMs <= 0) {
-                    BotCombatManager.AttackPlan ap = BotCombatManager.planAttack(entry, bot, followTarget);
-                    if (BotCombatManager.isTargetInAttackRange(ap, bot, followTarget)) {
-                        BotCombatManager.attackMonster(entry, bot, ap);
-                        int followDx = Math.abs(botPos.x - targetSnapshot.followTargetPos().x);
-                        entry.moveWindowMs = followDx > BotMovementManager.cfg.FOLLOW_DIST * 3 ? 1000
-                                           : followDx > BotMovementManager.cfg.FOLLOW_DIST     ? 200
-                                           : 0;
-                        clearFollowActionMoveWindowIfSettled(entry, botPos, targetSnapshot);
-                        if (ap.isCloseRangeRoute() && BotCombatManager.isRangedAmmoWeapon(followWeaponType)) {
-                            entry.degenAttackDone = true;
-                        }
-                        if (!entry.inAir) return;
-                    }
-                }
+            LocalOpportunityAttackResult result = tryLocalOpportunityAttack(
+                    entry, bot, botPos, targetPos, targetSnapshot.followTargetPos(), true, true);
+            targetPos = result.targetPos();
+            if (result.consumedTick()) {
+                return;
             }
         }
 
         if (tryFollowIdleMovementFastPath(entry, bot, targetPos, nowMs)) {
+            return;
+        }
+
+        if (entry.farmAnchor != null) {
+            tickAnchoredFarm(entry, bot, botPos, runAiTick);
             return;
         }
 
@@ -1863,21 +1843,132 @@ public class BotManager {
         stepMovementCore(entry, targetPos, runAiTick);
     }
 
-    private static void clearFollowActionMoveWindowIfSettled(BotEntry entry,
-                                                             Point botPos,
-                                                             TargetSnapshot targetSnapshot) {
-        if (entry == null || !entry.following || entry.moveWindowMs <= 0 || botPos == null || targetSnapshot == null) {
+    private void tickAnchoredFarm(BotEntry entry, Character bot, Point botPos, boolean runAiTick) {
+        if (entry.farmAnchor == null || entry.farmAnchorMapId != bot.getMapId()) {
+            clearFarmAnchorOnMapChange(entry, bot);
+            tickIdleEntry(entry, bot);
             return;
         }
 
-        Point followTargetPos = targetSnapshot.followTargetPos();
-        if (followTargetPos == null) {
+        Point anchor = new Point(entry.farmAnchor);
+        if (runAiTick) {
+            LocalOpportunityAttackResult attackResult = tryLocalOpportunityAttack(
+                    entry, bot, botPos, anchor, anchor, false, false);
+            if (attackResult.consumedTick()) {
+                return;
+            }
+        }
+
+        if (isNear(botPos, anchor, 8) && !entry.inAir && !entry.climbing) {
+            entry.moveTarget = null;
+            entry.moveTargetPrecise = false;
+            BotPhysicsEngine.idleOnGround(entry, bot);
+            BotMovementManager.broadcastMovement(entry);
+            return;
+        }
+
+        entry.moveTarget = anchor;
+        entry.moveTargetPrecise = true;
+        stepMovementCore(entry, anchor, runAiTick);
+    }
+
+    private LocalOpportunityAttackResult tryLocalOpportunityAttack(BotEntry entry,
+                                                                  Character bot,
+                                                                  Point botPos,
+                                                                  Point movementTargetPos,
+                                                                  Point moveWindowReferencePos,
+                                                                  boolean allowCombatMovement,
+                                                                  boolean allowJumpTowardTarget) {
+        Point targetPos = movementTargetPos;
+        if (entry.noAmmo || bot == null || botPos == null) {
+            return new LocalOpportunityAttackResult(false, targetPos);
+        }
+
+        Monster localTarget = BotCombatManager.findFollowAttackTarget(entry, bot);
+        if (localTarget == null) {
+            return new LocalOpportunityAttackResult(false, targetPos);
+        }
+
+        Point localTargetPos = localTarget.getPosition();
+        WeaponType weaponType = BotAttackExecutionProvider.getEquippedWeaponType(bot);
+        boolean shouldRetreat = allowCombatMovement
+                && (entry.degenAttackDone
+                || BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(weaponType, botPos, localTargetPos)
+                || BotAttackExecutionProvider.isAnyMobNearerThanTarget(bot, botPos, localTargetPos));
+        if (shouldRetreat) {
+            entry.degenAttackDone = false;
+            return new LocalOpportunityAttackResult(
+                    false, selectGrindNavigationTarget(entry, botPos, localTargetPos));
+        }
+
+        BotCombatManager.AttackPlan attackPlan = BotCombatManager.planAttack(entry, bot, localTarget);
+        if (attackPlan == null) {
+            return new LocalOpportunityAttackResult(false, targetPos);
+        }
+        if (entry.inAir) {
+            if (BotCombatManager.canUseAttackPlanNow(entry, weaponType, attackPlan)
+                    && BotCombatManager.isTargetInAttackRange(attackPlan, bot, localTarget)) {
+                BotCombatManager.attackMonster(entry, bot, attackPlan);
+                if (allowCombatMovement && attackPlan.isCloseRangeRoute()
+                        && BotCombatManager.isRangedAmmoWeapon(weaponType)) {
+                    entry.degenAttackDone = true;
+                }
+            }
+            return new LocalOpportunityAttackResult(false, targetPos);
+        }
+
+        if (allowJumpTowardTarget
+                && weaponType != WeaponType.BOW && weaponType != WeaponType.CROSSBOW
+                && weaponType != WeaponType.WAND && weaponType != WeaponType.STAFF
+                && BotCombatManager.isTargetJumpable(entry.movementProfile, true, botPos, localTargetPos)) {
+            BotMovementManager.initiateJump(entry, bot, localTargetPos.x - botPos.x);
+            return new LocalOpportunityAttackResult(true, targetPos);
+        }
+
+        if (entry.moveWindowMs <= 0 && BotCombatManager.isTargetInAttackRange(attackPlan, bot, localTarget)) {
+            BotCombatManager.attackMonster(entry, bot, attackPlan);
+            setLocalAttackMoveWindow(entry, botPos, moveWindowReferencePos);
+            if (allowCombatMovement && attackPlan.isCloseRangeRoute()
+                    && BotCombatManager.isRangedAmmoWeapon(weaponType)) {
+                entry.degenAttackDone = true;
+            }
+            return new LocalOpportunityAttackResult(!entry.inAir, targetPos);
+        }
+
+        return new LocalOpportunityAttackResult(false, targetPos);
+    }
+
+    private static void setLocalAttackMoveWindow(BotEntry entry, Point botPos, Point referencePos) {
+        if (botPos == null || referencePos == null) {
+            entry.moveWindowMs = 0;
+            return;
+        }
+        int dx = Math.abs(botPos.x - referencePos.x);
+        entry.moveWindowMs = dx > BotMovementManager.cfg.FOLLOW_DIST * 3 ? 1000
+                           : dx > BotMovementManager.cfg.FOLLOW_DIST     ? 200
+                           : 0;
+        clearActionMoveWindowIfSettled(entry, botPos, referencePos);
+    }
+
+    private static void clearFollowActionMoveWindowIfSettled(BotEntry entry,
+                                                             Point botPos,
+                                                             TargetSnapshot targetSnapshot) {
+        if (entry == null || !entry.following || targetSnapshot == null) {
+            return;
+        }
+        clearActionMoveWindowIfSettled(entry, botPos, targetSnapshot.followTargetPos());
+    }
+
+    private static void clearActionMoveWindowIfSettled(BotEntry entry,
+                                                       Point botPos,
+                                                       Point targetPos) {
+        if (entry == null || entry.moveWindowMs <= 0 || botPos == null || targetPos == null) {
             return;
         }
 
         int followStopBand = Math.max(BotMovementManager.cfg.STOP_DIST, BotMovementManager.cfg.FOLLOW_DIST);
-        if (Math.abs(botPos.x - followTargetPos.x) <= followStopBand
-                && Math.abs(botPos.y - followTargetPos.y) <= BotMovementManager.cfg.FOLLOW_Y_CAP) {
+        if (Math.abs(botPos.x - targetPos.x) <= followStopBand
+                && Math.abs(botPos.y - targetPos.y) <= BotMovementManager.cfg.FOLLOW_Y_CAP) {
             entry.moveWindowMs = 0;
         }
     }
@@ -2074,6 +2165,31 @@ public class BotManager {
         entry.moveTargetPrecise = precise;
     }
 
+    public void issueFarmHere(BotEntry entry, Point dest) {
+        if (entry == null || dest == null || entry.bot == null) {
+            return;
+        }
+        clearScriptTasks(entry);
+        BotShopManager.cancelShopVisit(entry);
+        startFarmHere(entry, dest);
+    }
+
+    private void startFarmHere(BotEntry entry, Point dest) {
+        clearMode(entry);
+        entry.farmAnchor = new Point(dest);
+        entry.farmAnchorMapId = entry.bot.getMapId();
+        entry.moveTarget = new Point(dest);
+        entry.moveTargetPrecise = true;
+        entry.grindTarget = null;
+        entry.nextGrindTargetSearchAtMs = 0L;
+        entry.moveWindowMs = 0;
+        entry.degenAttackDone = false;
+        entry.retreatHoldUntilMs = 0L;
+        entry.retreatHoldPos = null;
+        entry.wanderDirection = 0;
+        BotMovementManager.clearNavigationState(entry);
+    }
+
     /**
      * Public hook: return the bot to ordinary owner-follow mode. Scripted map
      * automation and chat commands should use this instead of writing mode
@@ -2104,6 +2220,8 @@ public class BotManager {
         entry.grinding = false;
         entry.moveTarget = null;
         entry.moveTargetPrecise = false;
+        entry.farmAnchor = null;
+        entry.farmAnchorMapId = -1;
         entry.following = true;
     }
 
@@ -2127,6 +2245,8 @@ public class BotManager {
         entry.following = false;
         entry.moveTarget = null;
         entry.moveTargetPrecise = false;
+        entry.farmAnchor = null;
+        entry.farmAnchorMapId = -1;
         entry.grindTarget = null;
         entry.nextGrindTargetSearchAtMs = 0L;
         entry.moveWindowMs = 0;
@@ -2212,6 +2332,8 @@ public class BotManager {
         entry.followTargetId = 0;
         entry.following = false;
         entry.grinding = false;
+        entry.farmAnchor = null;
+        entry.farmAnchorMapId = -1;
     }
 
     private static boolean isNear(Point source, Point target, int dist) {
@@ -2407,7 +2529,8 @@ public class BotManager {
     }
 
     private boolean tickIdleEntry(BotEntry entry, Character bot) {
-        if (entry.following || entry.grinding || entry.moveTarget != null || entry.shopVisitPending) {
+        if (entry.following || entry.grinding || entry.moveTarget != null
+                || entry.farmAnchor != null || entry.shopVisitPending) {
             return false;
         }
         if (isSwimMap(entry) && entry.inAir && !entry.climbing) {
@@ -2653,6 +2776,20 @@ public class BotManager {
         }
         entry.observedOwnerStepX = entry.lastOwnerPos == null ? 0 : ownerPos.x - entry.lastOwnerPos.x;
         entry.observedOwnerStepY = entry.lastOwnerPos == null ? 0 : ownerPos.y - entry.lastOwnerPos.y;
+    }
+
+    private static void clearFarmAnchorOnMapChange(BotEntry entry, Character bot) {
+        if (entry == null || bot == null || entry.farmAnchor == null) {
+            return;
+        }
+        if (entry.farmAnchorMapId != bot.getMapId()) {
+            entry.farmAnchor = null;
+            entry.farmAnchorMapId = -1;
+            if (entry.moveTargetPrecise) {
+                entry.moveTarget = null;
+                entry.moveTargetPrecise = false;
+            }
+        }
     }
 
     private static void tickStuckDetection(BotEntry entry) {

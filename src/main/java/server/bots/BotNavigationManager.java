@@ -194,6 +194,7 @@ final class BotNavigationManager {
                 snapshot.followBasePos(),
                 snapshot.followTargetPos(),
                 snapshot.moveTargetPos(),
+                snapshot.farmAnchorPos(),
                 snapshot.grindTargetPos(),
                 new Point(rawTargetPos),
                 "nav-input");

@@ -61,6 +61,21 @@ class BotChatManagerTest {
     }
 
     @Test
+    void shouldOnlyMatchMovementModeCommandsAsWholeCommands() {
+        assertTrue(BotChatManager.isMoveHereCommand("here"));
+        assertTrue(BotChatManager.isMoveHereCommand("move here!"));
+        assertFalse(BotChatManager.isMoveHereCommand("some random chat message here"));
+
+        assertTrue(BotChatManager.isGrindCommand("farm"));
+        assertTrue(BotChatManager.isGrindCommand("go grind"));
+        assertFalse(BotChatManager.isGrindCommand("Im going to the farm today"));
+
+        assertTrue(BotChatManager.isFarmHereCommand("farm here"));
+        assertTrue(BotChatManager.isFarmHereCommand("grind here please"));
+        assertFalse(BotChatManager.isFarmHereCommand("Im going to farm here today"));
+    }
+
+    @Test
     void shouldParseNamedItemGiveRequests() {
         assertEquals("name:flaming feather", BotChatManager.matchChoiceCategory("give me flaming feather"));
         assertEquals("name:flaming feather", BotChatManager.matchChoiceCategory("give flaming feather"));

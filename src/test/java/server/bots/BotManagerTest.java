@@ -391,6 +391,42 @@ class BotManagerTest {
     }
 
     @Test
+    void shouldUseFarmHereAnchorAsPrimaryTargetWithoutEnteringGrindMode() {
+        MapleMap map = createEmptyTestMap(910000031);
+        Character owner = mockMovingBot(new Point(50, 100), map);
+        Character bot = mockMovingBot(new Point(100, 100), map);
+        BotEntry entry = new BotEntry(bot, owner, null);
+
+        BotManager.getInstance().issueFarmHere(entry, new Point(300, 100));
+
+        assertEquals(new Point(300, 100), entry.farmAnchor);
+        assertEquals(map.getId(), entry.farmAnchorMapId);
+        assertEquals(new Point(300, 100), entry.moveTarget);
+        assertTrue(entry.moveTargetPrecise);
+        assertFalse(entry.following);
+        assertFalse(entry.grinding);
+
+        BotManager.TargetSnapshot snapshot = BotManager.getInstance().captureTargetSnapshot(entry);
+        assertEquals(new Point(300, 100), snapshot.primaryTargetPos());
+        assertEquals("move-target", snapshot.primaryTargetSource());
+    }
+
+    @Test
+    void shouldKeepFarmHereAnchorPrimaryAfterArrivalClearsMoveTarget() {
+        MapleMap map = createEmptyTestMap(910000032);
+        Character owner = mockMovingBot(new Point(50, 100), map);
+        Character bot = mockMovingBot(new Point(300, 100), map);
+        BotEntry entry = new BotEntry(bot, owner, null);
+        entry.farmAnchor = new Point(300, 100);
+        entry.farmAnchorMapId = map.getId();
+
+        BotManager.TargetSnapshot snapshot = BotManager.getInstance().captureTargetSnapshot(entry);
+
+        assertEquals(new Point(300, 100), snapshot.primaryTargetPos());
+        assertEquals("farm-anchor", snapshot.primaryTargetSource());
+    }
+
+    @Test
     void shouldCancelShopVisitWhenOwnerIssuesFollow() {
         MapleMap map = createEmptyTestMap(910000027);
         Character owner = mockMovingBot(new Point(50, 100), map);
@@ -407,6 +443,26 @@ class BotManagerTest {
         assertFalse(entry.shopSequenceActive);
         assertNull(entry.shopNpcPos);
         assertNull(entry.shopTargetPos);
+        assertTrue(entry.following);
+    }
+
+    @Test
+    void shouldClearFarmHereAnchorWhenOwnerIssuesFollow() {
+        MapleMap map = createEmptyTestMap(910000033);
+        Character owner = mockMovingBot(new Point(50, 100), map);
+        Character bot = mockMovingBot(new Point(100, 100), map);
+        BotEntry entry = new BotEntry(bot, owner, null);
+        entry.farmAnchor = new Point(300, 100);
+        entry.farmAnchorMapId = map.getId();
+        entry.moveTarget = new Point(300, 100);
+        entry.moveTargetPrecise = true;
+
+        BotManager.getInstance().issueFollowOwner(entry);
+
+        assertNull(entry.farmAnchor);
+        assertEquals(-1, entry.farmAnchorMapId);
+        assertNull(entry.moveTarget);
+        assertFalse(entry.moveTargetPrecise);
         assertTrue(entry.following);
     }
 
