@@ -11,6 +11,7 @@ import constants.game.CharacterStance;
 import org.mockito.MockedStatic;
 import org.junit.jupiter.api.Test;
 import server.StatEffect;
+import server.life.Monster;
 import server.maps.Foothold;
 import server.maps.FootholdTree;
 import server.maps.MapleMap;
@@ -182,6 +183,25 @@ class BotManagerTest {
     }
 
     @Test
+    void shouldNotUseLowerPlatformDropAsCrossRegionRetreat() {
+        MapleMap map = createEmptyTestMap(910000060);
+        FootholdTree footholds = map.getFootholds();
+        footholds.insert(new Foothold(new Point(0, 100), new Point(500, 100), 1));
+        footholds.insert(new Foothold(new Point(0, 220), new Point(500, 220), 2));
+        BotNavigationGraphProvider.rebuildGraph(map);
+
+        Character bot = mock(Character.class);
+        when(bot.getMap()).thenReturn(map);
+        when(bot.getPosition()).thenReturn(new Point(250, 100));
+        BotEntry entry = new BotEntry(bot, null, null);
+
+        assertNull(BotManager.selectCrossRegionRetreatTarget(
+                entry,
+                new Point(250, 100),
+                new Point(300, 100)));
+    }
+
+    @Test
     void shouldResetPhysicsWhenOnlineBotIsSpawnedAtOwnerPosition() {
         MapleMap map = createEmptyTestMap(910000023);
         map.getFootholds().insert(new Foothold(new Point(0, 100), new Point(200, 100), 1));
@@ -248,6 +268,7 @@ class BotManagerTest {
             bots.remove(owner.getId());
         }
     }
+
     @Test
     void shouldUseFollowIdleFastPathOnlyWhileParkedNearTarget() {
         MapleMap map = createEmptyTestMap(910000024);
@@ -266,6 +287,46 @@ class BotManagerTest {
         entry.observedOwnerStepX = 1;
         assertFalse(BotManager.tryFollowIdleMovementFastPath(entry, bot, new Point(100, 100), 2_100L),
                 "owner movement should force normal movement resolution");
+    }
+
+    @Test
+    void shouldKeepAttackableGrindTargetInsteadOfRetargetingDuringCooldown() {
+        MapleMap map = createEmptyTestMap(910000028);
+        Character bot = mockMovingBot(new Point(100, 100), map);
+        BotEntry entry = new BotEntry(bot, mock(Character.class), null);
+        entry.nextGrindTargetSearchAtMs = 1_000L;
+        Monster target = mock(Monster.class);
+        when(target.getPosition()).thenReturn(new Point(140, 100));
+        BotCombatManager.AttackPlan plan = basicClosePlan(target);
+
+        assertFalse(BotManager.shouldSearchForGrindTarget(entry, bot, target, plan, 1_000L));
+    }
+
+    @Test
+    void shouldRetargetWhenCurrentGrindTargetIsNotAttackableAndIntervalElapsed() {
+        MapleMap map = createEmptyTestMap(910000029);
+        Character bot = mockMovingBot(new Point(100, 100), map);
+        BotEntry entry = new BotEntry(bot, mock(Character.class), null);
+        entry.nextGrindTargetSearchAtMs = 1_000L;
+        Monster target = mock(Monster.class);
+        when(target.getPosition()).thenReturn(new Point(300, 100));
+        BotCombatManager.AttackPlan plan = basicClosePlan(target);
+
+        assertTrue(BotManager.shouldSearchForGrindTarget(entry, bot, target, plan, 1_000L));
+    }
+
+    @Test
+    void shouldReuseWanderDirectionWhenGrindHasNoTarget() {
+        Character bot = mockMovingBot(new Point(100, 100), createEmptyTestMap(910000030));
+        BotEntry entry = new BotEntry(bot, mock(Character.class), null);
+
+        Point first = BotManager.resolveNoGrindTargetPosition(entry, bot.getPosition());
+        int direction = entry.wanderDirection;
+        Point second = BotManager.resolveNoGrindTargetPosition(entry, bot.getPosition());
+
+        assertTrue(direction == -1 || direction == 1);
+        assertEquals(new Point(100 + direction * 200, 100), first);
+        assertEquals(first, second);
     }
 
     @Test
@@ -561,6 +622,12 @@ class BotManagerTest {
         assertEquals("name:warrior potion", BotChatManager.matchChoiceCategory("drop warrior potions?"));
         assertEquals("name:warrior potion", BotChatManager.matchTradeCategory("trade me warrior potions"));
         assertEquals("warrior potion", BotChatManager.matchItemQuery("anybody got warrior potions?"));
+    }
+
+    private static BotCombatManager.AttackPlan basicClosePlan(Monster target) {
+        return new BotCombatManager.AttackPlan(
+                0, 0, 1, null, List.of(target), BotCombatManager.AttackRoute.CLOSE,
+                0, 0, 0, 0, 0, 0, 0);
     }
 
     private static MapleMap createEmptyTestMap(int mapId) {

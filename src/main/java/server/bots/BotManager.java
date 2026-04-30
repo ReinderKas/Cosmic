@@ -641,7 +641,8 @@ public class BotManager {
             bot.changeKeybinding(key, new KeyBinding(7, binding.getAction()));
         }
     }
-    /** Disown a bot by name — cancels its AI tick and leaves it idle in the map. */
+
+    /** Disown a bot by name - cancels its AI tick and leaves it idle in the map. */
     public boolean dismissBot(int ownerCharId, String botName) {
         List<BotEntry> entries = bots.get(ownerCharId);
         if (entries == null) return false;
@@ -1284,6 +1285,13 @@ public class BotManager {
     private static final int RETREAT_ARRIVAL_TOLERANCE_X = 25; // 50ms tick can't land on an exact pixel
 
     static Point selectGrindNavigationTarget(BotEntry entry, Point botPos, Point combatTargetPos) {
+        return selectGrindNavigationTarget(entry, botPos, combatTargetPos, false);
+    }
+
+    private static Point selectGrindNavigationTarget(BotEntry entry,
+                                                     Point botPos,
+                                                     Point combatTargetPos,
+                                                     boolean crossRegionRetreatChecked) {
         if (entry == null || botPos == null || combatTargetPos == null) {
             return combatTargetPos;
         }
@@ -1324,7 +1332,9 @@ public class BotManager {
         // path to the bot without traversing a nav edge, while the bot can still shoot across.
         // Empty/sparse adjacent regions score highest. Cross-region uses the nav-edge
         // pipeline for stickiness, so no separate hysteresis is set here.
-        Point crossRegionPos = selectCrossRegionRetreatTarget(entry, botPos, combatTargetPos);
+        Point crossRegionPos = crossRegionRetreatChecked
+                ? null
+                : selectCrossRegionRetreatTarget(entry, botPos, combatTargetPos);
         if (crossRegionPos != null) {
             return crossRegionPos;
         }
@@ -1380,6 +1390,9 @@ public class BotManager {
         BotNavigationGraph.Edge bestEdge = null;
         int bestScore = Integer.MIN_VALUE;
         for (BotNavigationGraph.Edge edge : graph.getOutgoing(botRegionId)) {
+            if (edge.type != BotNavigationGraph.EdgeType.WALK) {
+                continue;
+            }
             int toRegionId = edge.toRegionId;
             if (toRegionId == botRegionId || toRegionId == targetRegionId) {
                 continue;
@@ -1464,6 +1477,38 @@ public class BotManager {
 
         int retreatRegionId = BotNavigationManager.resolveTargetRegionId(graph, entry, map, retreatPos);
         return retreatRegionId == botRegionId;
+    }
+
+    static boolean shouldSearchForGrindTarget(BotEntry entry,
+                                              Character bot,
+                                              Monster currentTarget,
+                                              BotCombatManager.AttackPlan currentAttackPlan,
+                                              long now) {
+        if (entry == null) {
+            return false;
+        }
+        if (currentTarget == null) {
+            return true;
+        }
+        if (now < entry.nextGrindTargetSearchAtMs) {
+            return false;
+        }
+        return bot == null
+                || currentAttackPlan == null
+                || !BotCombatManager.isTargetInAttackRange(currentAttackPlan, bot, currentTarget);
+    }
+
+    static Point resolveNoGrindTargetPosition(BotEntry entry, Point botPos) {
+        if (entry == null || botPos == null) {
+            return botPos;
+        }
+        if (BotPqHooks.isCouponSeeking(entry)) {
+            return entry.kpq.navTarget;
+        }
+        if (entry.wanderDirection == 0) {
+            entry.wanderDirection = ThreadLocalRandom.current().nextBoolean() ? 1 : -1;
+        }
+        return new Point(botPos.x + entry.wanderDirection * 200, botPos.y);
     }
 
     // Main tick
@@ -1688,8 +1733,15 @@ public class BotManager {
                 target = null;
             }
             long now = System.currentTimeMillis();
-            if (runAiTick && (target == null || now >= entry.nextGrindTargetSearchAtMs)) {
-                target = BotCombatManager.findGrindTarget(entry, bot);
+            BotCombatManager.AttackPlan attackPlan = target == null
+                    ? null
+                    : BotCombatManager.planAttack(entry, bot, target);
+            if (runAiTick && shouldSearchForGrindTarget(entry, bot, target, attackPlan, now)) {
+                Monster searchedTarget = BotCombatManager.findGrindTarget(entry, bot);
+                if (searchedTarget != null || target == null) {
+                    target = searchedTarget;
+                    attackPlan = null;
+                }
                 entry.nextGrindTargetSearchAtMs = now + BotCombatManager.cfg.GRIND_RETARGET_INTERVAL_MS;
             }
             if (target == null) {
@@ -1714,6 +1766,11 @@ public class BotManager {
                     // falls through to stepMovementCore below
                 }
             }
+            if (target == null) {
+                targetPos = resolveNoGrindTargetPosition(entry, botPos);
+                stepMovementCore(entry, targetPos, runAiTick);
+                return;
+            }
             entry.grindTarget = target;
             entry.wanderDirection = 0;
             Point tp = target.getPosition();
@@ -1726,8 +1783,11 @@ public class BotManager {
                 target = closerThreat;
                 entry.grindTarget = closerThreat;
                 tp = target.getPosition();
+                attackPlan = null;
             }
-            BotCombatManager.AttackPlan attackPlan = BotCombatManager.planAttack(entry, bot, target);
+            if (attackPlan == null) {
+                attackPlan = BotCombatManager.planAttack(entry, bot, target);
+            }
             WeaponType grindWeaponType = BotAttackExecutionProvider.getEquippedWeaponType(bot);
             boolean shouldRetreatForRangedSpacing = entry.degenAttackDone
                     || BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(grindWeaponType, botPos, tp);
@@ -1794,7 +1854,7 @@ public class BotManager {
             // the monster's actual region.
             targetPos = crossRegionRetreatPos != null
                     ? crossRegionRetreatPos
-                    : selectGrindNavigationTarget(entry, botPos, tp);
+                    : selectGrindNavigationTarget(entry, botPos, tp, shouldRetreatForRangedSpacing);
             if (entry.degenAttackDone && shouldRetreatForRangedSpacing) {
                 entry.degenAttackDone = false;
             }
@@ -2067,6 +2127,14 @@ public class BotManager {
         entry.following = false;
         entry.moveTarget = null;
         entry.moveTargetPrecise = false;
+        entry.grindTarget = null;
+        entry.nextGrindTargetSearchAtMs = 0L;
+        entry.moveWindowMs = 0;
+        entry.degenAttackDone = false;
+        entry.retreatHoldUntilMs = 0L;
+        entry.retreatHoldPos = null;
+        entry.wanderDirection = 0;
+        BotMovementManager.clearNavigationState(entry);
         entry.grinding = true;
     }
 

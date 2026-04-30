@@ -19,7 +19,8 @@
       "Bash(cmd /c \"mvnw.cmd compile -q 2>&1\")",
       "Bash(cmd:*)",
       "WebSearch",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(/c/apache-maven/bin/mvn compile *)"
     ]
   }
 }
