@@ -27,10 +27,13 @@ import server.maps.Foothold;
 import server.maps.MapleMap;
 
 import java.awt.*;
+import java.lang.reflect.Field;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Collections;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -554,6 +557,67 @@ class BotCombatManagerTest {
     }
 
     @Test
+    void shouldPreferLessOccupiedGrindRegionWhenPathCostIsClose() throws Exception {
+        MapleMap map = spy(new MapleMap(910009052, 0, 0, 910009052, 1.0f));
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        Foothold startFoothold = new Foothold(new Point(0, 100), new Point(100, 100), 1);
+        Foothold occupiedFoothold = new Foothold(new Point(200, 100), new Point(300, 100), 2);
+        Foothold openFoothold = new Foothold(new Point(320, 100), new Point(420, 100), 3);
+        footholds.insert(startFoothold);
+        footholds.insert(occupiedFoothold);
+        footholds.insert(openFoothold);
+        map.setFootholds(footholds);
+
+        BotNavigationGraph.Region startRegion = new BotNavigationGraph.Region(
+                1, List.of(new BotNavigationGraph.Segment(startFoothold)));
+        BotNavigationGraph.Region occupiedRegion = new BotNavigationGraph.Region(
+                2, List.of(new BotNavigationGraph.Segment(occupiedFoothold)));
+        BotNavigationGraph.Region openRegion = new BotNavigationGraph.Region(
+                3, List.of(new BotNavigationGraph.Segment(openFoothold)));
+        BotNavigationGraph graph = new BotNavigationGraph(
+                map.getId(),
+                1,
+                BotMovementProfile.base(),
+                List.of(startRegion, occupiedRegion, openRegion),
+                Map.of(1, startRegion, 2, occupiedRegion, 3, openRegion),
+                Map.of(1, 1, 2, 2, 3, 3),
+                Map.of(1, List.of(
+                        new BotNavigationGraph.Edge(1, 2, BotNavigationGraph.EdgeType.WALK,
+                                new Point(100, 100), new Point(200, 100), 0, 0, 0, 0, 0, 100),
+                        new BotNavigationGraph.Edge(1, 3, BotNavigationGraph.EdgeType.WALK,
+                                new Point(100, 100), new Point(320, 100), 0, 0, 0, 0, 0, 150))),
+                Set.of());
+
+        Character owner = mock(Character.class);
+        when(owner.getId()).thenReturn(909052);
+        Character bot = mockBot(new Point(50, 100), map, 20_000, null);
+        Character siblingBot = mockBot(new Point(220, 100), map, 20_000, null);
+        Monster occupiedTarget = mockMob(new Point(220, 100), 9300400);
+        Monster openTarget = mockMob(new Point(340, 100), 9300401);
+        doReturn(List.of(occupiedTarget, openTarget)).when(map).getAllMonsters();
+
+        BotEntry entry = new BotEntry(bot, owner, null);
+        entry.grinding = true;
+        BotEntry siblingEntry = new BotEntry(siblingBot, owner, null);
+        siblingEntry.grinding = true;
+
+        BotManager manager = BotManager.getInstance();
+        Map<Integer, List<BotEntry>> bots = botEntries(manager);
+        bots.put(owner.getId(), new CopyOnWriteArrayList<>(List.of(entry, siblingEntry)));
+        try (MockedStatic<BotNavigationGraphProvider> graphProvider =
+                     Mockito.mockStatic(BotNavigationGraphProvider.class, Mockito.CALLS_REAL_METHODS)) {
+            graphProvider.when(() -> BotNavigationGraphProvider.peekGraph(map, BotMovementProfile.base()))
+                    .thenReturn(graph);
+
+            Monster target = BotCombatManager.findGrindTarget(entry, bot);
+
+            assertEquals(openTarget, target);
+        } finally {
+            bots.remove(owner.getId());
+        }
+    }
+
+    @Test
     void shouldUseRangedHitBoxTargetOutsideCurrentRegionWithoutPathingThere() {
         MapleMap map = spy(new MapleMap(910009051, 0, 0, 910009051, 1.0f));
         server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
@@ -672,5 +736,12 @@ class BotCombatManagerTest {
             return new Rectangle(anchor.x - 30, anchor.y - 50, 80, 100);
         });
         return skill;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<Integer, List<BotEntry>> botEntries(BotManager manager) throws Exception {
+        Field field = BotManager.class.getDeclaredField("bots");
+        field.setAccessible(true);
+        return (Map<Integer, List<BotEntry>>) field.get(manager);
     }
 }

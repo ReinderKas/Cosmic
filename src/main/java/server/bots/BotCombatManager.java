@@ -148,6 +148,8 @@ class BotCombatManager {
         public int   GRIND_SEEK_RANGE  = 800;
         public int   GRIND_RETARGET_INTERVAL_MS = 400;
         public int   AOE_MOB_THRESHOLD = 2;
+        public int   GRIND_REGION_OCCUPANCY_PENALTY = 1200;
+        public int   GRIND_REGION_OCCUPANCY_PENALTY_CAP = 3600;
 
         // Mob damage
         public int   MOB_TOUCH_SWEEP_HEIGHT = 50;
@@ -1253,7 +1255,11 @@ class BotCombatManager {
                     && !isImmediateProjectileTarget(entry, bot, candidate)) {
                 continue;
             }
-            long localScore = grindTargetScore(bot, botPos, botFoothold, candidate);
+            int targetRegionId = graphContext.available()
+                    ? BotNavigationManager.resolveTargetRegionId(graphContext.graph(), entry, graphContext.map(), candidate.getPosition())
+                    : -1;
+            long localScore = grindTargetScore(bot, botPos, botFoothold, candidate)
+                    + grindRegionOccupancyPenalty(graphContext, bot, targetRegionId);
             currentRegionTargets.add(new ScoredGrindTarget(candidate, localScore, localScore,
                     candidate.getPosition().distanceSq(botPos)));
         }
@@ -1381,10 +1387,12 @@ class BotCombatManager {
             long pathCost = graphPathCost(context.graph(), context.map(), context.startPos(), context.startRegionId(),
                     group.bestMonster().getPosition(), group.regionId(), context.profile());
             long crowdBonus = Math.min(3_000L, (long) Math.max(0, group.mobCount() - 1) * 400L);
+            long occupancyPenalty = grindRegionOccupancyPenalty(context, bot, group.regionId());
             long graphScore = pathCost >= UNREACHABLE_GRAPH_COST
                     ? UNREACHABLE_GRAPH_COST
-                    : Math.max(0L, pathCost - crowdBonus);
-            scoredTargets.add(new ScoredGrindTarget(group.bestMonster(), graphScore, group.bestLocalScore(),
+                    : Math.max(0L, pathCost - crowdBonus) + occupancyPenalty;
+            long localScore = group.bestLocalScore() + occupancyPenalty;
+            scoredTargets.add(new ScoredGrindTarget(group.bestMonster(), graphScore, localScore,
                     group.bestDistanceSq()));
         }
         return scoredTargets;
@@ -1465,6 +1473,31 @@ class BotCombatManager {
             score += 1200L;
         }
         return score;
+    }
+
+    private static long grindRegionOccupancyPenalty(GrindGraphContext context, Character bot, int targetRegionId) {
+        if (!context.available() || context.entry().owner == null || bot == null || targetRegionId < 0) {
+            return 0L;
+        }
+
+        int occupiedCount = 0;
+        for (BotEntry sibling : BotManager.getInstance().getBotEntries(context.entry().owner.getId())) {
+            if (sibling == context.entry() || sibling == null || !sibling.grinding || sibling.bot == null) {
+                continue;
+            }
+            if (sibling.bot.getMap() != context.map() || sibling.bot.getHp() <= 0 || sibling.bot.getPosition() == null) {
+                continue;
+            }
+
+            int occupiedRegionId = BotNavigationManager.resolveCurrentRegionId(
+                    context.graph(), sibling, context.map(), sibling.bot.getPosition());
+            if (occupiedRegionId == targetRegionId) {
+                occupiedCount++;
+            }
+        }
+
+        long penalty = (long) Math.max(0, occupiedCount) * Math.max(0, cfg.GRIND_REGION_OCCUPANCY_PENALTY);
+        return Math.min(Math.max(0, cfg.GRIND_REGION_OCCUPANCY_PENALTY_CAP), penalty);
     }
 
     private static Foothold findGroundFoothold(Point position, Character bot) {
