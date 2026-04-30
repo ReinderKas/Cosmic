@@ -179,7 +179,6 @@ class BotCombatManager {
     private static final int CLIENT_PROJECTILE_BOTTOM = 50;
     private static final List<Integer> PASSIVE_PROJECTILE_RANGE_SKILL_IDS = List.of(
             Archer.EYE_OF_AMAZON,
-            4000001,
             Rogue.KEEN_EYES,
             WindArcher.EYE_OF_AMAZON,
             NightWalker.KEEN_EYES
