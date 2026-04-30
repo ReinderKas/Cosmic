@@ -644,9 +644,9 @@ class BotEquipManager {
 
     /**
      * Computes max-base damage from a simulated stat snapshot, then if a {@link MapDamageProfile}
-     * is available approximates expected damage as {@code ((min+max)/2 - mobWdef) * hitChance}
-     * with min approximated as half max (low-mastery proxy). Falls back to raw max when no
-     * map context (town, recommendations from trade).
+     * is available approximates expected per-hit damage as the integral of
+     * {@code max(1, uniform[min,max] - wdef)} where min ≈ max/2 (low-mastery proxy). Falls back
+     * to raw max when no map context (town, recommendations from trade).
      */
     private static int damageWith(StatSnapshot sim, ItemInformationProvider ii, WeaponType wtype,
                                    MapDamageProfile mobProfile) {
@@ -673,9 +673,7 @@ class BotEquipManager {
         if (mobProfile == null) {
             return rawMax;
         }
-        // mid ≈ (min + max) / 2, where min is approximated as max * 0.5 (low-mastery proxy).
-        int mid = (rawMax * 3) / 4;
-        int afterDef = Math.max(1, mid - mobProfile.mobWdef());
+        double expectedAfterDef = expectedDamageAfterDef(rawMax, mobProfile.mobWdef());
         double hitChance;
         try {
             hitChance = CombatFormulaProvider.getInstance().calculatePhysicalMobHitChance(
@@ -683,7 +681,32 @@ class BotEquipManager {
         } catch (Throwable t) {
             hitChance = 1.0;
         }
-        return Math.max(1, (int) (afterDef * hitChance));
+        // Scale by 1000 so hitChance and small expectedAfterDef differences survive the int cast.
+        return Math.max(1, (int) Math.round(expectedAfterDef * hitChance * 1000.0));
+    }
+
+    /**
+     * Expected per-hit damage when each roll is {@code uniform[rawMax/2, rawMax] - wdef} clamped
+     * to 1. The previous {@code (rawMin + rawMax)/2 - wdef} approximation collapsed to the floor
+     * once wdef exceeded the midpoint, erasing the upper-tail damage that higher STR/WATK
+     * actually delivers — so two candidates with different rawMax both scored ≈1 against a
+     * high-WDEF mob, even when one cleared the defense and the other barely did.
+     */
+    static double expectedDamageAfterDef(int rawMax, int wdef) {
+        if (rawMax <= 0) return 1.0;
+        double rawMin = rawMax * 0.5;
+        if (wdef <= rawMin) {
+            return Math.max(1.0, (rawMin + rawMax) / 2.0 - wdef);
+        }
+        if (wdef >= rawMax) {
+            return 1.0;
+        }
+        // Partial clamp: fraction below wdef floors to 1; above-tail integrates as a triangle.
+        double range = rawMax - rawMin;
+        double clampedFraction = (wdef - rawMin) / range;
+        double aboveTail = rawMax - wdef;
+        double aboveContribution = (aboveTail * aboveTail) / (2.0 * range);
+        return Math.max(1.0, clampedFraction + aboveContribution);
     }
 
     /**
