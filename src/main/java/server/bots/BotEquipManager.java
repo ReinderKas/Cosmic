@@ -975,6 +975,14 @@ class BotEquipManager {
      */
     record MapDamageProfile(int mobWdef, int mobAvoid, int mobLevel) {
         static MapDamageProfile snapshot(Character bot) {
+            return fromStats(collectCandidates(bot));
+        }
+
+        static MapDamageProfile snapshotByAvoid(Character bot) {
+            return fromStatsByAvoid(collectCandidates(bot));
+        }
+
+        private static List<MonsterStats> collectCandidates(Character bot) {
             if (bot == null) return null;
             MapleMap map;
             try { map = bot.getMap(); } catch (Throwable t) { return null; }
@@ -1000,7 +1008,7 @@ class BotEquipManager {
             } catch (Throwable ignored) {
                 // Live mobs are enough; spawn templates are only a fallback/stabilizer.
             }
-            return fromStats(candidates);
+            return candidates;
         }
 
         static MapDamageProfile fromStats(List<MonsterStats> candidates) {
@@ -1014,6 +1022,21 @@ class BotEquipManager {
                         || (s.getLevel() == picked.getLevel()
                             && s.getAvoidability() == picked.getAvoidability()
                             && s.getPDDamage() > picked.getPDDamage())) {
+                    picked = s;
+                }
+            }
+            if (picked == null) return null;
+            return new MapDamageProfile(picked.getPDDamage(), picked.getAvoidability(), picked.getLevel());
+        }
+
+        static MapDamageProfile fromStatsByAvoid(List<MonsterStats> candidates) {
+            if (candidates == null || candidates.isEmpty()) return null;
+            MonsterStats picked = null;
+            for (MonsterStats s : candidates) {
+                if (s == null || s.isFriendly()) continue;
+                if (picked == null
+                        || s.getAvoidability() > picked.getAvoidability()
+                        || (s.getAvoidability() == picked.getAvoidability() && s.getLevel() > picked.getLevel())) {
                     picked = s;
                 }
             }

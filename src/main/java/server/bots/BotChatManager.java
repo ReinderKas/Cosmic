@@ -1105,10 +1105,17 @@ public class BotChatManager {
     }
 
     static String buildRangeReport(Character bot) {
-        return buildRangeReport(bot, BotEquipManager.MapDamageProfile.snapshot(bot));
+        BotEquipManager.MapDamageProfile dmgProfile = BotEquipManager.MapDamageProfile.snapshot(bot);
+        BotEquipManager.MapDamageProfile hitProfile = BotEquipManager.MapDamageProfile.snapshotByAvoid(bot);
+        return buildRangeReport(bot, dmgProfile, hitProfile);
     }
 
     static String buildRangeReport(Character bot, BotEquipManager.MapDamageProfile mobProfile) {
+        return buildRangeReport(bot, mobProfile, mobProfile);
+    }
+
+    private static String buildRangeReport(Character bot, BotEquipManager.MapDamageProfile mobProfile,
+                                           BotEquipManager.MapDamageProfile hitProfile) {
         CombatFormulaProvider formulas = CombatFormulaProvider.getInstance();
         boolean magicAttack = BotEquipManager.isMageJob(bot.getJob());
         int attackStat;
@@ -1136,15 +1143,15 @@ public class BotChatManager {
 
         String report = String.format("my dmg is %d-%d, %s %d, %s %d",
                 minDmg, maxDmg, attackLabel, attackStat, accuracyLabel, accuracy);
-        if (mobProfile == null) {
+        if (hitProfile == null) {
             return report;
         }
 
         double hitChance = magicAttack
-                ? formulas.calculateMagicMobHitChance(accuracy, bot.getLevel(), mobProfile.mobLevel(), mobProfile.mobAvoid())
-                : formulas.calculatePhysicalMobHitChance(accuracy, bot.getLevel(), mobProfile.mobLevel(), mobProfile.mobAvoid());
+                ? formulas.calculateMagicMobHitChance(accuracy, bot.getLevel(), hitProfile.mobLevel(), hitProfile.mobAvoid())
+                : formulas.calculatePhysicalMobHitChance(accuracy, bot.getLevel(), hitProfile.mobLevel(), hitProfile.mobAvoid());
         int hitPercent = (int) Math.round(hitChance * 100.0d);
-        return String.format("%s, hit %d%% vs strongest lv%d mob", report, hitPercent, mobProfile.mobLevel());
+        return String.format("%s | hit %d%% vs hardest mob (avd %d)", report, hitPercent, hitProfile.mobAvoid());
     }
 
     private static void reportMovementStats(BotEntry entry, Character bot) {
