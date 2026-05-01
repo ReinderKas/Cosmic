@@ -34,8 +34,10 @@ class BotNavigationGraphProviderTest {
     private static BotNavigationGraph perionGraph;
     private static MapleMap kerning;
     private static BotNavigationGraph kerningGraph;
+    private static MapleMap kerningPharmacy;
     private static MapleMap kpqS1;
     private static BotNavigationGraph kpqS1Graph;
+    private static MapleMap mushroomShrine;
     private static MapleMap swamp1;
     private static BotNavigationGraph swamp1Graph;
 
@@ -52,8 +54,12 @@ class BotNavigationGraphProviderTest {
         kerning = BotNavigationMapLoader.loadMapGeometry(103000000);
         kerningGraph = BotNavigationGraphProvider.rebuildGraph(kerning);
 
+        kerningPharmacy = BotNavigationMapLoader.loadMapGeometry(103000002);
+
         kpqS1 = BotNavigationMapLoader.loadMapGeometry(103000800);
         kpqS1Graph = BotNavigationGraphProvider.rebuildGraph(kpqS1);
+
+        mushroomShrine = BotNavigationMapLoader.loadMapGeometry(800000000);
 
         swamp1 = BotNavigationMapLoader.loadMapGeometry(107000000);
         swamp1Graph = BotNavigationGraphProvider.rebuildGraph(swamp1);
@@ -497,6 +503,55 @@ class BotNavigationGraphProviderTest {
                                 && edge.toRegionId == targetRegionId
                                 && edge.containsLaunchX(badLaunch.x)),
                 "jump launch windows must exclude launches that immediately walk off the landing platform");
+    }
+
+    @Test
+    void shouldNotGenerateKerningPharmacyJumpIntoBlockedUnderside() {
+        BotMovementProfile profile = new BotMovementProfile(105, 100);
+        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(kerningPharmacy, profile);
+        int fromRegionId = graph.regionIdByFootholdId.getOrDefault(17, -1);
+        int targetRegionId = graph.regionIdByFootholdId.getOrDefault(1, -1);
+        Point badLaunch = new Point(-294, -45);
+
+        assertEquals(14, fromRegionId);
+        assertEquals(9, targetRegionId);
+
+        BotPhysicsEngine.JumpLanding landing =
+                BotPhysicsEngine.simulateJumpLanding(kerningPharmacy, badLaunch, 0, profile);
+        assertNotNull(landing);
+        assertEquals(fromRegionId, graph.regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1),
+                "blocked underside jump should fall back onto the source platform");
+
+        assertFalse(graph.getOutgoing(fromRegionId).stream()
+                        .anyMatch(edge -> edge.type == BotNavigationGraph.EdgeType.JUMP
+                                && edge.toRegionId == targetRegionId
+                                && edge.containsLaunchX(badLaunch.x)),
+                "jump window must exclude launches that hit the pharmacy box underside");
+    }
+
+    @Test
+    void shouldNotGenerateMushroomShrineJumpIntoDoughnutUnderside() {
+        BotMovementProfile profile = new BotMovementProfile(110, 100);
+        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(mushroomShrine, profile);
+        int fromRegionId = graph.findRegionId(mushroomShrine, new Point(3146, 95));
+        int targetRegionId = graph.regionIdByFootholdId.getOrDefault(264, -1);
+        Point badLaunch = new Point(3145, 95);
+        int stepX = BotPhysicsEngine.walkStep(mushroomShrine, profile);
+
+        assertEquals(55, fromRegionId);
+        assertEquals(48, targetRegionId);
+
+        BotPhysicsEngine.JumpLanding landing =
+                BotPhysicsEngine.simulateJumpLanding(mushroomShrine, badLaunch, stepX, profile);
+        assertNotNull(landing);
+        assertEquals(fromRegionId, graph.regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1),
+                "doughnut underside jump should bounce back to the outer floor");
+
+        assertFalse(graph.getOutgoing(fromRegionId).stream()
+                        .anyMatch(edge -> edge.type == BotNavigationGraph.EdgeType.JUMP
+                                && edge.toRegionId == targetRegionId
+                                && edge.containsLaunchX(badLaunch.x)),
+                "jump window must exclude launches that hit the doughnut underside");
     }
 
     private static List<BotNavigationGraph.Edge> findPath(BotNavigationGraph graph,

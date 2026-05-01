@@ -28,8 +28,9 @@ import java.util.concurrent.Executors;
 final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
-    private static final int GRAPH_VERSION = 36;
+    private static final int GRAPH_VERSION = 38;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
+    private static final int SAME_SOLID_NEST_GAP_PX = 8;
     private static final int ROPE_ANCHOR_INTERVAL_PX = 30;
     private static final int JUMP_POST_LANDING_STABILITY_TICKS = 3;
     private static final int MAX_PROFILED_JUMP_REGIONS = 5;
@@ -38,6 +39,7 @@ final class BotNavigationGraphProvider {
     private static final Map<GraphCacheKey, CompletableFuture<BotNavigationGraph>> PENDING_GRAPHS = new ConcurrentHashMap<>();
     private static final Map<GraphCacheKey, GraphBuildReport> LAST_BUILD_REPORTS = new ConcurrentHashMap<>();
     private static final Map<Integer, Set<Integer>> COLLIDABLE_WALL_IDS_BY_MAP_ID = new ConcurrentHashMap<>();
+    private static final Map<Integer, Set<Integer>> COLLIDABLE_FROM_BELOW_IDS_BY_MAP_ID = new ConcurrentHashMap<>();
     private static final ThreadLocal<BuildProfileBuilder> ACTIVE_BUILD_PROFILE = new ThreadLocal<>();
     private static final ExecutorService GRAPH_WARMUP_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "bot-nav-graph-warmup");
@@ -448,6 +450,7 @@ final class BotNavigationGraphProvider {
                     || graph.movementProfile.totalJumpStat() != key.totalJumpStat()) {
                 return null;
             }
+            seedCachedFootholdCollisionIds(graph);
             return graph;
         } catch (IOException | ClassNotFoundException e) {
             log.debug("Failed to load bot nav graph cache for map {} speed={} jump={}",
@@ -481,12 +484,14 @@ final class BotNavigationGraphProvider {
             List<Foothold> walkableFootholds = new ArrayList<>();
             long phaseStartedAt = System.nanoTime();
             Set<Integer> collidableWallIds = new HashSet<>();
+            Set<Integer> collidableFromBelowIds;
             for (Foothold foothold : footholds) {
                 footholdsById.put(foothold.getId(), foothold);
                 if (!foothold.isWall()) {
                     walkableFootholds.add(foothold);
                 }
             }
+            collidableFromBelowIds = classifyCollidableFromBelowFootholds(footholdsById);
             for (Foothold foothold : footholds) {
                 if (Foothold.isCollidableWall(foothold, footholdsById)) {
                     collidableWallIds.add(foothold.getId());
@@ -497,12 +502,13 @@ final class BotNavigationGraphProvider {
             buildProfile.walkableFootholdCount = walkableFootholds.size();
             buildProfile.ropeCount = map.getRopes().size();
             COLLIDABLE_WALL_IDS_BY_MAP_ID.put(map.getId(), new HashSet<>(collidableWallIds));
+            COLLIDABLE_FROM_BELOW_IDS_BY_MAP_ID.put(map.getId(), new HashSet<>(collidableFromBelowIds));
 
             List<BotNavigationGraph.Region> regions = new ArrayList<>();
             Map<Integer, BotNavigationGraph.Region> regionsById = new HashMap<>();
             Map<Integer, Integer> regionIdByFootholdId = new HashMap<>();
             phaseStartedAt = System.nanoTime();
-            buildRegions(walkableFootholds, footholdsById, regions, regionsById, regionIdByFootholdId);
+            buildRegions(walkableFootholds, footholdsById, collidableFromBelowIds, regions, regionsById, regionIdByFootholdId);
             buildProfile.buildRegionsNs = System.nanoTime() - phaseStartedAt;
 
             phaseStartedAt = System.nanoTime();
@@ -579,7 +585,8 @@ final class BotNavigationGraphProvider {
             buildProfile.buildPortalEdgesNs = System.nanoTime() - phaseStartedAt;
 
             BotNavigationGraph graph = new BotNavigationGraph(
-                    map.getId(), GRAPH_VERSION, movementProfile, regions, regionsById, regionIdByFootholdId, outgoing, collidableWallIds);
+                    map.getId(), GRAPH_VERSION, movementProfile, regions, regionsById, regionIdByFootholdId, outgoing,
+                    collidableWallIds, collidableFromBelowIds);
             GraphBuildReport report = buildProfile.finish();
             LAST_BUILD_REPORTS.put(GraphCacheKey.from(map.getId(), movementProfile), report);
             log.debug("Built bot nav graph map {} speed={} jump={} in {} ms (regions={}, edges={}, drop={} ms, jump={} ms, jumpSamples={}, cacheHits={})",
@@ -612,8 +619,197 @@ final class BotNavigationGraphProvider {
         return COLLIDABLE_WALL_IDS_BY_MAP_ID.get(mapId);
     }
 
+    static Set<Integer> getCachedCollidableFromBelowIds(int mapId) {
+        return COLLIDABLE_FROM_BELOW_IDS_BY_MAP_ID.get(mapId);
+    }
+
+    static Set<Integer> computeCollidableFromBelowIds(MapleMap map) {
+        if (map == null || map.getFootholds() == null) {
+            return Set.of();
+        }
+        Set<Integer> cached = COLLIDABLE_FROM_BELOW_IDS_BY_MAP_ID.get(map.getId());
+        if (cached != null) {
+            return cached;
+        }
+        Map<Integer, Foothold> footholdsById = new HashMap<>();
+        for (Foothold foothold : map.getFootholds().getAllFootholds()) {
+            footholdsById.put(foothold.getId(), foothold);
+        }
+        Set<Integer> computed = classifyCollidableFromBelowFootholds(footholdsById);
+        COLLIDABLE_FROM_BELOW_IDS_BY_MAP_ID.put(map.getId(), new HashSet<>(computed));
+        return computed;
+    }
+
+    private static void seedCachedFootholdCollisionIds(BotNavigationGraph graph) {
+        COLLIDABLE_WALL_IDS_BY_MAP_ID.put(graph.mapId, new HashSet<>(graph.collidableWallIds));
+        COLLIDABLE_FROM_BELOW_IDS_BY_MAP_ID.put(graph.mapId, new HashSet<>(graph.collidableFromBelowIds));
+    }
+
+    private static Set<Integer> classifyCollidableFromBelowFootholds(Map<Integer, Foothold> footholdsById) {
+        List<ClassifiedLoop> loops = classifyClosedLoops(buildClosedLoops(footholdsById));
+        if (loops.isEmpty()) {
+            return Set.of();
+        }
+
+        Set<Integer> result = new HashSet<>();
+        for (ClassifiedLoop classifiedLoop : loops) {
+            if (!classifiedLoop.solid()) {
+                continue;
+            }
+
+            ClosedLoop loop = classifiedLoop.loop();
+            for (int footholdId : loop.footholdIds()) {
+                Foothold foothold = footholdsById.get(footholdId);
+                if (foothold == null || foothold.isWall() || foothold.getY1() != foothold.getY2()) {
+                    continue;
+                }
+
+                double midX = (foothold.getX1() + foothold.getX2()) / 2.0;
+                double y = foothold.getY1();
+                boolean insideAbove = isPointInLoop(loop, midX, y - 1.0);
+                boolean insideBelow = isPointInLoop(loop, midX, y + 1.0);
+                if (insideAbove && !insideBelow) {
+                    result.add(foothold.getId());
+                }
+            }
+        }
+        return result;
+    }
+
+    private record ClosedLoop(int[] footholdIds, double[] xs, double[] ys, double minX, double maxX, double minY, double maxY) {}
+
+    private record ClassifiedLoop(ClosedLoop loop, int depth, boolean solid) {}
+
+    private static List<ClosedLoop> buildClosedLoops(Map<Integer, Foothold> footholdsById) {
+        List<ClosedLoop> loops = new ArrayList<>();
+        Set<Integer> visited = new HashSet<>();
+        for (Foothold start : footholdsById.values()) {
+            if (visited.contains(start.getId())) {
+                continue;
+            }
+
+            List<Foothold> chain = new ArrayList<>();
+            Set<Integer> seenInChain = new HashSet<>();
+            Foothold current = start;
+            boolean closed = false;
+            while (current != null && seenInChain.add(current.getId()) && chain.size() <= footholdsById.size()) {
+                chain.add(current);
+                Foothold next = footholdsById.get(current.getNext());
+                if (next != null && next.getId() == start.getId()) {
+                    closed = true;
+                    break;
+                }
+                current = next;
+            }
+
+            if (!closed || chain.size() < 3 || !isEndpointConnectedLoop(chain)) {
+                continue;
+            }
+
+            visited.addAll(seenInChain);
+            loops.add(toClosedLoop(chain));
+        }
+        return loops;
+    }
+
+    private static boolean isEndpointConnectedLoop(List<Foothold> chain) {
+        for (int i = 0; i < chain.size(); i++) {
+            Foothold current = chain.get(i);
+            Foothold next = chain.get((i + 1) % chain.size());
+            if (current.getX2() != next.getX1() || current.getY2() != next.getY1()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static ClosedLoop toClosedLoop(List<Foothold> chain) {
+        int size = chain.size();
+        int[] footholdIds = new int[size];
+        double[] xs = new double[size];
+        double[] ys = new double[size];
+        double minX = Double.POSITIVE_INFINITY;
+        double maxX = Double.NEGATIVE_INFINITY;
+        double minY = Double.POSITIVE_INFINITY;
+        double maxY = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < size; i++) {
+            Foothold foothold = chain.get(i);
+            footholdIds[i] = foothold.getId();
+            xs[i] = foothold.getX1();
+            ys[i] = foothold.getY1();
+            minX = Math.min(minX, Math.min(foothold.getX1(), foothold.getX2()));
+            maxX = Math.max(maxX, Math.max(foothold.getX1(), foothold.getX2()));
+            minY = Math.min(minY, Math.min(foothold.getY1(), foothold.getY2()));
+            maxY = Math.max(maxY, Math.max(foothold.getY1(), foothold.getY2()));
+        }
+        return new ClosedLoop(footholdIds, xs, ys, minX, maxX, minY, maxY);
+    }
+
+    private static List<ClassifiedLoop> classifyClosedLoops(List<ClosedLoop> loops) {
+        List<ClosedLoop> ordered = new ArrayList<>(loops);
+        ordered.sort(Comparator.comparingDouble(BotNavigationGraphProvider::loopBoundingArea).reversed());
+
+        List<ClassifiedLoop> classified = new ArrayList<>(ordered.size());
+        for (ClosedLoop loop : ordered) {
+            ClassifiedLoop parent = null;
+            double parentArea = Double.POSITIVE_INFINITY;
+            for (ClassifiedLoop candidate : classified) {
+                if (loopContainsLoop(candidate.loop(), loop)) {
+                    double area = loopBoundingArea(candidate.loop());
+                    if (area < parentArea) {
+                        parent = candidate;
+                        parentArea = area;
+                    }
+                }
+            }
+
+            int depth = parent == null ? 0 : parent.depth() + 1;
+            boolean solid = parent == null
+                    || isThinNestedShell(parent.loop(), loop)
+                    ? parent == null || parent.solid()
+                    : !parent.solid();
+            ClassifiedLoop classifiedLoop = new ClassifiedLoop(loop, depth, solid);
+            classified.add(classifiedLoop);
+        }
+        return classified;
+    }
+
+    private static double loopBoundingArea(ClosedLoop loop) {
+        return (loop.maxX() - loop.minX()) * (loop.maxY() - loop.minY());
+    }
+
+    private static boolean loopContainsLoop(ClosedLoop outer, ClosedLoop inner) {
+        if (outer.minX() > inner.minX() || outer.maxX() < inner.maxX()
+                || outer.minY() > inner.minY() || outer.maxY() < inner.maxY()) {
+            return false;
+        }
+        return isPointInLoop(outer, inner.xs()[0], inner.ys()[0]);
+    }
+
+    private static boolean isThinNestedShell(ClosedLoop outer, ClosedLoop inner) {
+        return inner.minX() - outer.minX() <= SAME_SOLID_NEST_GAP_PX
+                && outer.maxX() - inner.maxX() <= SAME_SOLID_NEST_GAP_PX
+                && inner.minY() - outer.minY() <= SAME_SOLID_NEST_GAP_PX
+                && outer.maxY() - inner.maxY() <= SAME_SOLID_NEST_GAP_PX;
+    }
+
+    private static boolean isPointInLoop(ClosedLoop loop, double x, double y) {
+        boolean inside = false;
+        double[] xs = loop.xs();
+        double[] ys = loop.ys();
+        for (int i = 0, j = xs.length - 1; i < xs.length; j = i++) {
+            boolean intersects = ((ys[i] > y) != (ys[j] > y))
+                    && (x < (xs[j] - xs[i]) * (y - ys[i]) / ((ys[j] - ys[i]) + 0.0) + xs[i]);
+            if (intersects) {
+                inside = !inside;
+            }
+        }
+        return inside;
+    }
+
     private static void buildRegions(List<Foothold> footholds,
                                      Map<Integer, Foothold> footholdsById,
+                                     Set<Integer> collidableFromBelowIds,
                                      List<BotNavigationGraph.Region> regions,
                                      Map<Integer, BotNavigationGraph.Region> regionsById,
                                      Map<Integer, Integer> regionIdByFootholdId) {
@@ -646,7 +842,9 @@ final class BotNavigationGraphProvider {
 
             List<BotNavigationGraph.Segment> segments = new ArrayList<>(group.size());
             for (Foothold foothold : group) {
-                segments.add(new BotNavigationGraph.Segment(foothold));
+                segments.add(new BotNavigationGraph.Segment(
+                        foothold,
+                        collidableFromBelowIds.contains(foothold.getId())));
             }
 
             BotNavigationGraph.Region region = new BotNavigationGraph.Region(nextRegionId++, segments);

@@ -324,6 +324,10 @@ class BotMovementManager {
                 broadcastMovement(entry);
                 return;
             }
+            if (result == BotPhysicsEngine.AirborneStepResult.CEILING) {
+                broadcastMovement(entry);
+                return;
+            }
             if (result == BotPhysicsEngine.AirborneStepResult.LANDED) {
                 entry.jumpCooldownMs = 0;
                 broadcastMovement(entry);

@@ -174,6 +174,7 @@ final class BotPhysicsEngine {
     private enum AirCollisionType {
         NONE,
         WALL,
+        CEILING,
         LAND
     }
 
@@ -187,6 +188,7 @@ final class BotPhysicsEngine {
 
     enum AirborneStepResult {
         WALL,
+        CEILING,
         LANDED,
         CONTINUE
     }
@@ -1233,6 +1235,10 @@ final class BotPhysicsEngine {
             collideWithAirWall(entry, bot, collision.point());
             return AirborneStepResult.WALL;
         }
+        if (collision.type() == AirCollisionType.CEILING) {
+            collideWithAirCeiling(entry, bot, collision.point());
+            return AirborneStepResult.CEILING;
+        }
         if (collision.type() == AirCollisionType.LAND && canLand(entry)) {
             landOnGround(entry, bot, collision.point(), collision.foothold(),
                     nextPos.x - previousPos.x, nextPos.y - previousPos.y);
@@ -1254,6 +1260,20 @@ final class BotPhysicsEngine {
         entry.climbRope = null;
         entry.crouching = false;
         setMovementVelocity(entry, 0, velocityFromAirStep(entry.velY));
+        syncCharacterState(entry);
+    }
+
+    private static void collideWithAirCeiling(BotEntry entry, Character bot, Point collisionPoint) {
+        entry.velY = 0f;
+        entry.fixedAirArc = false;
+        entry.physX = collisionPoint.x;
+        entry.physY = collisionPoint.y;
+        bot.setPosition(collisionPoint);
+        entry.inAir = true;
+        entry.climbing = false;
+        entry.climbRope = null;
+        entry.crouching = false;
+        setMovementVelocity(entry, velocityFromDeltaX(entry.airVelX), 0);
         syncCharacterState(entry);
     }
 
@@ -1491,14 +1511,19 @@ final class BotPhysicsEngine {
             return AirCollision.none();
         }
         AirCollision wall = findWallCollision(map, previousPos, nextPos);
+        AirCollision ceiling = findCeilingCollision(map, previousPos, nextPos);
         AirCollision landing = findGroundCollision(map, previousPos, nextPos);
-        if (wall.type == AirCollisionType.NONE) {
-            return landing;
+        AirCollision best = AirCollision.none();
+        if (wall.type() != AirCollisionType.NONE) {
+            best = wall;
         }
-        if (landing.type == AirCollisionType.NONE) {
-            return wall;
+        if (ceiling.type() != AirCollisionType.NONE && ceiling.progress() < best.progress()) {
+            best = ceiling;
         }
-        return wall.progress <= landing.progress ? wall : landing;
+        if (landing.type() != AirCollisionType.NONE && landing.progress() < best.progress()) {
+            best = landing;
+        }
+        return best;
     }
 
     private static void launchAirborne(BotEntry entry,
@@ -1724,6 +1749,29 @@ final class BotPhysicsEngine {
         return AirCollision.none();
     }
 
+    private static AirCollision findCeilingCollision(MapleMap map, Point previousPos, Point nextPos) {
+        if (map == null || map.getFootholds() == null || nextPos.y >= previousPos.y) {
+            return AirCollision.none();
+        }
+
+        java.util.Set<Integer> collidableFromBelow = getCollidableFromBelowIds(map);
+        if (collidableFromBelow.isEmpty()) {
+            return AirCollision.none();
+        }
+
+        AirCollision best = AirCollision.none();
+        for (Foothold foothold : map.getFootholds().getAllFootholds()) {
+            if (foothold.isWall() || !collidableFromBelow.contains(foothold.getId())) {
+                continue;
+            }
+            AirCollision collision = ceilingCollision(foothold, previousPos, nextPos);
+            if (collision.type() == AirCollisionType.CEILING && collision.progress() < best.progress()) {
+                best = collision;
+            }
+        }
+        return best;
+    }
+
     private static AirCollision findWallCollision(MapleMap map, Point previousPos, Point nextPos) {
         return findWallCollision(map, previousPos, nextPos, false);
     }
@@ -1831,6 +1879,14 @@ final class BotPhysicsEngine {
         return result;
     }
 
+    private static java.util.Set<Integer> getCollidableFromBelowIds(MapleMap map) {
+        java.util.Set<Integer> cached = BotNavigationGraphProvider.getCachedCollidableFromBelowIds(map.getId());
+        if (cached != null) {
+            return cached;
+        }
+        return BotNavigationGraphProvider.computeCollidableFromBelowIds(map);
+    }
+
     private static AirCollision landingAtX(MapleMap map,
                                            Point previousPos,
                                            Point nextPos,
@@ -1918,6 +1974,35 @@ final class BotPhysicsEngine {
                 progress);
     }
 
+    private static AirCollision ceilingCollision(Foothold foothold, Point previousPos, Point nextPos) {
+        if (foothold.getY1() != foothold.getY2()) {
+            return AirCollision.none();
+        }
+
+        int ceilingY = foothold.getY1();
+        if (ceilingY > previousPos.y || ceilingY < nextPos.y) {
+            return AirCollision.none();
+        }
+
+        double progress = (ceilingY - previousPos.y) / (double) (nextPos.y - previousPos.y);
+        if (progress <= 0.0 || progress > 1.0) {
+            return AirCollision.none();
+        }
+
+        double xAtCeiling = previousPos.x + (nextPos.x - previousPos.x) * progress;
+        int minX = Math.min(foothold.getX1(), foothold.getX2());
+        int maxX = Math.max(foothold.getX1(), foothold.getX2());
+        if (xAtCeiling < minX || xAtCeiling > maxX) {
+            return AirCollision.none();
+        }
+
+        return new AirCollision(
+                AirCollisionType.CEILING,
+                new Point((int) Math.round(xAtCeiling), ceilingY + 1),
+                foothold,
+                progress);
+    }
+
     private static boolean isWalkableGroundWallEndpoint(double yAtWall, int minY, int maxY) {
         if (Math.abs(yAtWall - minY) < 0.001) {
             return true;
@@ -2002,6 +2087,13 @@ final class BotPhysicsEngine {
                 previousIntY = collision.point().y;
                 continue;
             }
+            if (collision.type() == AirCollisionType.CEILING) {
+                physX = collision.point().x;
+                physY = collision.point().y;
+                velocityY = 0f;
+                previousIntY = collision.point().y;
+                continue;
+            }
             if (collision.type() == AirCollisionType.LAND && remainingLandingGraceMs == 0L) {
                 return null;
             }
@@ -2069,6 +2161,13 @@ final class BotPhysicsEngine {
                 physX = collision.point().x;
                 physY = collision.point().y;
                 stepX = 0;
+                previousIntY = collision.point().y;
+                continue;
+            }
+            if (collision.type() == AirCollisionType.CEILING) {
+                physX = collision.point().x;
+                physY = collision.point().y;
+                velocityY = 0f;
                 previousIntY = collision.point().y;
                 continue;
             }

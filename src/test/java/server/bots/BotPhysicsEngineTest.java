@@ -30,7 +30,9 @@ class BotPhysicsEngineTest {
     private static MapleMap henesys;
     private static MapleMap elliniaWeaponStore;
     private static MapleMap kerning;
+    private static MapleMap kerningPharmacy;
     private static MapleMap kpqS1;
+    private static MapleMap mushroomShrine;
     private static MapleMap sleepyForest;
 
     @BeforeAll
@@ -39,7 +41,9 @@ class BotPhysicsEngineTest {
         henesys = BotNavigationMapLoader.loadMapGeometry(100000000);
         elliniaWeaponStore = BotNavigationMapLoader.loadMapGeometry(101000001);
         kerning = BotNavigationMapLoader.loadMapGeometry(103000000);
+        kerningPharmacy = BotNavigationMapLoader.loadMapGeometry(103000002);
         kpqS1 = BotNavigationMapLoader.loadMapGeometry(103000800);
+        mushroomShrine = BotNavigationMapLoader.loadMapGeometry(800000000);
         sleepyForest = BotNavigationMapLoader.loadMapGeometry(105040400);
     }
 
@@ -646,6 +650,65 @@ class BotPhysicsEngineTest {
         assertTrue(collidableWallIds.contains(2), "top-right shaft wall should be collidable");
         assertTrue(collidableWallIds.contains(10), "left lower wall should be collidable");
         assertTrue(collidableWallIds.contains(13), "bottom platform right wall should be collidable");
+    }
+
+    @Test
+    void shouldCacheKerningPharmacyBlockedUndersidesAtGraphBuild() {
+        BotNavigationGraphProvider.rebuildGraph(kerningPharmacy);
+
+        java.util.Set<Integer> collidableFromBelowIds = BotNavigationGraphProvider.getCachedCollidableFromBelowIds(kerningPharmacy.getId());
+
+        assertNotNull(collidableFromBelowIds);
+        assertTrue(collidableFromBelowIds.contains(1), "left pharmacy box lower edge should block jumps from below");
+        assertTrue(collidableFromBelowIds.contains(27), "right pharmacy box lower edge should block jumps from below");
+        assertFalse(collidableFromBelowIds.contains(17), "standalone pharmacy platform should stay jump-through from below");
+    }
+
+    @Test
+    void shouldCacheMushroomShrineDoughnutUndersidesAtGraphBuild() {
+        BotNavigationGraphProvider.rebuildGraph(mushroomShrine);
+
+        java.util.Set<Integer> collidableFromBelowIds = BotNavigationGraphProvider.getCachedCollidableFromBelowIds(mushroomShrine.getId());
+
+        assertNotNull(collidableFromBelowIds);
+        assertTrue(collidableFromBelowIds.contains(248), "outer doughnut lower edge should block jumps from below");
+        assertFalse(collidableFromBelowIds.contains(250), "outer doughnut upper edge should stay a normal floor");
+        assertFalse(collidableFromBelowIds.contains(264), "inner doughnut lower edge should stay a normal floor");
+    }
+
+    @Test
+    void shouldBumpHeadAgainstClosedBoxUnderside() {
+        MapleMap map = createEmptyTestMap(910000058);
+        server.maps.FootholdTree footholds = map.getFootholds();
+        Foothold lower = new Foothold(new Point(0, 100), new Point(40, 100), 1);
+        Foothold right = new Foothold(new Point(40, 100), new Point(40, 60), 2);
+        Foothold upper = new Foothold(new Point(40, 60), new Point(0, 60), 3);
+        Foothold left = new Foothold(new Point(0, 60), new Point(0, 100), 4);
+        lower.setPrev(left.getId());
+        lower.setNext(right.getId());
+        right.setPrev(lower.getId());
+        right.setNext(upper.getId());
+        upper.setPrev(right.getId());
+        upper.setNext(left.getId());
+        left.setPrev(upper.getId());
+        left.setNext(lower.getId());
+        footholds.insert(lower);
+        footholds.insert(right);
+        footholds.insert(upper);
+        footholds.insert(left);
+        BotNavigationGraphProvider.rebuildGraph(map);
+
+        Character bot = mockBot(new Point(20, 120), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.inAir = true;
+        entry.physX = 20;
+        entry.physY = 120;
+        entry.velY = -30f;
+        entry.airVelX = 0;
+
+        assertEquals(BotPhysicsEngine.AirborneStepResult.CEILING, BotPhysicsEngine.stepAirborne(entry, bot));
+        assertEquals(new Point(20, 101), bot.getPosition());
+        assertEquals(0f, entry.velY);
     }
 
     @Test

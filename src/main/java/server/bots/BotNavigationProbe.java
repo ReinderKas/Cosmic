@@ -34,24 +34,28 @@ public final class BotNavigationProbe {
         int mapId = Integer.parseInt(args[0]);
         boolean rebuild = false;
         boolean listRopes = false;
+        boolean listUndersides = false;
         List<Point> points = new ArrayList<>();
         List<Point> jumps = new ArrayList<>();
         List<PathProbe> paths = new ArrayList<>();
         List<Integer> regions = new ArrayList<>();
         List<Integer> edgeRegions = new ArrayList<>();
         List<RegionPathProbe> regionPaths = new ArrayList<>();
+        List<Integer> footholdIds = new ArrayList<>();
 
         for (int i = 1; i < args.length; i++) {
             String arg = args[i];
             switch (arg) {
                 case "--rebuild" -> rebuild = true;
                 case "--ropes" -> listRopes = true;
+                case "--undersides" -> listUndersides = true;
                 case "--point" -> points.add(parsePoint(nextArg(args, ++i, "--point")));
                 case "--jump" -> jumps.add(parsePoint(nextArg(args, ++i, "--jump")));
                 case "--path" -> paths.add(parsePath(nextArg(args, ++i, "--path")));
                 case "--region" -> regions.add(Integer.parseInt(nextArg(args, ++i, "--region")));
                 case "--edges" -> edgeRegions.add(Integer.parseInt(nextArg(args, ++i, "--edges")));
                 case "--path-region" -> regionPaths.add(parseRegionPath(nextArg(args, ++i, "--path-region")));
+                case "--foothold" -> footholdIds.add(Integer.parseInt(nextArg(args, ++i, "--foothold")));
                 default -> throw new IllegalArgumentException("Unknown arg: " + arg);
             }
         }
@@ -66,6 +70,12 @@ public final class BotNavigationProbe {
             for (String line : formatBuildReport(graph, BotNavigationGraphProvider.getLastBuildReport(map.getId(), graph.movementProfile))) {
                 System.out.println(line);
             }
+        }
+        if (listUndersides) {
+            probeUndersides(graph);
+        }
+        for (int footholdId : footholdIds) {
+            probeFoothold(map, footholdId);
         }
         for (Point point : points) {
             probePoint(map, graph, point);
@@ -92,7 +102,7 @@ public final class BotNavigationProbe {
 
     private static void printUsage() {
         System.out.println("Usage: BotNavigationProbe <mapId> [--rebuild] [--point x,y] [--jump x,y] [--path x1,y1:x2,y2]");
-        System.out.println("       BotNavigationProbe <mapId> [--region id] [--edges id] [--path-region fromRegion:toRegion] [--ropes]");
+        System.out.println("       BotNavigationProbe <mapId> [--region id] [--edges id] [--path-region fromRegion:toRegion] [--ropes] [--undersides] [--foothold id]");
         System.out.println("Example: BotNavigationProbe 100000000 --rebuild --point 1080,334 --jump 1080,334 --path 990,334:938,274");
     }
 
@@ -285,6 +295,32 @@ public final class BotNavigationProbe {
             System.out.printf("    %d,%d -> %d,%d  %s  toRegion=%d%n",
                     edge.startPoint.x, edge.startPoint.y, edge.endPoint.x, edge.endPoint.y, edgeDetails(edge), edge.toRegionId);
         }
+    }
+
+    private static void probeUndersides(BotNavigationGraph graph) {
+        List<Integer> ids = new ArrayList<>(graph.collidableFromBelowIds);
+        ids.sort(Integer::compareTo);
+        System.out.printf("%nCollidable from below ids (%d): %s%n", ids.size(), ids);
+    }
+
+    private static void probeFoothold(MapleMap map, int footholdId) {
+        Foothold foothold = null;
+        for (Foothold candidate : map.getFootholds().getAllFootholds()) {
+            if (candidate.getId() == footholdId) {
+                foothold = candidate;
+                break;
+            }
+        }
+
+        System.out.printf("%nFoothold %d%n", footholdId);
+        if (foothold == null) {
+            System.out.println("  missing");
+            return;
+        }
+
+        System.out.printf("  (%d,%d) -> (%d,%d) prev=%d next=%d wall=%s forbidFallDown=%s%n",
+                foothold.getX1(), foothold.getY1(), foothold.getX2(), foothold.getY2(),
+                foothold.getPrev(), foothold.getNext(), foothold.isWall(), foothold.isForbidFallDown());
     }
 
     private static void probeRegion(BotNavigationGraph graph, int regionId) {
