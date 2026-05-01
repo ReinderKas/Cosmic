@@ -566,12 +566,12 @@ class BotEquipManager {
             case "eye", "eyeacc", "eyeaccessory", "eyepiece" -> new short[]{-3};
             case "ear", "earring", "earrings" -> new short[]{-4};
             case "top", "shirt", "overall" -> new short[]{-5};
-            case "bottom", "pants" -> new short[]{-6};
-            case "shoes", "boots" -> new short[]{-7};
+            case "bottom", "pant", "pants" -> new short[]{-6};
+            case "shoe", "shoes", "boot", "boots" -> new short[]{-7};
             case "glove", "gloves" -> new short[]{-8};
-            case "cape" -> new short[]{-9};
-            case "shield", "offhand" -> new short[]{-10};
-            case "weapon", "wep" -> new short[]{-11};
+            case "cape", "capes" -> new short[]{-9};
+            case "shield", "shields", "offhand" -> new short[]{-10};
+            case "weapon", "weapons", "wep" -> new short[]{-11};
             case "ring" -> RING_SLOTS.clone();
             case "ring1" -> new short[]{-12};
             case "ring2" -> new short[]{-13};
