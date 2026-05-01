@@ -1,6 +1,7 @@
 package server.bots;
 
 import client.BotClient;
+import config.YamlConfig;
 import client.Character;
 import client.Disease;
 import client.QuestStatus;
@@ -498,6 +499,14 @@ public class BotManager {
         botChar.setMapId(spawnMap.getId());
         botChar.newClient(botClient);
         botChar.recalcLocalStats();
+
+        botChar.resetPlayerRates();
+        if (YamlConfig.config.server.USE_ADD_RATES_BY_LEVEL) {
+            botChar.setPlayerRates();
+        }
+        botChar.setWorldRates();
+        botChar.updateCouponRates();
+
         botChar.setPosition(spawnPos);
 
         var channelServer = Server.getInstance().getChannel(world, channel);
