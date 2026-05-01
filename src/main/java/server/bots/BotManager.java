@@ -1993,7 +1993,11 @@ public class BotManager {
             targetPos = crossRegionRetreatPos != null
                     ? crossRegionRetreatPos
                     : selectGrindNavigationTarget(entry, botPos, tp, shouldRetreatForRangedSpacing);
-            if (entry.degenAttackDone && shouldRetreatForRangedSpacing) {
+            // Clear only once the bot has physically left the retreat zone, not after the
+            // first retreat tick — otherwise the flag resets while the bot is still overlapping
+            // and allowOneDegenerateAttack re-opens the attack gate next tick.
+            if (entry.degenAttackDone
+                    && !BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(grindWeaponType, botPos, tp)) {
                 entry.degenAttackDone = false;
             }
         }
