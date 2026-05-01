@@ -34,8 +34,8 @@ final class BotShopManager {
     private static final long SHOP_SEQUENCE_TIMEOUT_MS = 45_000L;
     private static final int POT_TRIGGER_THRESHOLD = 4; // 80% of target (5) for early trigger
     private static final int POT_TARGET_THRESHOLD = 5; // full target when buying at shop
-    private static final int AMMO_TRIGGER_THRESHOLD = 4; // 80% of target (5) for early trigger
-    private static final int AMMO_TARGET_THRESHOLD = 5; // full target when buying at shop
+    private static final int AMMO_TRIGGER_THRESHOLD = 8;
+    private static final int AMMO_TARGET_THRESHOLD = 10; // full target when buying at shop
 
     private BotShopManager() {}
 
