@@ -213,8 +213,31 @@ class BotEquipManager {
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
         Inventory holderEquipInv = holder.getInventory(InventoryType.EQUIP);
         Inventory receiverEquippedInv = receiver.getInventory(InventoryType.EQUIPPED);
+        Inventory receiverEquipInv = receiver.getInventory(InventoryType.EQUIP);
 
         WeaponType weaponType = currentWeaponType(receiver, ii);
+
+        // Build weapon lookahead pool from the receiver's unequipped weapons — mirrors autoEquipPass.
+        // This ensures sibling suggestions score stat items (rings, gloves, etc.) against weapons
+        // the receiver could unlock, not just the currently-equipped weapon. Without this, a
+        // +STR ring could be recommended over a +ACC ring even when the +ACC ring unlocks a
+        // higher-tier weapon producing more expected DPS (hitrate-adjusted).
+        List<Equip> weaponLookaheadPool = new ArrayList<>();
+        for (Item item : receiverEquipInv.list()) {
+            if (ii.isCash(item.getItemId())) continue;
+            if (!(item instanceof Equip equip)) continue;
+            String textSlot = ii.getEquipmentSlot(item.getItemId());
+            EquipSlot eslot = EquipSlot.getFromTextSlot(textSlot);
+            short primary = (short) eslot.getPrimarySlot();
+            if (primary != (short) -11) continue;
+            if (!isWeaponCompatible(receiver, ii.getWeaponType(equip.getItemId()))) continue;
+            if (ii.canWearEquipment(receiver, equip, primary)) {
+                weaponLookaheadPool.add(equip);
+            } else if (statOnlyBlocked(receiver, ii, equip)) {
+                weaponLookaheadPool.add(equip);
+            }
+        }
+
         Map<Short, List<Equip>> bySlot = new LinkedHashMap<>();
         for (Item item : holderEquipInv.list()) {
             if (!(item instanceof Equip equip) || ii.isCash(item.getItemId())) {
@@ -267,8 +290,10 @@ class BotEquipManager {
             Equip current = (Equip) receiverEquippedInv.getItem(slot);
             Equip effectiveCurrent = slot == (short) -11 ? compatibleWeaponOrNull(receiver, ii, current) : current;
             Equip effectiveWeapon = compatibleWeaponOrNull(receiver, ii, (Equip) receiverEquippedInv.getItem((short) -11));
+            // Lookahead applies only when scoring non-weapon slots (mirrors autoEquipPass).
+            List<Equip> lookahead = slot == (short) -11 ? null : weaponLookaheadPool;
             Equip best = findBestWithLookahead(receiver, ii, weaponType, effectiveCurrent,
-                                                bySlot.get(slot), mobProfile, null, effectiveWeapon);
+                                                bySlot.get(slot), mobProfile, lookahead, effectiveWeapon);
             // 2H weapon displaces shield — only recommend if 2H beats current weapon+shield combined.
             if (slot == (short) -11 && best != null && best != current && ii.isTwoHanded(best.getItemId())) {
                 Equip shield = (Equip) receiverEquippedInv.getItem((short) -10);
@@ -278,17 +303,17 @@ class BotEquipManager {
             // Overall displaces pants — only recommend if overall beats current top+pants combined.
             if (slot == (short) -5 && best != null && best != current && isOverall(best, ii)) {
                 Equip pants = (Equip) receiverEquippedInv.getItem((short) -6);
-                if (compareScores(scoreEquipFull(receiver, ii, weaponType, effectiveCurrent, best, pants, mobProfile, null, effectiveWeapon),
-                                  scoreEquipFull(receiver, ii, weaponType, effectiveCurrent, effectiveCurrent, null, mobProfile, null, effectiveWeapon)) <= 0) best = effectiveCurrent;
+                if (compareScores(scoreEquipFull(receiver, ii, weaponType, effectiveCurrent, best, pants, mobProfile, lookahead, effectiveWeapon),
+                                  scoreEquipFull(receiver, ii, weaponType, effectiveCurrent, effectiveCurrent, null, mobProfile, lookahead, effectiveWeapon)) <= 0) best = effectiveCurrent;
             }
-            if (best != null && best != current && isBetterThanCurrent(receiver, ii, weaponType, effectiveCurrent, best, mobProfile, effectiveWeapon)) {
+            if (best != null && best != current) {
                 recommendations.add(new EquipRecommendation(slot, current, best));
                 if (slot == (short) -5) overallRec = isOverall(best, ii);
             }
         }
 
         if (bySlot.containsKey((short) -12)) {
-            recommendations.addAll(findRecommendedRings(receiver, ii, weaponType, bySlot.get((short) -12), receiverEquippedInv, mobProfile));
+            recommendations.addAll(findRecommendedRings(receiver, ii, weaponType, bySlot.get((short) -12), receiverEquippedInv, mobProfile, weaponLookaheadPool));
         }
 
         return recommendations;
@@ -326,9 +351,28 @@ class BotEquipManager {
 
         WeaponType weaponType = currentWeaponType(receiver, ii);
         Inventory receiverEquippedInv = receiver.getInventory(InventoryType.EQUIPPED);
+        Inventory receiverEquipInv = receiver.getInventory(InventoryType.EQUIP);
         MapDamageProfile mobProfile = MapDamageProfile.snapshot(receiver);
+
+        // Build weapon lookahead pool from receiver's unequipped weapons (mirrors findRecommendedEquips).
+        List<Equip> weaponLookaheadPool = new ArrayList<>();
+        for (Item item : receiverEquipInv.list()) {
+            if (ii.isCash(item.getItemId())) continue;
+            if (!(item instanceof Equip eq)) continue;
+            String tSlot = ii.getEquipmentSlot(item.getItemId());
+            EquipSlot eSlot = EquipSlot.getFromTextSlot(tSlot);
+            short p = (short) eSlot.getPrimarySlot();
+            if (p != (short) -11) continue;
+            if (!isWeaponCompatible(receiver, ii.getWeaponType(eq.getItemId()))) continue;
+            if (ii.canWearEquipment(receiver, eq, p)) {
+                weaponLookaheadPool.add(eq);
+            } else if (statOnlyBlocked(receiver, ii, eq)) {
+                weaponLookaheadPool.add(eq);
+            }
+        }
+
         if (isRingSlot(primarySlot)) {
-            return findRecommendedRingForItem(receiver, ii, weaponType, candidate, receiverEquippedInv, mobProfile);
+            return findRecommendedRingForItem(receiver, ii, weaponType, candidate, receiverEquippedInv, mobProfile, weaponLookaheadPool);
         }
 
         if (!ii.canWearEquipment(receiver, candidate, primarySlot)) {
@@ -349,7 +393,11 @@ class BotEquipManager {
             current = compatibleWeaponOrNull(receiver, ii, current);
         }
         Equip effectiveWeapon = compatibleWeaponOrNull(receiver, ii, (Equip) receiverEquippedInv.getItem((short) -11));
-        if (!isBetterThanCurrent(receiver, ii, weaponType, current, candidate, mobProfile, effectiveWeapon)) {
+        // Lookahead applies only when scoring non-weapon slots.
+        List<Equip> lookahead = primarySlot == (short) -11 ? null : weaponLookaheadPool;
+        EquipScore candidateScore = scoreEquipFull(receiver, ii, weaponType, current, candidate, null, mobProfile, lookahead, effectiveWeapon);
+        EquipScore currentScore = scoreEquipFull(receiver, ii, weaponType, current, current, null, mobProfile, lookahead, effectiveWeapon);
+        if (compareScores(candidateScore, currentScore) <= 0) {
             return null;
         }
 
@@ -488,7 +536,8 @@ class BotEquipManager {
 
     private static List<EquipRecommendation> findRecommendedRings(Character receiver, ItemInformationProvider ii, WeaponType wt,
                                                                   List<Equip> candidates, Inventory receiverEquippedInv,
-                                                                  MapDamageProfile mobProfile) {
+                                                                  MapDamageProfile mobProfile,
+                                                                  List<Equip> weaponLookaheadPool) {
         List<EquipRecommendation> recommendations = new ArrayList<>();
         List<Equip> pool = new ArrayList<>(candidates);
         Equip effectiveWeapon = compatibleWeaponOrNull(receiver, ii, (Equip) receiverEquippedInv.getItem((short) -11));
@@ -497,8 +546,8 @@ class BotEquipManager {
             List<Equip> eligible = pool.stream()
                     .filter(candidate -> ii.canWearEquipment(receiver, candidate, ringSlot))
                     .collect(Collectors.toList());
-            Equip best = findBestWithLookahead(receiver, ii, wt, current, eligible, mobProfile, null, effectiveWeapon);
-            if (best != null && best != current && isBetterThanCurrent(receiver, ii, wt, current, best, mobProfile, effectiveWeapon)) {
+            Equip best = findBestWithLookahead(receiver, ii, wt, current, eligible, mobProfile, weaponLookaheadPool, effectiveWeapon);
+            if (best != null && best != current) {
                 recommendations.add(new EquipRecommendation(ringSlot, current, best));
                 pool.remove(best);
             }
@@ -511,7 +560,8 @@ class BotEquipManager {
                                                                   WeaponType wt,
                                                                   Equip candidate,
                                                                   Inventory receiverEquippedInv,
-                                                                  MapDamageProfile mobProfile) {
+                                                                  MapDamageProfile mobProfile,
+                                                                  List<Equip> weaponLookaheadPool) {
         EquipRecommendation bestRecommendation = null;
         EquipScore bestScore = null;
         Equip effectiveWeapon = compatibleWeaponOrNull(receiver, ii, (Equip) receiverEquippedInv.getItem((short) -11));
@@ -521,8 +571,8 @@ class BotEquipManager {
             }
 
             Equip current = (Equip) receiverEquippedInv.getItem(ringSlot);
-            EquipScore currentScore = scoreEquipFull(receiver, ii, wt, current, current, null, mobProfile, null, effectiveWeapon);
-            EquipScore candidateScore = scoreEquipFull(receiver, ii, wt, current, candidate, null, mobProfile, null, effectiveWeapon);
+            EquipScore currentScore = scoreEquipFull(receiver, ii, wt, current, current, null, mobProfile, weaponLookaheadPool, effectiveWeapon);
+            EquipScore candidateScore = scoreEquipFull(receiver, ii, wt, current, candidate, null, mobProfile, weaponLookaheadPool, effectiveWeapon);
             if (compareScores(candidateScore, currentScore) <= 0) {
                 continue;
             }
@@ -560,14 +610,6 @@ class BotEquipManager {
             }
         }
         return best;
-    }
-
-    private static boolean isBetterThanCurrent(Character bot, ItemInformationProvider ii, WeaponType wt,
-                                               Equip current, Equip candidate,
-                                               MapDamageProfile mobProfile, Equip currentWeapon) {
-        return compareScores(
-                scoreEquipFull(bot, ii, wt, current, candidate, null, mobProfile, null, currentWeapon),
-                scoreEquipFull(bot, ii, wt, current, current, null, mobProfile, null, currentWeapon)) > 0;
     }
 
     /**
