@@ -6,8 +6,8 @@ import client.Job;
 import client.inventory.Inventory;
 import client.inventory.InventoryType;
 import client.inventory.Item;
-import net.server.channel.handlers.UseItemHandler;
 import net.server.PlayerBuffValueHolder;
+import net.server.channel.handlers.UseItemHandler;
 import server.ItemInformationProvider;
 import server.StatEffect;
 import server.combat.CombatFormulaProvider;
@@ -16,7 +16,6 @@ import tools.Pair;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -35,7 +34,7 @@ import java.util.concurrent.ConcurrentHashMap;
 final class BotBuffManager {
 
     private static final long TICK_MS = 3_000;
-    private static final double ACC_HIT_THRESHOLD = 0.60;
+    private static final double ACC_HIT_THRESHOLD = 0.90;
 
     // Shared across bot ticks, so keep the cache concurrent.
     private static final Map<Integer, StatEffect> fxCache = new ConcurrentHashMap<>();
