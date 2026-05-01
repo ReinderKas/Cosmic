@@ -346,6 +346,40 @@ class BotNavigationManagerTest {
     }
 
     @Test
+    void shouldRetainCommittedGroundEdgeWhenAlternativeLeadsToSameDestinationRegion() {
+        BotNavigationGraph.Edge committedDrop = new BotNavigationGraph.Edge(
+                80, 83, BotNavigationGraph.EdgeType.DROP,
+                new Point(7, -34), new Point(-84, 99),
+                7, 7, 0, 0, 0, 655
+        );
+        BotNavigationGraph.Edge replacementJump = new BotNavigationGraph.Edge(
+                80, 83, BotNavigationGraph.EdgeType.JUMP,
+                new Point(5, -34), new Point(-99, 95),
+                -35, 45, -7, 0, 0, 0, 0, 750
+        );
+
+        assertTrue(BotNavigationManager.shouldRetainCommittedGroundEdge(committedDrop, replacementJump),
+                "equivalent first exits into the same destination region should not thrash mid-approach");
+    }
+
+    @Test
+    void shouldNotRetainCommittedGroundEdgeWhenAlternativeChangesDestinationRegion() {
+        BotNavigationGraph.Edge committedDrop = new BotNavigationGraph.Edge(
+                1, 2, BotNavigationGraph.EdgeType.DROP,
+                new Point(10, 0), new Point(10, 100),
+                10, 10, 0, 0, 0, 300
+        );
+        BotNavigationGraph.Edge replacementDrop = new BotNavigationGraph.Edge(
+                1, 3, BotNavigationGraph.EdgeType.DROP,
+                new Point(40, 0), new Point(40, 100),
+                40, 40, 0, 0, 0, 300
+        );
+
+        assertFalse(BotNavigationManager.shouldRetainCommittedGroundEdge(committedDrop, replacementDrop),
+                "grounded replans must still refresh when the better first edge changes destination region");
+    }
+
+    @Test
     void shouldUseRawTargetWhileMovementGraphWarmsInBackground() {
         MapleMap map = new MapleMap(910000030, 0, 0, 910000030, 1.0f);
         server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));

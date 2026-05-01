@@ -285,6 +285,9 @@ final class BotNavigationManager {
         if (bestEdge == null || sameEdge(edge, bestEdge)) {
             return edge;
         }
+        if (shouldRetainCommittedGroundEdge(edge, bestEdge)) {
+            return edge;
+        }
 
         entry.navEdge = bestEdge;
         entry.navTargetRegionId = targetRegionId;
@@ -904,6 +907,23 @@ final class BotNavigationManager {
                 && left.ropeBottomY == right.ropeBottomY
                 && left.startPoint.equals(right.startPoint)
                 && left.endPoint.equals(right.endPoint));
+    }
+
+    static boolean shouldRetainCommittedGroundEdge(BotNavigationGraph.Edge current,
+                                                   BotNavigationGraph.Edge replacement) {
+        if (current == null || replacement == null) {
+            return false;
+        }
+        if (current.fromRegionId != replacement.fromRegionId
+                || current.toRegionId != replacement.toRegionId) {
+            return false;
+        }
+        // Equivalent first exits into the same downstream region can trade off a few pixels of
+        // approach cost as the bot shuffles on the source platform. Replacing the committed edge
+        // every AI tick creates oscillation loops like the John 2026-05-01 down-jump trace,
+        // where nav flips between a straight DROP and a nearby JUMP before either can execute.
+        return current.type != BotNavigationGraph.EdgeType.WALK
+                && replacement.type != BotNavigationGraph.EdgeType.WALK;
     }
 
     private static boolean isEdgeUsable(BotNavigationGraph graph, MapleMap map, BotNavigationGraph.Edge edge) {
