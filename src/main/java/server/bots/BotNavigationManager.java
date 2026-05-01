@@ -510,7 +510,7 @@ final class BotNavigationManager {
         if (edge.launchStepX != 0) {
             return false;
         }
-        if (!isReadyForEdge(botPos, edge)) {
+        if (!isWithinDropLaunchWindow(graph, botPos, edge)) {
             return false;
         }
         return true;
@@ -626,8 +626,18 @@ final class BotNavigationManager {
                                     BotNavigationGraph graph,
                                     Point botPos,
                                     BotNavigationGraph.Edge edge) {
-        if (entry.inAir || edge.launchStepX == 0) {
-            return entry.inAir ? new Point(edge.endPoint) : new Point(edge.startPoint);
+        if (entry.inAir) {
+            return new Point(edge.endPoint);
+        }
+        if (edge.launchStepX == 0) {
+            BotNavigationGraph.Region fromRegion = graph != null ? graph.getRegion(edge.fromRegionId) : null;
+            if (fromRegion == null || fromRegion.isRopeRegion) {
+                return new Point(edge.startPoint);
+            }
+            int targetX = edge.containsLaunchX(botPos.x)
+                    ? botPos.x
+                    : botPos.x < edge.launchMinX ? edge.launchMinX : edge.launchMaxX;
+            return fromRegion.pointAt(targetX);
         }
 
         if (hasReachedDirectionalDropRunway(botPos, edge)) {
@@ -959,6 +969,29 @@ final class BotNavigationManager {
 
         BotNavigationGraph.Region fromRegion = graph.getRegion(edge.fromRegionId);
         if (fromRegion == null) {
+            return false;
+        }
+
+        Point expectedLaunchPoint = fromRegion.pointAt(botPos.x);
+        return Math.abs(botPos.y - expectedLaunchPoint.y) <= BotMovementManager.cfg.JUMP_Y_THRESH;
+    }
+
+    static boolean isWithinDropLaunchWindow(BotNavigationGraph graph,
+                                            Point botPos,
+                                            BotNavigationGraph.Edge edge) {
+        if (botPos == null
+                || edge.type != BotNavigationGraph.EdgeType.DROP
+                || edge.launchStepX != 0
+                || !edge.containsLaunchX(botPos.x)) {
+            return false;
+        }
+
+        if (graph == null) {
+            return Math.abs(botPos.y - edge.startPoint.y) <= BotMovementManager.cfg.JUMP_Y_THRESH;
+        }
+
+        BotNavigationGraph.Region fromRegion = graph.getRegion(edge.fromRegionId);
+        if (fromRegion == null || fromRegion.isRopeRegion) {
             return false;
         }
 

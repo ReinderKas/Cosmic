@@ -537,13 +537,16 @@ class BotMovementManager {
     /**
      * Stop-distance used when navPreciseTarget is true.
      * WALK edges use 4px to absorb terrain micro-bumps on sloped footholds.
-     * All other precise edge types (JUMP, straight DROP, CLIMB, PORTAL) use 1px — the bot
-     * must reach the exact entry anchor for jump/climb simulations to succeed reliably.
+     * JUMP and straight down-jump DROP edges use 0px because the bot must walk INTO the
+     * authored launch window, not stop just outside it. Other precise edge types
+     * (CLIMB, PORTAL, non-windowed fallback cases) use 1px to reach the exact anchor.
      */
     static int preciseNavStopDist(BotNavigationGraph.Edge navEdge) {
-        if (navEdge != null && navEdge.type == BotNavigationGraph.EdgeType.JUMP) {
-            // Bot must walk INTO the launch window, not just near it. isWithinJumpLaunchWindow is
-            // a strict >= check, so stopDist=1 would halt the bot exactly 1px before the window.
+        if (navEdge != null
+                && (navEdge.type == BotNavigationGraph.EdgeType.JUMP
+                || (navEdge.type == BotNavigationGraph.EdgeType.DROP && navEdge.launchStepX == 0))) {
+            // Bot must walk INTO the launch window, not just near it. The launch window checks
+            // are strict, so stopDist=1 can halt the bot exactly 1px before the valid range.
             return 0;
         }
         if (navEdge != null && navEdge.type != BotNavigationGraph.EdgeType.WALK) {

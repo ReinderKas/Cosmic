@@ -309,11 +309,11 @@ class BotNavigationGraphProviderTest {
     }
 
     @Test
-    void shouldRequireStraightDropExecutionNearItsAuthoredAnchor() {
+    void shouldRequireStraightDropExecutionInsideItsAuthoredLaunchWindow() {
         BotNavigationGraph.Edge dropEdge = new BotNavigationGraph.Edge(
                 1, 2, BotNavigationGraph.EdgeType.DROP,
                 new Point(100, 100), new Point(100, 160),
-                0, 0, 0, 0, 0, 100
+                100, 114, 0, 0, 0, 0, 0, 100
         );
 
         assertTrue(BotNavigationManager.canExecuteDropFromCurrentPosition(
@@ -322,6 +322,25 @@ class BotNavigationGraphProviderTest {
                 null, null, new Point(114, 100), dropEdge));
         assertFalse(BotNavigationManager.canExecuteDropFromCurrentPosition(
                 null, null, new Point(115, 100), dropEdge));
+    }
+
+    @Test
+    void shouldGenerateLaunchWindowForStraightDownJumpEdges() {
+        MapleMap map = createEmptyTestMap(910000211);
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        footholds.insert(new Foothold(new Point(0, 0), new Point(200, 0), 1));
+        footholds.insert(new Foothold(new Point(40, 120), new Point(160, 120), 2));
+        map.setFootholds(footholds);
+
+        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(map);
+        BotNavigationGraph.Edge dropEdge = findFirstStraightDropEdge(graph);
+
+        assertNotNull(dropEdge, "fixture should produce a straight down-jump edge");
+        assertTrue(dropEdge.launchMinX < dropEdge.launchMaxX,
+                "straight down-jump edges should carry an authored launch window");
+        assertTrue(dropEdge.containsLaunchX((dropEdge.launchMinX + dropEdge.launchMaxX) / 2));
+        assertFalse(dropEdge.containsLaunchX(dropEdge.launchMinX - 1));
+        assertFalse(dropEdge.containsLaunchX(dropEdge.launchMaxX + 1));
     }
 
     @Test
@@ -823,6 +842,17 @@ class BotNavigationGraphProviderTest {
         for (Point candidate : candidates) {
             if (!candidate.equals(excluded)) {
                 return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static BotNavigationGraph.Edge findFirstStraightDropEdge(BotNavigationGraph graph) {
+        for (BotNavigationGraph.Region region : graph.regions) {
+            for (BotNavigationGraph.Edge edge : graph.getOutgoing(region.id)) {
+                if (edge.type == BotNavigationGraph.EdgeType.DROP && edge.launchStepX == 0) {
+                    return edge;
+                }
             }
         }
         return null;

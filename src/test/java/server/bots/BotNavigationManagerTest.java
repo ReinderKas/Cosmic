@@ -7,6 +7,7 @@ import server.maps.MapleMap;
 import server.maps.Foothold;
 import server.maps.Rope;
 import org.junit.jupiter.api.Test;
+import server.maps.FootholdTree;
 
 import java.awt.*;
 import java.nio.file.Path;
@@ -117,6 +118,29 @@ class BotNavigationManagerTest {
         assertTrue(BotNavigationManager.isTopStepOffExit(rope, new Point(675, 145), topExit));
         assertTrue(BotNavigationManager.isTopStepOffExit(rope, new Point(675, 171), topExit));
         assertFalse(BotNavigationManager.isTopStepOffExit(rope, new Point(675, 215), bottomExit));
+    }
+
+    @Test
+    void shouldOnlyExecuteStraightDownJumpInsideLaunchWindow() {
+        MapleMap map = new MapleMap(910000031, 0, 0, 910000031, 1.0f);
+        FootholdTree footholds = new FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        footholds.insert(new Foothold(new Point(0, 0), new Point(200, 0), 1));
+        footholds.insert(new Foothold(new Point(40, 120), new Point(160, 120), 2));
+        map.setFootholds(footholds);
+
+        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(map);
+        BotNavigationGraph.Edge downJump = findFirstStraightDropEdge(graph);
+
+        assertNotNull(downJump, "fixture should produce a straight down-jump edge");
+        assertTrue(downJump.launchMinX < downJump.launchMaxX);
+
+        int insideX = (downJump.launchMinX + downJump.launchMaxX) / 2;
+        int outsideX = downJump.launchMaxX + 1;
+
+        assertTrue(BotNavigationManager.canExecuteDropFromCurrentPosition(
+                graph, map, new Point(insideX, 0), downJump));
+        assertFalse(BotNavigationManager.canExecuteDropFromCurrentPosition(
+                graph, map, new Point(outsideX, 0), downJump));
     }
 
     @Test
@@ -509,6 +533,17 @@ class BotNavigationManagerTest {
         when(bot.getTotalMoveSpeedStat()).thenReturn(100);
         when(bot.getTotalJumpStat()).thenReturn(100);
         return bot;
+    }
+
+    private static BotNavigationGraph.Edge findFirstStraightDropEdge(BotNavigationGraph graph) {
+        for (BotNavigationGraph.Region region : graph.regions) {
+            for (BotNavigationGraph.Edge edge : graph.getOutgoing(region.id)) {
+                if (edge.type == BotNavigationGraph.EdgeType.DROP && edge.launchStepX == 0) {
+                    return edge;
+                }
+            }
+        }
+        return null;
     }
 
     private static MapleMap topRopeSyntheticMap(int mapId) {

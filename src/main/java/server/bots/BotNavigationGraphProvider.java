@@ -925,28 +925,22 @@ final class BotNavigationGraphProvider {
                 continue;
             }
 
-            // WZ marks platforms that cannot be down-jumped through with foothold/forbidFallDown=1.
-            if (from.isForbidFallDownAt(anchor.x)) {
+            JumpLaunchWindow launchWindow = expandDownJumpLaunchWindow(
+                    from, map, regionIdByFootholdId, anchor.x, movementProfile);
+            if (launchWindow == null) {
                 continue;
             }
 
-            BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateDownJumpLanding(map, anchor);
-            if (landing == null) {
-                continue;
-            }
-
-            int toRegionId = regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1);
+            int toRegionId = findRegionIdBelow(map, regionIdByFootholdId, launchWindow.endPoint());
             BotNavigationGraph.Region below = regionsById.get(toRegionId);
             if (below == null || below.id == from.id) {
                 continue;
             }
 
-            if (landing.point().y <= anchor.y + 4) {
-                continue;
-            }
-
-            int dropCost = BotPhysicsEngine.estimateDownJumpLandingTimeMs(map, anchor);
-            addEdge(from.id, below.id, BotNavigationGraph.EdgeType.DROP, anchor, landing.point(), 0, 0, dropCost, outgoing, edgeKeys);
+            addEdge(from.id, below.id, BotNavigationGraph.EdgeType.DROP,
+                    launchWindow.startPoint(), launchWindow.endPoint(),
+                    launchWindow.minX(), launchWindow.maxX(),
+                    0, 0, launchWindow.landingTimeMs(), outgoing, edgeKeys);
         }
     }
 
@@ -1193,6 +1187,37 @@ final class BotNavigationGraphProvider {
                 representativeSimulation.landing().timeMs());
     }
 
+    private static JumpLaunchWindow expandDownJumpLaunchWindow(BotNavigationGraph.Region from,
+                                                               MapleMap map,
+                                                               Map<Integer, Integer> regionIdByFootholdId,
+                                                               int anchorX,
+                                                               BotMovementProfile movementProfile) {
+        BotPhysicsEngine.JumpLanding anchorLanding = validateDownJumpLaunchX(
+                from, map, regionIdByFootholdId, anchorX, movementProfile);
+        if (anchorLanding == null) {
+            return null;
+        }
+
+        int targetRegionId = regionIdByFootholdId.getOrDefault(anchorLanding.foothold().getId(), -1);
+        if (targetRegionId < 0) {
+            return null;
+        }
+
+        int minX = findDownJumpBoundary(from, map, regionIdByFootholdId, anchorX, targetRegionId, true, movementProfile);
+        int maxX = findDownJumpBoundary(from, map, regionIdByFootholdId, anchorX, targetRegionId, false, movementProfile);
+
+        int representativeX = (minX + maxX) / 2;
+        Point representativeStart = from.pointAt(representativeX);
+        BotPhysicsEngine.JumpLanding representativeLanding = validateDownJumpLaunchX(
+                from, map, regionIdByFootholdId, representativeX, movementProfile);
+        if (representativeLanding == null) {
+            return null;
+        }
+
+        return new JumpLaunchWindow(minX, maxX, representativeStart,
+                representativeLanding.point(), representativeLanding.timeMs());
+    }
+
     private static int findJumpBoundary(BotNavigationGraph.Region from,
                                         MapleMap map,
                                         Map<Integer, Integer> regionIdByFootholdId,
@@ -1241,6 +1266,49 @@ final class BotNavigationGraphProvider {
         return validX;
     }
 
+    private static int findDownJumpBoundary(BotNavigationGraph.Region from,
+                                            MapleMap map,
+                                            Map<Integer, Integer> regionIdByFootholdId,
+                                            int startX,
+                                            int targetRegionId,
+                                            boolean searchLeft,
+                                            BotMovementProfile movementProfile) {
+        int limitX = searchLeft ? from.minX : from.maxX;
+        int validX = startX;
+        int invalidX = startX;
+        int step = 1;
+
+        while (true) {
+            int probeX = searchLeft
+                    ? Math.max(limitX, startX - step)
+                    : Math.min(limitX, startX + step);
+            if (probeX == validX) {
+                break;
+            }
+
+            if (validateDownJumpLaunchX(from, map, regionIdByFootholdId, probeX, movementProfile, targetRegionId) == null) {
+                invalidX = probeX;
+                break;
+            }
+
+            validX = probeX;
+            if (probeX == limitX) {
+                return probeX;
+            }
+            step *= 2;
+        }
+
+        while (Math.abs(validX - invalidX) > 1) {
+            int probeX = (validX + invalidX) / 2;
+            if (validateDownJumpLaunchX(from, map, regionIdByFootholdId, probeX, movementProfile, targetRegionId) != null) {
+                validX = probeX;
+            } else {
+                invalidX = probeX;
+            }
+        }
+        return validX;
+    }
+
     private static boolean isValidJumpLaunchX(BotNavigationGraph.Region from,
                                               MapleMap map,
                                               Map<Integer, Integer> regionIdByFootholdId,
@@ -1259,6 +1327,44 @@ final class BotNavigationGraphProvider {
                 && !landing.lostGround()
                 && regionIdByFootholdId.getOrDefault(landing.finalFoothold().getId(), -1) == targetRegionId;
     }
+
+    private static BotPhysicsEngine.JumpLanding validateDownJumpLaunchX(BotNavigationGraph.Region from,
+                                                                         MapleMap map,
+                                                                         Map<Integer, Integer> regionIdByFootholdId,
+                                                                         int launchX,
+                                                                         BotMovementProfile movementProfile) {
+        return validateDownJumpLaunchX(from, map, regionIdByFootholdId, launchX, movementProfile, Integer.MIN_VALUE);
+    }
+
+    private static BotPhysicsEngine.JumpLanding validateDownJumpLaunchX(BotNavigationGraph.Region from,
+                                                                         MapleMap map,
+                                                                         Map<Integer, Integer> regionIdByFootholdId,
+                                                                         int launchX,
+                                                                         BotMovementProfile movementProfile,
+                                                                         int requiredTargetRegionId) {
+        if (!isApproachableJumpLaunchX(from, map, launchX)) {
+            return null;
+        }
+        Point launchPoint = from.pointAt(launchX);
+        if (from.isForbidFallDownAt(launchX) || dropLaunchStep(from, map, launchPoint, movementProfile) != 0) {
+            return null;
+        }
+
+        BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateDownJumpLanding(map, launchPoint);
+        if (landing == null || landing.point().y <= launchPoint.y + 4) {
+            return null;
+        }
+
+        int landingRegionId = regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1);
+        if (landingRegionId < 0 || landingRegionId == from.id) {
+            return null;
+        }
+        if (requiredTargetRegionId != Integer.MIN_VALUE && landingRegionId != requiredTargetRegionId) {
+            return null;
+        }
+        return landing;
+    }
+
     private static boolean isApproachableJumpLaunchX(BotNavigationGraph.Region from, MapleMap map, int launchX) {
         if (from == null || from.isRopeRegion || map == null) {
             return false;
