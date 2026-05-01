@@ -135,9 +135,13 @@ public class ExpDebugCommand extends Command {
             return;
         }
 
-        // Get current party sessions for a live report
-        List<ExpDebugTracker.ExpSession> sessions = ExpDebugTracker.startPartyTracking(player);
-        // Don't stop them, just read current state
+        // Read current party sessions without resetting counters.
+        List<ExpDebugTracker.ExpSession> sessions = ExpDebugTracker.getPartyTrackingSessions(player);
+        if (sessions.isEmpty()) {
+            player.message("No active EXP debug sessions found for your current party.");
+            return;
+        }
+
         List<String> lines = ExpDebugTracker.formatResults(sessions);
         for (String line : lines) {
             player.message(line);

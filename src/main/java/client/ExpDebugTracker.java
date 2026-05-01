@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -175,6 +176,34 @@ public class ExpDebugTracker {
     }
 
     /**
+     * Return current tracked sessions for all party members without mutating counters.
+     */
+    public static List<ExpSession> getPartyTrackingSessions(Character leader) {
+        List<ExpSession> sessions = new ArrayList<>();
+        List<Integer> memberIds = new ArrayList<>();
+
+        memberIds.add(leader.getId());
+
+        if (leader.getParty() != null) {
+            for (PartyCharacter pc : leader.getParty().getMembers()) {
+                Character member = pc.getPlayer();
+                if (member != null) {
+                    memberIds.add(member.getId());
+                }
+            }
+        }
+
+        for (int id : memberIds) {
+            ExpSession session = activeSessions.get(id);
+            if (session != null && session.active) {
+                sessions.add(session);
+            }
+        }
+
+        return sessions;
+    }
+
+    /**
      * Format tracking results as chat messages.
      */
     public static List<String> formatResults(List<ExpSession> sessions) {
@@ -184,7 +213,7 @@ public class ExpDebugTracker {
         for (ExpSession s : sessions) {
             String type = s.isBot ? "[BOT]" : "[CHR]";
             long totalExp = s.totalPersonalExp.get() + s.totalPartyExp.get();
-            String line = String.format("%s %s (Lvl %d) | Total: %'d | Personal: %'d | Party: %'d | Equip: %'d | Gains: %'d | EXP/min: %.0f",
+            String line = String.format(Locale.US, "%s %s (Lvl %d) | Total: %,d | Personal: %,d | Party: %,d | Equip: %,d | Gains: %,d | EXP/min: %,.0f",
                     type, s.characterName, s.level, totalExp,
                     s.totalPersonalExp.get(), s.totalPartyExp.get(),
                     s.totalEquipExp.get(), s.expGainCount.get(),
@@ -237,11 +266,11 @@ public class ExpDebugTracker {
                     fw.write(String.format("\n%s %s (Lvl %d, ID: %d)\n",
                             s.isBot ? "[BOT]" : "[CHR]",
                             s.characterName, s.level, s.characterId));
-                    fw.write(String.format("  Total EXP: %'d\n", s.totalPersonalExp.get() + s.totalPartyExp.get()));
-                    fw.write(String.format("  Personal EXP: %'d\n", s.totalPersonalExp.get()));
-                    fw.write(String.format("  Party EXP: %'d\n", s.totalPartyExp.get()));
-                    fw.write(String.format("  Equip EXP: %'d\n", s.totalEquipExp.get()));
-                    fw.write(String.format("  EXP Gain Events: %'d\n", s.expGainCount.get()));
+                    fw.write(String.format(Locale.US, "  Total EXP: %,d\n", s.totalPersonalExp.get() + s.totalPartyExp.get()));
+                    fw.write(String.format(Locale.US, "  Personal EXP: %,d\n", s.totalPersonalExp.get()));
+                    fw.write(String.format(Locale.US, "  Party EXP: %,d\n", s.totalPartyExp.get()));
+                    fw.write(String.format(Locale.US, "  Equip EXP: %,d\n", s.totalEquipExp.get()));
+                    fw.write(String.format(Locale.US, "  EXP Gain Events: %,d\n", s.expGainCount.get()));
                     fw.write(String.format("  Elapsed: %d seconds\n", s.elapsedSeconds()));
                     fw.write(String.format("  EXP/minute: %.2f\n", s.expPerMinute()));
                 }

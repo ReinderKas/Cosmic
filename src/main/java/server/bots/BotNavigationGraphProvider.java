@@ -30,7 +30,7 @@ final class BotNavigationGraphProvider {
 
     private static final int GRAPH_VERSION = 39;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
-    private static final int DOWN_JUMP_PRELAUNCH_WINDOW_PX = 14;
+    private static final int DOWN_JUMP_PRELAUNCH_WINDOW_PX = 20;
     private static final int SAME_SOLID_NEST_GAP_PX = 8;
     private static final int ROPE_ANCHOR_INTERVAL_PX = 30;
     private static final int JUMP_POST_LANDING_STABILITY_TICKS = 3;
