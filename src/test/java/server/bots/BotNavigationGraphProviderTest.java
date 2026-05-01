@@ -344,6 +344,22 @@ class BotNavigationGraphProviderTest {
     }
 
     @Test
+    void shouldCapStraightDownJumpLaunchWindowAroundSeedAnchor() {
+        MapleMap map = createEmptyTestMap(910000212);
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        footholds.insert(new Foothold(new Point(0, 0), new Point(300, 0), 1));
+        footholds.insert(new Foothold(new Point(0, 120), new Point(300, 120), 2));
+        map.setFootholds(footholds);
+
+        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(map);
+        BotNavigationGraph.Edge dropEdge = findFirstStraightDropEdge(graph);
+
+        assertNotNull(dropEdge, "fixture should produce a straight down-jump edge");
+        assertTrue(dropEdge.launchMaxX - dropEdge.launchMinX <= 28,
+                "straight down-jump launch windows should be capped to the graphgen prelaunch span");
+    }
+
+    @Test
     void shouldTreatWalkOffDropsAsDirectionalMovementInsteadOfExecutableAnchors() {
         MapleMap map = ledgeDropMap(910000208);
         BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(map);

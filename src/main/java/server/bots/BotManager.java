@@ -75,6 +75,10 @@ public class BotManager {
         // Grind recovery is looser than follow recovery so bots can work nearby platforms,
         // but still get pulled back to a same-map party anchor if they fall far out of bounds.
         public int GRIND_PARTY_TELEPORT_DIST_MULTIPLIER = 2;
+
+        // Debug aid: keep stuck detection/logging active, but disable automatic recovery jumps
+        // so pathing failures remain visible in logs and at runtime.
+        public boolean ENABLE_UNSTUCK = false;
     }
 
     /** Singleton config — replace with `cfg = new Config()` after hotswapping to reset. */
@@ -3073,7 +3077,7 @@ public class BotManager {
             entry.stuckMs += BotPhysicsEngine.cfg.TICK_MS;
         }
 
-        if (entry.stuckMs >= 500 && entry.unstuckCooldownMs == 0) {
+        if (cfg.ENABLE_UNSTUCK && entry.stuckMs >= 500 && entry.unstuckCooldownMs == 0) {
             entry.stuckMs = 0;
             entry.stuckCheckX = Integer.MIN_VALUE;
             BotMovementManager.tickUnstuck(entry);

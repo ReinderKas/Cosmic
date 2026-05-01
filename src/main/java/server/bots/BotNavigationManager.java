@@ -103,6 +103,14 @@ final class BotNavigationManager {
                     edge = refreshedEdge;
                     edgeReused = edge != null;
                 }
+                if (edgeReused) {
+                    BotNavigationGraph.Edge refreshedGroundEdge = refreshCommittedGroundEdge(
+                            graph, entry, bot, startRegionId, targetRegionId, pathTargetPos, edge, runAiTick);
+                    if (refreshedGroundEdge != edge) {
+                        edge = refreshedGroundEdge;
+                        edgeReused = edge != null;
+                    }
+                }
             }
             if (edge == null && runAiTick && startRegionId >= 0 && targetRegionId >= 0 && startRegionId != targetRegionId) {
                 edge = findNextEdge(graph, bot, startRegionId, targetRegionId, pathTargetPos);
@@ -245,6 +253,36 @@ final class BotNavigationManager {
 
         BotNavigationGraph.Edge bestEdge = findNextEdge(graph, bot, startRegionId, targetRegionId, targetPos);
         if (sameEdge(edge, bestEdge) || bestEdge == null) {
+            return edge;
+        }
+
+        entry.navEdge = bestEdge;
+        entry.navTargetRegionId = targetRegionId;
+        entry.navTargetPos = null;
+        entry.navPreciseTarget = false;
+        return bestEdge;
+    }
+
+    private static BotNavigationGraph.Edge refreshCommittedGroundEdge(BotNavigationGraph graph,
+                                                                      BotEntry entry,
+                                                                      Character bot,
+                                                                      int startRegionId,
+                                                                      int targetRegionId,
+                                                                      Point targetPos,
+                                                                      BotNavigationGraph.Edge edge,
+                                                                      boolean runAiTick) {
+        if (!runAiTick
+                || edge == null
+                || entry.inAir
+                || entry.climbing
+                || startRegionId < 0
+                || targetRegionId < 0
+                || startRegionId == targetRegionId) {
+            return edge;
+        }
+
+        BotNavigationGraph.Edge bestEdge = findNextEdge(graph, bot, startRegionId, targetRegionId, targetPos);
+        if (bestEdge == null || sameEdge(edge, bestEdge)) {
             return edge;
         }
 

@@ -30,6 +30,7 @@ final class BotNavigationGraphProvider {
 
     private static final int GRAPH_VERSION = 38;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
+    private static final int DOWN_JUMP_PRELAUNCH_WINDOW_PX = 14;
     private static final int SAME_SOLID_NEST_GAP_PX = 8;
     private static final int ROPE_ANCHOR_INTERVAL_PX = 30;
     private static final int JUMP_POST_LANDING_STABILITY_TICKS = 3;
@@ -1209,7 +1210,7 @@ final class BotNavigationGraphProvider {
         int representativeX = (minX + maxX) / 2;
         Point representativeStart = from.pointAt(representativeX);
         BotPhysicsEngine.JumpLanding representativeLanding = validateDownJumpLaunchX(
-                from, map, regionIdByFootholdId, representativeX, movementProfile);
+                from, map, regionIdByFootholdId, representativeX, movementProfile, targetRegionId);
         if (representativeLanding == null) {
             return null;
         }
@@ -1273,7 +1274,9 @@ final class BotNavigationGraphProvider {
                                             int targetRegionId,
                                             boolean searchLeft,
                                             BotMovementProfile movementProfile) {
-        int limitX = searchLeft ? from.minX : from.maxX;
+        int limitX = searchLeft
+                ? Math.max(from.minX, startX - DOWN_JUMP_PRELAUNCH_WINDOW_PX)
+                : Math.min(from.maxX, startX + DOWN_JUMP_PRELAUNCH_WINDOW_PX);
         int validX = startX;
         int invalidX = startX;
         int step = 1;
@@ -1286,7 +1289,7 @@ final class BotNavigationGraphProvider {
                 break;
             }
 
-            if (validateDownJumpLaunchX(from, map, regionIdByFootholdId, probeX, movementProfile, targetRegionId) == null) {
+            if (!isValidDownJumpLaunchX(from, map, regionIdByFootholdId, probeX, movementProfile, targetRegionId)) {
                 invalidX = probeX;
                 break;
             }
@@ -1300,7 +1303,7 @@ final class BotNavigationGraphProvider {
 
         while (Math.abs(validX - invalidX) > 1) {
             int probeX = (validX + invalidX) / 2;
-            if (validateDownJumpLaunchX(from, map, regionIdByFootholdId, probeX, movementProfile, targetRegionId) != null) {
+            if (isValidDownJumpLaunchX(from, map, regionIdByFootholdId, probeX, movementProfile, targetRegionId)) {
                 validX = probeX;
             } else {
                 invalidX = probeX;
@@ -1336,16 +1339,28 @@ final class BotNavigationGraphProvider {
         return validateDownJumpLaunchX(from, map, regionIdByFootholdId, launchX, movementProfile, Integer.MIN_VALUE);
     }
 
+    private static boolean isValidDownJumpLaunchX(BotNavigationGraph.Region from,
+                                                  MapleMap map,
+                                                  Map<Integer, Integer> regionIdByFootholdId,
+                                                  int launchX,
+                                                  BotMovementProfile movementProfile,
+                                                  int targetRegionId) {
+        return validateDownJumpLaunchX(from, map, regionIdByFootholdId, launchX, movementProfile, targetRegionId) != null;
+    }
+
     private static BotPhysicsEngine.JumpLanding validateDownJumpLaunchX(BotNavigationGraph.Region from,
                                                                          MapleMap map,
                                                                          Map<Integer, Integer> regionIdByFootholdId,
                                                                          int launchX,
                                                                          BotMovementProfile movementProfile,
                                                                          int requiredTargetRegionId) {
-        if (!isApproachableJumpLaunchX(from, map, launchX)) {
+        if (from == null || from.isRopeRegion || map == null) {
             return null;
         }
         Point launchPoint = from.pointAt(launchX);
+        if (isBlockedWallBoundaryLaunch(map, launchPoint)) {
+            return null;
+        }
         if (from.isForbidFallDownAt(launchX) || dropLaunchStep(from, map, launchPoint, movementProfile) != 0) {
             return null;
         }

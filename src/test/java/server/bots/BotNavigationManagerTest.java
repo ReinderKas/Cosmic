@@ -298,6 +298,54 @@ class BotNavigationManagerTest {
     }
 
     @Test
+    void shouldRefreshStaleCommittedGroundDropWhenBestFirstEdgeChanges() {
+        MapleMap map = new MapleMap(910000032, 0, 0, 910000032, 1.0f);
+        FootholdTree footholds = new FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        footholds.insert(new Foothold(new Point(0, 0), new Point(300, 0), 1));
+        footholds.insert(new Foothold(new Point(0, 120), new Point(100, 120), 2));
+        footholds.insert(new Foothold(new Point(200, 120), new Point(300, 120), 3));
+        map.setFootholds(footholds);
+
+        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(map);
+        Point botPos = new Point(50, 0);
+        Point leftTarget = new Point(50, 120);
+        Point rightTarget = new Point(250, 120);
+        int startRegionId = graph.findRegionId(map, botPos);
+        int leftTargetRegionId = graph.findRegionId(map, leftTarget);
+        int rightTargetRegionId = graph.findRegionId(map, rightTarget);
+
+        List<BotNavigationGraph.Edge> leftPath = BotNavigationManager.findPath(
+                graph, map, botPos, startRegionId, leftTargetRegionId, leftTarget);
+        List<BotNavigationGraph.Edge> rightPath = BotNavigationManager.findPath(
+                graph, map, botPos, startRegionId, rightTargetRegionId, rightTarget);
+
+        assertFalse(leftPath.isEmpty(), "fixture should produce a left-side drop path");
+        assertFalse(rightPath.isEmpty(), "fixture should produce a right-side drop path");
+
+        BotNavigationGraph.Edge staleEdge = leftPath.getFirst();
+        BotNavigationGraph.Edge freshEdge = rightPath.getFirst();
+        assertEquals(BotNavigationGraph.EdgeType.DROP, staleEdge.type);
+        assertEquals(BotNavigationGraph.EdgeType.DROP, freshEdge.type);
+        assertNotEquals(staleEdge.toRegionId, freshEdge.toRegionId,
+                "regression requires different first actionable drop edges from the same source region");
+
+        Character bot = mockBot(botPos, map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.movementProfile = BotMovementProfile.base();
+        entry.following = true;
+        entry.navEdge = staleEdge;
+        entry.navTargetRegionId = leftTargetRegionId;
+
+        BotNavigationManager.NavigationDirective directive =
+                BotNavigationManager.resolveTarget(entry, rightTarget, true);
+
+        assertFalse(directive.consumedTick);
+        assertEquals(freshEdge.toRegionId, entry.navEdge.toRegionId,
+                "grounded reuse must discard a stale drop edge once the current best first edge changes");
+        assertEquals(freshEdge.startPoint, entry.navEdge.startPoint);
+    }
+
+    @Test
     void shouldUseRawTargetWhileMovementGraphWarmsInBackground() {
         MapleMap map = new MapleMap(910000030, 0, 0, 910000030, 1.0f);
         server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));

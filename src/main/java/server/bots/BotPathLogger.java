@@ -417,7 +417,9 @@ final class BotPathLogger {
     }
 
     private static String launchWindowSummary(BotNavigationGraph.Edge edge) {
-        if (edge.type != BotNavigationGraph.EdgeType.JUMP || edge.launchMinX == edge.launchMaxX) {
+        if ((edge.type != BotNavigationGraph.EdgeType.JUMP
+                && !(edge.type == BotNavigationGraph.EdgeType.DROP && edge.launchStepX == 0))
+                || edge.launchMinX == edge.launchMaxX) {
             return "";
         }
         return " window=[" + edge.launchMinX + "," + edge.launchMaxX + "]";
