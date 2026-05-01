@@ -136,10 +136,10 @@ class BotCombatManager {
         public int   ATTACK_DOWN_MAX = 20;
         public int   ATTACK_JUMP_Y   = 130;
         public int   ATTACK_JUMP_X_EXTRA = 60;
-        public int   RANGED_DEGENERATE_RANGE_X = 100;
-        public int   RANGED_DEGENERATE_RANGE_Y = 70;
+        public int   RANGED_DEGENERATE_RANGE_X = 50;
+        public int   RANGED_DEGENERATE_RANGE_Y = 50;
         public int   RANGED_RETREAT_THRESHOLD_X = 80;
-        public int   RANGED_RETREAT_DISTANCE_X = 120;
+        public int   RANGED_RETREAT_DISTANCE_X = 100;
 
         // Ammo
         public int   AMMO_LOW_WARN = 500;
