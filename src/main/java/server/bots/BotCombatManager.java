@@ -1002,7 +1002,7 @@ class BotCombatManager {
                 : null;
         int direction = route == AttackRoute.CLOSE
                 ? closeRangePacketFields.bodyActionId()
-                : BotAttackExecutionProvider.bodyActionId(action, fallbackAction);
+                : BotAttackExecutionProvider.bodyActionId(action, fallbackAction, weaponType);
         BotAttackExecutionProvider.SkillAttackTiming skillTiming =
                 BotAttackExecutionProvider.resolveSkillAttackTiming(skill, action, bot, fallbackAttackData);
         return new AttackPlan(entry.aoeSkillId, skillLevel, attackCount, hitBox, targets,
