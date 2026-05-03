@@ -1762,6 +1762,14 @@ public class BotManager {
             return;
         }
 
+        // Trade window open: keep physics consistent (gravity / swim / idle stance) but
+        // do not issue any movement input — no follow, grind, attack, teleport, or shop visit.
+        // Prevents the bot from wandering away or auto-equipping while the player is mid-trade.
+        if (bot.getTrade() != null) {
+            tickTradePhysicsOnly(entry, bot);
+            return;
+        }
+
         if (tickIdleEntry(entry, bot)) {
             return;
         }
@@ -2726,7 +2734,14 @@ public class BotManager {
             return true;
         }
         tickReleaseMonsterControl(bot);
-        BotInventoryManager.tickPassiveLoot(entry, bot);
+        // While a trade window is open, suppress passive loot pickup. pickupItem() runs on
+        // this scheduler thread and races Trade.completeTrade()'s addFromDrop on the packet
+        // thread: fitsInInventory() can pass, then this fills the last slot before addFromDrop
+        // runs, and the silently-ignored false return loses the partner's item.
+        // See memory/kb_bot_trade_dupe_loss_audit.md.
+        if (bot.getTrade() == null) {
+            BotInventoryManager.tickPassiveLoot(entry, bot);
+        }
         BotPotionManager.tickPotionCheck(entry, bot);
         BotPotionManager.tickPassiveRecovery(entry, bot);
         BotBuildManager.checkLevelUp(entry, bot);
@@ -2750,6 +2765,27 @@ public class BotManager {
             BotBuffManager.tick(entry, bot);
         }
         return tickActionLocked(entry);
+    }
+
+    /**
+     * Physics-only tick used while a trade window is open. Mirrors {@link #tickIdleEntry}'s
+     * physics body but skips the active-mode early-return so gravity / swim / stance stay
+     * consistent even if the bot was following or grinding when the trade started. Issues
+     * no movement input (no follow, grind, teleport, shop visit, or attack).
+     */
+    private void tickTradePhysicsOnly(BotEntry entry, Character bot) {
+        if (isSwimMap(entry) && entry.inAir && !entry.climbing) {
+            BotMovementManager.tickSwimming(entry, null);
+        } else if (entry.inAir) {
+            BotMovementManager.tickAirborne(entry, null);
+        } else if (!entry.climbing) {
+            int expectedIdleStance = BotPhysicsEngine.resolveIdleGroundStance(entry);
+            if (BotPhysicsEngine.resolveStance(entry) != expectedIdleStance
+                    || bot.getStance() != expectedIdleStance) {
+                BotPhysicsEngine.idleOnGround(entry, bot);
+                BotMovementManager.broadcastMovement(entry);
+            }
+        }
     }
 
     private boolean tickIdleEntry(BotEntry entry, Character bot) {
