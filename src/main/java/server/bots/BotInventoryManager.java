@@ -307,7 +307,7 @@ class BotInventoryManager {
         if (bot.getTrade() != null || entry.pendingTradeCategory != null || recipient.getTrade() != null) {
             if (entry.pendingBotTradeRetry == null) {
                 entry.pendingBotTradeRetry = () -> startTradeTransfer(item, recipient, entry, bot);
-                entry.pendingBotTradeRetryMs = BotMovementManager.delayAfterCurrentTick(2_000);
+                entry.pendingBotTradeRetryMs = BotMovementManager.delayAfterCurrentTick(10_000);
             }
             return;
         }
@@ -1200,7 +1200,7 @@ class BotInventoryManager {
         if (bot.getTrade() != null || entry.pendingTradeCategory != null || recipient.getTrade() != null) {
             if (entry.pendingBotTradeRetry == null) {
                 entry.pendingBotTradeRetry = () -> startPotShareTransfer(items, recipient, entry, bot, maxQty);
-                entry.pendingBotTradeRetryMs = BotMovementManager.delayAfterCurrentTick(2_000);
+                entry.pendingBotTradeRetryMs = BotMovementManager.delayAfterCurrentTick(10_000);
             }
             return;
         }
@@ -1240,7 +1240,7 @@ class BotInventoryManager {
         if (bot.getTrade() != null || entry.pendingTradeCategory != null || recipient.getTrade() != null) {
             if (entry.pendingBotTradeRetry == null) {
                 entry.pendingBotTradeRetry = () -> startAmmoShareTransfer(items, recipient, entry, bot, maxQty);
-                entry.pendingBotTradeRetryMs = BotMovementManager.delayAfterCurrentTick(2_000);
+                entry.pendingBotTradeRetryMs = BotMovementManager.delayAfterCurrentTick(10_000);
             }
             return;
         }
