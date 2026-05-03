@@ -2,6 +2,8 @@ package server.bots;
 
 import client.BotClient;
 import client.Character;
+import client.Job;
+import client.inventory.Equip;
 import client.inventory.Inventory;
 import client.inventory.InventoryType;
 import client.inventory.Item;
@@ -9,6 +11,7 @@ import client.inventory.WeaponType;
 import constants.inventory.ItemConstants;
 import server.ItemInformationProvider;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -197,10 +200,9 @@ final class BotOfferManager {
     }
 
     private static void createOwnerUpgradeRequest(BotEntry entry, Character bot, Character owner, Item ownerItem) {
-        String itemName = ItemInformationProvider.getInstance().getName(ownerItem.getItemId());
-        if (itemName == null || itemName.isBlank()) {
-            itemName = String.valueOf(ownerItem.getItemId());
-        }
+        // Audience for the specifier is the bot itself: it's describing why the item
+        // is good for it, so format stats relative to the bot's job.
+        String itemDesc = formatItemSpecifier(ownerItem, bot);
 
         entry.pendingDropCategory = null;
         entry.pendingLootOfferItem = ownerItem;
@@ -209,11 +211,11 @@ final class BotOfferManager {
         entry.pendingLootOfferBotRequesting = true;
 
         List<String> prompts = List.of(
-                "hey, that " + itemName + " would be an upgrade for me, can i have it pls?",
-                "Can I have your " + itemName + "?",
-                "Your " + itemName + " would be better on me! trade it over?",
-                "I could use that " + itemName + " of yours ;)",
-                "that " + itemName + " is an upgrade for me, want to trade?");
+                "hey, that " + itemDesc + " would be an upgrade for me, can i have it pls?",
+                "Can I have your " + itemDesc + "?",
+                "Your " + itemDesc + " would be better on me! trade it over?",
+                "I could use that " + itemDesc + " of yours ;)",
+                "that " + itemDesc + " is an upgrade for me, want to trade?");
         BotChatManager.queueBotSay(entry, BotManager.randomReply(prompts));
     }
 
@@ -294,12 +296,98 @@ final class BotOfferManager {
     }
 
     private static String buildLootOfferPrompt(Character recipient, Character owner, Item item) {
-        String itemName = ItemInformationProvider.getInstance().getName(item.getItemId());
-        if (itemName == null || itemName.isBlank()) {
-            itemName = String.valueOf(item.getItemId());
-        }
+        // Audience is the recipient: format stats relative to who would wear it.
+        String itemDesc = formatItemSpecifier(item, recipient);
         boolean targetIsOwner = owner != null && recipient.getId() == owner.getId();
-        return buildLootOfferPrompt(recipient.getName(), itemName, targetIsOwner);
+        return buildLootOfferPrompt(recipient.getName(), itemDesc, targetIsOwner);
+    }
+
+    /**
+     * Returns "<spec> <itemName>" with up to 2 stat tokens in priority order:
+     * 1) att (or matt for mage audience), 2) main stat, 3) secondary stat.
+     * Tokens with value 0 are skipped — att/matt is NOT gated by slot type, since
+     * gloves/capes/earrings can also carry att or matt. Audience's job decides
+     * which stats are "main"/"secondary" and whether matt outranks att.
+     * Weapon att is rendered without a leading "+" ("30 att maple bow"); all
+     * other tokens use "+" since they are bonus values ("+3 str", "+3 att").
+     */
+    static String formatItemSpecifier(Item item, Character audience) {
+        String name = ItemInformationProvider.getInstance().getName(item.getItemId());
+        if (name == null || name.isBlank()) {
+            name = String.valueOf(item.getItemId());
+        }
+        if (!(item instanceof Equip eq) || audience == null) {
+            return name;
+        }
+
+        int jobId = audience.getJob() == null ? 0 : audience.getJob().getId();
+        boolean mageBranch = isMageBranch(jobId);
+        boolean weapon = ItemConstants.isWeapon(item.getItemId());
+        char[] order = mainSecondaryStats(jobId);
+
+        int attVal = mageBranch ? eq.getMatk() : eq.getWatk();
+        String attLabel = mageBranch ? "matt" : "att";
+        int mainVal = statValue(eq, order[0]);
+        int secVal = statValue(eq, order[1]);
+
+        List<String> tokens = new ArrayList<>(2);
+        if (attVal > 0) {
+            tokens.add(weapon ? (attVal + " " + attLabel) : ("+" + attVal + " " + attLabel));
+        }
+        if (tokens.size() < 2 && mainVal > 0) {
+            tokens.add("+" + mainVal + " " + statName(order[0]));
+        }
+        if (tokens.size() < 2 && secVal > 0) {
+            tokens.add("+" + secVal + " " + statName(order[1]));
+        }
+
+        if (tokens.isEmpty()) {
+            return name;
+        }
+        return String.join(" ", tokens) + " " + name;
+    }
+
+    private static boolean isMageBranch(int jobId) {
+        return (jobId >= 200 && jobId < 300)
+                || (jobId >= 1200 && jobId < 1300)
+                || jobId == 2001
+                || (jobId >= 2200 && jobId < 2300);
+    }
+
+    // Returns 2-char [main, secondary] stat codes: s=str, d=dex, i=int, l=luk
+    private static char[] mainSecondaryStats(int jobId) {
+        // Magician branches: INT main, LUK secondary
+        if (isMageBranch(jobId)) return new char[]{'i', 'l'};
+        // Bowman / Wind Archer: DEX main, STR secondary
+        if ((jobId >= 300 && jobId < 400) || (jobId >= 1300 && jobId < 1400)) return new char[]{'d', 's'};
+        // Thief / Night Walker: LUK main, DEX secondary
+        if ((jobId >= 400 && jobId < 500) || (jobId >= 1400 && jobId < 1500)) return new char[]{'l', 'd'};
+        // Pirate gunslinger sub-branch: DEX main, STR secondary
+        if (jobId >= 520 && jobId < 530) return new char[]{'d', 's'};
+        // Pirate brawler sub-branch + Thunderbreaker: STR main, DEX secondary
+        if ((jobId >= 510 && jobId < 520) || (jobId >= 1500 && jobId < 1600)) return new char[]{'s', 'd'};
+        // Warrior / Dawn Warrior / Aran / Pirate-beginner / fallback: STR main, DEX secondary
+        return new char[]{'s', 'd'};
+    }
+
+    private static int statValue(Equip eq, char code) {
+        return switch (code) {
+            case 's' -> eq.getStr();
+            case 'd' -> eq.getDex();
+            case 'i' -> eq.getInt();
+            case 'l' -> eq.getLuk();
+            default -> 0;
+        };
+    }
+
+    private static String statName(char code) {
+        return switch (code) {
+            case 's' -> "str";
+            case 'd' -> "dex";
+            case 'i' -> "int";
+            case 'l' -> "luk";
+            default -> "";
+        };
     }
 
     private static Character findLootOfferRecipient(BotEntry entry, Character bot, Item item) {
