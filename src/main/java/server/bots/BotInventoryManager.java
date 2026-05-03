@@ -2,6 +2,8 @@ package server.bots;
 
 import client.BotClient;
 import client.Character;
+import client.Job;
+import client.inventory.Equip;
 import client.inventory.Inventory;
 import client.inventory.InventoryType;
 import client.inventory.Item;
@@ -839,8 +841,13 @@ class BotInventoryManager {
                 int id = item.getItemId();
                 return !isRecoveryPotion(id) && !isBuffConsumable(id) && !ItemConstants.isEquipScroll(id);
             });
-            case "equips"  -> collectFromBag(bot, result, InventoryType.EQUIP,
-                    item -> !entry.ownerGivenItems.contains(item));
+            case "equips" -> {
+                collectFromBag(bot, result, InventoryType.EQUIP,
+                        item -> !entry.ownerGivenItems.contains(item));
+                List<Item> sorted = sortEquipsForTrade(result, bot);
+                result.clear();
+                result.addAll(sorted);
+            }
             case "etc"     -> collectFromBag(bot, result, InventoryType.ETC,   item -> true);
             default -> {
                 if (category.startsWith("name:")) {
@@ -1019,6 +1026,53 @@ class BotInventoryManager {
     }
 
     // ─── Internals ────────────────────────────────────────────────────────────
+
+    /**
+     * Orders equips for trade: foreign-class items first (grouped by equipment type),
+     * then own-class items sorted worst-to-best so the owner receives the least useful
+     * gear early and can cancel once they have what they want.
+     *
+     * "Own class" = bot's job/level/fame meets the item's requirements (stat reqs ignored;
+     * those may be unlocked by gear the bot already wears). Everything else is foreign.
+     */
+    private static List<Item> sortEquipsForTrade(List<Item> items, Character bot) {
+        if (items.size() <= 1) return items;
+        ItemInformationProvider ii = ItemInformationProvider.getInstance();
+        List<Item> foreign = new ArrayList<>();
+        List<Item> own = new ArrayList<>();
+        for (Item item : items) {
+            if (!(item instanceof Equip equip) || !BotEquipManager.statOnlyBlocked(bot, ii, equip)) {
+                foreign.add(item);
+            } else {
+                own.add(item);
+            }
+        }
+        // Foreign: group by equipment category (itemId / 10000 gives the subtype, e.g. 100=hat, 110=cape)
+        foreign.sort(Comparator.comparingInt(i -> i.getItemId() / 10000));
+        // Own: worst-to-best so owner gets the bad stuff to discard first
+        Job job = bot.getJob();
+        own.sort(Comparator.comparingInt(i -> equipTradeScore((Equip) i, job)));
+        List<Item> result = new ArrayList<>(foreign.size() + own.size());
+        result.addAll(foreign);
+        result.addAll(own);
+        return result;
+    }
+
+    /** Score used to order own-class equips worst-to-best: 4*watk + matk + main + sec/2. */
+    private static int equipTradeScore(Equip e, Job job) {
+        int main, sec;
+        if (BotEquipManager.isMageJob(job)) {
+            main = e.getInt(); sec = e.getLuk();
+        } else if (job != null && (job.isA(Job.BOWMAN)
+                || job == Job.GUNSLINGER || job == Job.OUTLAW || job == Job.CORSAIR)) {
+            main = e.getDex(); sec = e.getStr();
+        } else if (job != null && job.isA(Job.THIEF)) {
+            main = e.getLuk(); sec = e.getDex();
+        } else {
+            main = e.getStr(); sec = e.getDex();
+        }
+        return 4 * e.getWatk() + e.getMatk() + main + sec / 2;
+    }
 
     private static int dropFromBag(Character bot, InventoryType type, Predicate<Item> filter) {
         Inventory inv = bot.getInventory(type);
