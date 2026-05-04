@@ -81,7 +81,7 @@ class BotEquipManager {
         }
     }
 
-    record EquipScore(int damage, int defense, int statSum) {}
+    record EquipScore(int damage, int statSum) {}
 
     /**
      * Pareto-frontier DP across equipment slots. Outer loop iterates each viable weapon
@@ -253,8 +253,7 @@ class BotEquipManager {
                 String wName = b.weapon() == null ? "(no weapon)" : ii.getName(b.weapon().getItemId());
                 EquipScore s = b.result().score();
                 String tag = i == 0 ? "*" : " ";
-                out.add(tag + " W=" + wName + " dmg=" + s.damage() + " def=" + s.defense()
-                        + " stat=" + s.statSum());
+                out.add(tag + " W=" + wName + " dmg=" + s.damage() + " stat=" + s.statSum());
             }
 
             // Diff vs current for the winning branch.
@@ -283,6 +282,8 @@ class BotEquipManager {
             }
             if (anyCap) out.add("WARN: pareto cap hit, result is best-effort");
         }
+
+        out.add("range: " + BotChatManager.buildRangeReport(bot));
 
         // Full dump to disk — chat is too narrow for inventory + per-branch breakdown.
         String filePath = writeAutoEquipDumpFile(bot, ii, eqpInv, eqdInv, mob, naked,
@@ -330,6 +331,7 @@ class BotEquipManager {
           .append(" watk=").append(naked.watk())
           .append(" mag=").append(naked.magic())
           .append(" acc=").append(naked.totalAcc()).append('\n');
+        sb.append("range:   ").append(BotChatManager.buildRangeReport(bot, mob)).append('\n');
 
         sb.append("\n--- equipped ---\n");
         sb.append(itemHeader());
@@ -377,7 +379,6 @@ class BotEquipManager {
             sb.append(i == 0 ? "[*] " : "[ ] ").append(wName)
               .append(" id=").append(b.w() == null ? 0 : b.w().getItemId())
               .append(" dmg=").append(s.damage())
-              .append(" def=").append(s.defense())
               .append(" stat=").append(s.statSum())
               .append(b.r().paretoCapHit() ? " (pareto-cap)" : "").append('\n');
             for (Map.Entry<Short, Equip> pick : b.r().picks().entrySet()) {
@@ -652,7 +653,7 @@ class BotEquipManager {
 
         int n = dpSlots.size();
         int overallIdx = dpSlots.indexOf((short) -5);
-        DpNode start = new DpNode(init, 0, 0, 0, 0, new Equip[n]);
+        DpNode start = new DpNode(init, 0, 0, 0, new Equip[n]);
         List<DpNode> frontier = new ArrayList<>();
         frontier.add(start);
 
@@ -683,13 +684,12 @@ class BotEquipManager {
                         }
                     }
                     StatSnapshot ns = prev.snap.swap(null, cand);
-                    int nDef = prev.def + cand.getWdef() + cand.getMdef();
                     int nHp = prev.hp + cand.getHp();
                     int nMp = prev.mp + cand.getMp();
                     int nStat = prev.statSum + usefulStatSum(cand, ns.job());
                     Equip[] picks = prev.picks.clone();
                     picks[i] = cand;
-                    next.add(new DpNode(ns, nDef, nHp, nMp, nStat, picks));
+                    next.add(new DpNode(ns, nHp, nMp, nStat, picks));
                 }
             }
             frontier = paretoPruneNodes(next, capHit, hooks, dpSlots);
@@ -733,10 +733,10 @@ class BotEquipManager {
 
     private static final class DpNode {
         final StatSnapshot snap;
-        final int def, hp, mp, statSum;
+        final int hp, mp, statSum;
         final Equip[] picks;
-        DpNode(StatSnapshot snap, int def, int hp, int mp, int statSum, Equip[] picks) {
-            this.snap = snap; this.def = def; this.hp = hp; this.mp = mp;
+        DpNode(StatSnapshot snap, int hp, int mp, int statSum, Equip[] picks) {
+            this.snap = snap; this.hp = hp; this.mp = mp;
             this.statSum = statSum; this.picks = picks;
         }
     }
@@ -775,13 +775,13 @@ class BotEquipManager {
 
     private static int damagePotential(DpNode n) {
         StatSnapshot s = n.snap;
-        return s.str() + s.dex() + s.int_() + s.luk() + s.watk() + s.magic() + n.def;
+        return s.str() + s.dex() + s.int_() + s.luk() + s.watk() + s.magic();
     }
 
     private static int[] nodeVec(DpNode n) {
         StatSnapshot s = n.snap;
         return new int[]{s.str(), s.dex(), s.int_(), s.luk(), s.watk(), s.magic(),
-                          s.totalAcc(), n.def, n.hp, n.mp, n.statSum};
+                          s.totalAcc(), n.hp, n.mp, n.statSum};
     }
 
     private static boolean vecDominates(int[] b, int[] a) {
@@ -827,7 +827,7 @@ class BotEquipManager {
     private static DpNode relaxToFeasible(OptimizerHooks hooks, DpNode node,
                                            List<Short> dpSlots, Equip weapon) {
         StatSnapshot s = node.snap;
-        int def = node.def, hp = node.hp, mp = node.mp, statSum = node.statSum;
+        int hp = node.hp, mp = node.mp, statSum = node.statSum;
         Equip[] picks = node.picks.clone();
         boolean changed = true;
         while (changed) {
@@ -838,7 +838,6 @@ class BotEquipManager {
                 if (!hooks.meetsReqs(p, s.job(), s.level(),
                         s.str(), s.dex(), s.int_(), s.luk(), s.fame())) {
                     s = s.swap(p, null);
-                    def -= p.getWdef() + p.getMdef();
                     hp -= p.getHp();
                     mp -= p.getMp();
                     statSum -= usefulStatSum(p, s.job());
@@ -849,18 +848,18 @@ class BotEquipManager {
         }
         if (weapon != null && !hooks.meetsReqs(weapon, s.job(), s.level(),
                 s.str(), s.dex(), s.int_(), s.luk(), s.fame())) return null;
-        return new DpNode(s, def, hp, mp, statSum, picks);
+        return new DpNode(s, hp, mp, statSum, picks);
     }
 
     private static EquipScore scoreNode(DpNode node, Equip weapon, WeaponType wt, MapDamageProfile mob) {
         if (isMageJob(node.snap.job())) {
-            return new EquipScore(magicScore(node.snap), node.def, node.statSum);
+            return new EquipScore(magicScore(node.snap), node.statSum);
         }
-        if (wt == null) return new EquipScore(0, node.def, node.statSum);
+        if (wt == null) return new EquipScore(0, node.statSum);
         int dmg = damageWith(node.snap, null, wt, mob);
         int cycleMs = weapon != null ? weaponCycleMs(weapon.getItemId()) : 0;
         if (cycleMs > 0) dmg = (int) (dmg * 1000.0 / cycleMs);
-        return new EquipScore(dmg, node.def, node.statSum);
+        return new EquipScore(dmg, node.statSum);
     }
 
     /** Naked stat snapshot: bot totals minus all currently-equipped non-cash gear. */
@@ -1254,15 +1253,7 @@ class BotEquipManager {
 
     private static int compareScores(EquipScore left, EquipScore right) {
         int cmp = Integer.compare(left.damage(), right.damage());
-        if (cmp != 0) {
-            return cmp;
-        }
-
-        cmp = Integer.compare(left.defense(), right.defense());
-        if (cmp != 0) {
-            return cmp;
-        }
-
+        if (cmp != 0) return cmp;
         return Integer.compare(left.statSum(), right.statSum());
     }
 
@@ -1371,9 +1362,12 @@ class BotEquipManager {
             return e.getInt() * 5 + e.getMatk() * 4 + e.getLuk()
                     + e.getMdef() + hpmp;
         }
-        return e.getStr() + e.getDex() + e.getInt() + e.getLuk()
-             + e.getWatk() + e.getMatk() + e.getWdef() + e.getMdef()
-             + e.getAcc() + e.getAvoid() + e.getSpeed() + hpmp;
+        double sum = e.getStr() + e.getDex() + e.getInt() * 1.1 + e.getLuk()
+                   + e.getWatk() * 4
+                   + (e.getWdef() + e.getMdef()) * 0.25
+                   + e.getAcc() + e.getAvoid() + e.getSpeed()
+                   + (e.getHp() + e.getMp()) * 0.1;
+        return (int) Math.round(sum);
     }
 
     private static int magicScore(StatSnapshot sim) {
