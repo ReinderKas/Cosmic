@@ -108,6 +108,13 @@ jason stop - only jason will stop
 | `need pot` / `running low on pots` | Ask for whichever pot type is needed more |
 | `need ammo` / `low on arrows` / `low on bolts` | Ask for ammo help when using bow/crossbow |
 
+### Social
+
+| Say | Effect |
+|---|---|
+| `fame me` | Bot fames you (subject to daily & monthly limits) |
+| `fame <name>` | Bot fames the named player or bot on the map |
+
 ### Gear
 
 Bots auto-equip the best available gear they can use. They can also recommend gear for you, request current upgrades from you, and trade away non-reserved spare gear.

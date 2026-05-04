@@ -919,7 +919,7 @@ class BotEquipManager {
         // Pass huge level/stat values: if it still fails, job or fame is blocking, skip.
         return ii.meetsEquipRequirements(equip, bot.getJob(), Integer.MAX_VALUE / 4,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, bot.getFame());
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE);
     }
 
     private static boolean isRecommendationCandidate(Character bot, ItemInformationProvider ii, Equip equip,

@@ -183,6 +183,31 @@ public class BotChatManager {
             "i don't need arrows or bolts rn",
             "ammo sharing is only for arrows and bolts",
             "not using bow ammo rn");
+
+    private static final Pattern FAME_PATTERN = Pattern.compile(
+            "^\\s*fame\\s+(me|\\S+?)\\s*[?!.,]*\\s*$",
+            Pattern.CASE_INSENSITIVE);
+    private static final List<String> FAME_OK_REPLIES = List.of(
+            "k", "kk", "kkk", "ok", "sure", "done",
+            "famed %s", "my turn tomorrow?", "that would be 1m pls",
+            "trade me 500k first", "S> fame 1m", "famed!", "got u",
+            "ok famed", "yw", "done, fame me back?",
+            "np", "ok but u owe me", "famed %s, now we're even",
+            "ok done, 1m in the mail pls", "fame4fame?",
+            "consider this a gift", "ok fine, famed",
+            "you're welcome, now buy me dinner", "done. u got a good one");
+    private static final List<String> FAME_COOLDOWN_REPLIES = List.of(
+            "already famed someone today, try tmrw",
+            "can only fame once a day, already used it",
+            "famed earlier today, comeback tomorrow",
+            "daily limit hit, tomorrow ok?",
+            "i'm tapped out on fame for today");
+    private static final List<String> FAME_SAME_PERSON_REPLIES = List.of(
+            "already famed %s this month",
+            "famed %s too recently, next month",
+            "can't fame %s again yet, monthly limit",
+            "monthly limit for %s, try again next month",
+            "famed %s already this month, gotta wait");
     private static final List<String> OWNER_POT_SHORTAGE_REPLIES = List.of(
             "almost out of %s pots too, i thought u were our shopper?",
             "i checked, nobody has spare %s pots. that's kinda your department lol",
@@ -661,6 +686,12 @@ public class BotChatManager {
         }
         if (NEED_AMMO_PATTERN.matcher(message).find()) {
             BotManager.after(BotManager.randMs(500, 700), () -> handleNeedAmmoCommand(entry));
+            return;
+        }
+        Matcher fameMatcher = FAME_PATTERN.matcher(message);
+        if (fameMatcher.matches()) {
+            String fameTarget = fameMatcher.group(1);
+            BotManager.after(BotManager.randMs(500, 900), () -> handleFameCommand(entry, fameTarget));
             return;
         }
         if (SUPPORT_OFF_PATTERN.matcher(message).find()) {
@@ -2230,5 +2261,47 @@ public class BotChatManager {
             case CORSAIR     -> "corsair";
             default -> job.name().toLowerCase();
         };
+    }
+
+    private static void handleFameCommand(BotEntry entry, String targetName) {
+        Character bot = entry.bot;
+        Character target;
+        if (targetName.equalsIgnoreCase("me")) {
+            target = entry.owner;
+        } else {
+            target = bot.getMap().getCharacters().stream()
+                    .filter(c -> c.getName().equalsIgnoreCase(targetName))
+                    .findFirst().orElse(null);
+        }
+        if (target == null) {
+            BotManager.getInstance().botReply(entry, "can't find " + targetName + " on the map");
+            return;
+        }
+        if (target.getId() == bot.getId()) {
+            BotManager.getInstance().botReply(entry, "lol can't fame myself");
+            return;
+        }
+        if (bot.getLevel() < 15) {
+            BotManager.getInstance().botReply(entry, "i'm too low level to fame");
+            return;
+        }
+        Character.FameStatus status = bot.canGiveFame(target);
+        if (status == Character.FameStatus.NOT_TODAY) {
+            BotManager.getInstance().botReply(entry, BotManager.randomReply(FAME_COOLDOWN_REPLIES));
+            return;
+        }
+        if (status == Character.FameStatus.NOT_THIS_MONTH) {
+            String reply = String.format(BotManager.randomReply(FAME_SAME_PERSON_REPLIES), target.getName());
+            BotManager.getInstance().botReply(entry, reply);
+            return;
+        }
+        if (target.gainFame(1, bot, 1)) {
+            bot.hasGivenFame(target);
+            String template = BotManager.randomReply(FAME_OK_REPLIES);
+            String reply = template.contains("%s") ? String.format(template, target.getName()) : template;
+            BotManager.getInstance().botReply(entry, reply);
+        } else {
+            BotManager.getInstance().botReply(entry, "fame failed, might be at max already");
+        }
     }
 }
