@@ -451,6 +451,7 @@ server:
     MINIMUM_GM_LEVEL_TO_USE_STORAGE: 4
     MINIMUM_GM_LEVEL_TO_USE_DUEY: 4
     MINIMUM_GM_LEVEL_TO_DROP: 4
+    GM_NO_FAME_COOLDOWN: false          #If true, GMs bypass the daily/monthly fame cooldown. Set false so bot GMs respect normal limits.
 
     #Any NPC ids that should search for a js override script (useful if they already have wz entries since otherwise they're ignored).
     NPCS_SCRIPTABLE:

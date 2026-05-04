@@ -1108,7 +1108,7 @@ public class Character extends AbstractCharacterObject {
     }
 
     public FameStatus canGiveFame(Character from) {
-        if (this.isGM()) {
+        if (this.isGM() && YamlConfig.config.server.GM_NO_FAME_COOLDOWN) {
             return FameStatus.OK;
         } else if (lastfametime >= System.currentTimeMillis() - 3600000 * 24) {
             return FameStatus.NOT_TODAY;
