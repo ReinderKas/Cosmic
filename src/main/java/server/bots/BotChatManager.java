@@ -303,14 +303,19 @@ public class BotChatManager {
     private static final Pattern SP_2H_PATTERN = Pattern.compile(
             "\\b2h\\b", Pattern.CASE_INSENSITIVE);
 
+    // "pure <stat>" matches only the class whose primary stat it names.
+    // Bare "pure" (no stat qualifier) matches all classes via the negative lookahead,
+    // and the per-class job gate in handleApBuildSelection ensures only the right bot acts.
+    private static final String PURE_NO_STAT =
+            "\\bpure\\b(?!\\s+(?:str|dex|int|luk)\\b)";
     private static final Pattern AP_PURE_STR_PATTERN = Pattern.compile(
-            "\\bpure\\s+str\\b", Pattern.CASE_INSENSITIVE);
+            "\\bpure\\s+str\\b|\\bdexless\\b|" + PURE_NO_STAT, Pattern.CASE_INSENSITIVE);
     private static final Pattern AP_DEXLESS_PATTERN = Pattern.compile(
-            "\\bdexless\\b", Pattern.CASE_INSENSITIVE);
+            "\\bdexless\\b|\\bpure\\s+luk\\b|" + PURE_NO_STAT, Pattern.CASE_INSENSITIVE);
     private static final Pattern AP_LUKLESS_PATTERN = Pattern.compile(
-            "\\blukless\\b", Pattern.CASE_INSENSITIVE);
+            "\\blukless\\b|\\bpure\\s+int\\b|" + PURE_NO_STAT, Pattern.CASE_INSENSITIVE);
     private static final Pattern AP_STRLESS_PATTERN = Pattern.compile(
-            "\\bstrless\\b", Pattern.CASE_INSENSITIVE);
+            "\\bstrless\\b|\\bpure\\s+dex\\b|" + PURE_NO_STAT, Pattern.CASE_INSENSITIVE);
     private static final Pattern AP_FIXED_DEX_PATTERN = Pattern.compile(
             "\\b(\\d+)\\s*dex\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern AP_FIXED_LUK_PATTERN = Pattern.compile(
