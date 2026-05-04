@@ -40,6 +40,7 @@ import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.ToIntFunction;
 import java.util.stream.Collectors;
@@ -500,19 +501,31 @@ class BotEquipManager {
      *  non-ring slot picks. Picks omit slots the optimizer chose to leave empty. */
     record OptimizerResult(Equip weapon, Map<Short, Equip> picks) {}
 
+    private enum RecommendationScope {
+        IMMEDIATE,
+        FUTURE
+    }
+
     /**
      * Runs the autoEquip DP after merging {@code extras} into the receiver's candidate pool.
      * Used by the trade request/offer path so its recommendations match what autoEquip would
-     * actually do. Excludes rings (those use a separate greedy pass). The {@code extras} are
-     * still subject to wearability and weapon-compat filters before entering the DP.
+     * actually do. The {@code extras} are still subject to scope-appropriate requirement and
+     * weapon-compat filters before entering the DP.
      */
     static OptimizerResult runOptimizerWithExtras(Character bot, Collection<Equip> extras) {
+        return runOptimizerWithExtras(bot, extras, RecommendationScope.IMMEDIATE);
+    }
+
+    private static OptimizerResult runOptimizerWithExtras(Character bot, Collection<Equip> extras,
+                                                          RecommendationScope scope) {
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
         Inventory eqpInv = bot.getInventory(InventoryType.EQUIP);
         Inventory eqdInv = bot.getInventory(InventoryType.EQUIPPED);
         MapDamageProfile mob = MapDamageProfile.snapshotByAvoid(bot);
 
-        Map<Short, List<Equip>> bySlot = collectAutoEquipCandidates(bot, ii, eqpInv, eqdInv, null);
+        Map<Short, List<Equip>> bySlot = scope == RecommendationScope.IMMEDIATE
+                ? collectAutoEquipCandidates(bot, ii, eqpInv, eqdInv, null)
+                : collectFutureEquipCandidates(bot, ii, eqpInv, eqdInv);
         for (Equip ex : extras) {
             if (ex == null || ii.isCash(ex.getItemId())) continue;
             String ts = ii.getEquipmentSlot(ex.getItemId());
@@ -523,7 +536,7 @@ class BotEquipManager {
             if (pslot == 0) continue;
             if (pslot == (short) -11
                     && !isWeaponCompatible(bot, ii.getWeaponType(ex.getItemId()))) continue;
-            if (!ii.canWearEquipment(bot, ex, pslot) && !statOnlyBlocked(bot, ii, ex)) continue;
+            if (!isRecommendationCandidate(bot, ii, ex, pslot, scope)) continue;
             // Rings live in the shared -12 pool regardless of which equipped position they came from.
             short key = isRingSlot(pslot) ? (short) -12 : pslot;
             List<Equip> pool = bySlot.computeIfAbsent(key, k -> new ArrayList<>());
@@ -547,11 +560,14 @@ class BotEquipManager {
         if (weaponPool.isEmpty()) weaponPool.add(null);
 
         StatSnapshot naked = nakedBase(bot, ii, eqdInv);
+        OptimizerHooks hooks = scope == RecommendationScope.IMMEDIATE
+                ? OptimizerHooks.from(ii)
+                : OptimizerHooks.futureFrom(ii, bot);
         Map<Short, Equip> bestPicks = null;
         EquipScore bestScore = null;
         Equip bestWeapon = null;
         for (Equip w : weaponPool) {
-            DpResult r = solveForWeapon(bot, ii, naked, w, dpSlots, currentBySlot, bySlot, mob);
+            DpResult r = solveForWeapon(bot, hooks, naked, w, dpSlots, currentBySlot, bySlot, mob);
             if (r == null) continue;
             if (bestScore == null || compareScores(r.score(), bestScore) > 0) {
                 bestScore = r.score();
@@ -560,7 +576,7 @@ class BotEquipManager {
             }
         }
         if (bestPicks == null && !weaponPool.contains(null)) {
-            DpResult r = solveForWeapon(bot, ii, naked, null, dpSlots, currentBySlot, bySlot, mob);
+            DpResult r = solveForWeapon(bot, hooks, naked, null, dpSlots, currentBySlot, bySlot, mob);
             if (r != null) { bestPicks = r.picks(); bestWeapon = null; }
         }
         return new OptimizerResult(bestWeapon, bestPicks != null ? bestPicks : Map.of());
@@ -586,6 +602,22 @@ class BotEquipManager {
                 }
                 @Override public boolean meetsReqs(Equip e, Job job, int lvl, int s, int d, int i, int l, int f) {
                     return ii.meetsEquipRequirements(e, job, lvl, s, d, i, l, f);
+                }
+            };
+        }
+
+        static OptimizerHooks futureFrom(ItemInformationProvider ii, Character bot) {
+            final Job botJob = bot != null ? bot.getJob() : null;
+            final int fame = bot != null ? bot.getFame() : 0;
+            final int max = Integer.MAX_VALUE / 4;
+            return new OptimizerHooks() {
+                @Override public boolean isTwoHanded(int itemId) { return ii.isTwoHanded(itemId); }
+                @Override public WeaponType getWeaponType(int itemId) { return ii.getWeaponType(itemId); }
+                @Override public boolean isOverall(int itemId) {
+                    return "MaPn".equals(ii.getEquipmentSlot(itemId));
+                }
+                @Override public boolean meetsReqs(Equip e, Job job, int lvl, int s, int d, int i, int l, int f) {
+                    return ii.meetsEquipRequirements(e, botJob, max, max, max, max, max, fame);
                 }
             };
         }
@@ -883,10 +915,74 @@ class BotEquipManager {
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, bot.getFame());
     }
 
+    static boolean futureOnlyBlocked(Character bot, ItemInformationProvider ii, Equip equip) {
+        // Pass huge level/stat values: if it still fails, job or fame is blocking, skip.
+        return ii.meetsEquipRequirements(equip, bot.getJob(), Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, bot.getFame());
+    }
+
+    private static boolean isRecommendationCandidate(Character bot, ItemInformationProvider ii, Equip equip,
+                                                     short primarySlot, RecommendationScope scope) {
+        if (scope == RecommendationScope.IMMEDIATE) {
+            return ii.canWearEquipment(bot, equip, primarySlot) || statOnlyBlocked(bot, ii, equip);
+        }
+        return futureOnlyBlocked(bot, ii, equip);
+    }
+
+    private static Map<Short, List<Equip>> collectFutureEquipCandidates(
+            Character bot, ItemInformationProvider ii, Inventory eqpInv, Inventory eqdInv) {
+        Map<Short, List<Equip>> bySlot = new LinkedHashMap<>();
+        for (Item item : eqpInv.list()) {
+            if (ii.isCash(item.getItemId())) continue;
+            if (!(item instanceof Equip equip)) continue;
+            String textSlot = ii.getEquipmentSlot(item.getItemId());
+            EquipSlot eslot = EquipSlot.getFromTextSlot(textSlot);
+            if (eslot == null || eslot == EquipSlot.PET_EQUIP) continue;
+            short primary = (short) eslot.getPrimarySlot();
+            if (primary == 0) continue;
+            if (primary == (short) -11
+                    && !isWeaponCompatible(bot, ii.getWeaponType(equip.getItemId()))) continue;
+            if (!futureOnlyBlocked(bot, ii, equip)) continue;
+            short key = isRingSlot(primary) ? (short) -12 : primary;
+            bySlot.computeIfAbsent(key, k -> new ArrayList<>()).add(equip);
+        }
+        for (Item it : eqdInv.list()) {
+            if (!(it instanceof Equip e) || ii.isCash(e.getItemId())) continue;
+            short pos = e.getPosition();
+            if (pos == (short) -11
+                    && !isWeaponCompatible(bot, ii.getWeaponType(e.getItemId()))) continue;
+            if (!futureOnlyBlocked(bot, ii, e)) continue;
+            short key = isRingSlot(pos) ? (short) -12 : pos;
+            List<Equip> pool = bySlot.computeIfAbsent(key, k -> new ArrayList<>());
+            if (!pool.contains(e)) pool.add(e);
+        }
+        for (Map.Entry<Short, List<Equip>> e : bySlot.entrySet()) {
+            e.setValue(pruneDominated(ii, e.getValue()));
+        }
+        return bySlot;
+    }
+
     static List<EquipRecommendation> findRecommendedEquips(Character receiver, Character holder) {
+        return findRecommendedEquips(receiver, holder, RecommendationScope.IMMEDIATE);
+    }
+
+    static List<EquipRecommendation> findFutureRecommendedEquips(Character receiver, Character holder) {
+        return findRecommendedEquips(receiver, holder, RecommendationScope.FUTURE);
+    }
+
+    static List<EquipRecommendation> findRecommendedEquipsFromItems(Character receiver, Collection<Equip> holderItems) {
+        return buildRecommendations(receiver, holderItems, RecommendationScope.IMMEDIATE);
+    }
+
+    static List<EquipRecommendation> findFutureRecommendedEquipsFromItems(Character receiver, Collection<Equip> holderItems) {
+        return buildRecommendations(receiver, holderItems, RecommendationScope.FUTURE);
+    }
+
+    private static List<EquipRecommendation> findRecommendedEquips(Character receiver, Character holder,
+                                                                   RecommendationScope scope) {
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
         Inventory holderEquipInv = holder.getInventory(InventoryType.EQUIP);
-        Inventory receiverEquippedInv = receiver.getInventory(InventoryType.EQUIPPED);
 
         // Single source of truth: the autoEquip DP. Add the holder's tradeable items (incl.
         // rings) to the receiver's pool, run the optimizer, and recommend only the picks that
@@ -901,11 +997,21 @@ class BotEquipManager {
             EquipSlot eslot = EquipSlot.getFromTextSlot(textSlot);
             if (eslot == null || eslot == EquipSlot.PET_EQUIP) continue;
             if (eslot.getPrimarySlot() == 0) continue;
+            short primarySlot = (short) eslot.getPrimarySlot();
+            if (primarySlot == (short) -11
+                    && !isWeaponCompatible(receiver, ii.getWeaponType(equip.getItemId()))) continue;
+            if (!isRecommendationCandidate(receiver, ii, equip, primarySlot, scope)) continue;
             holderItems.add(equip);
         }
 
+        return buildRecommendations(receiver, holderItems, scope);
+    }
+
+    private static List<EquipRecommendation> buildRecommendations(Character receiver, Collection<Equip> holderItems,
+                                                                  RecommendationScope scope) {
+        Inventory receiverEquippedInv = receiver.getInventory(InventoryType.EQUIPPED);
         List<EquipRecommendation> recommendations = new ArrayList<>();
-        OptimizerResult opt = runOptimizerWithExtras(receiver, holderItems);
+        OptimizerResult opt = runOptimizerWithExtras(receiver, holderItems, scope);
         if (opt.weapon() != null && holderItems.contains(opt.weapon())) {
             Equip cur = (Equip) receiverEquippedInv.getItem((short) -11);
             recommendations.add(new EquipRecommendation((short) -11, cur, opt.weapon()));
@@ -926,6 +1032,15 @@ class BotEquipManager {
     }
 
     static EquipRecommendation findRecommendationForItem(Character receiver, Character holder, Item holderItem) {
+        return findRecommendationForItem(receiver, holder, holderItem, RecommendationScope.IMMEDIATE);
+    }
+
+    static EquipRecommendation findFutureRecommendationForItem(Character receiver, Character holder, Item holderItem) {
+        return findRecommendationForItem(receiver, holder, holderItem, RecommendationScope.FUTURE);
+    }
+
+    private static EquipRecommendation findRecommendationForItem(Character receiver, Character holder, Item holderItem,
+                                                                RecommendationScope scope) {
         if (!(holderItem instanceof Equip candidate)) return null;
 
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
@@ -938,13 +1053,16 @@ class BotEquipManager {
         if (slot == null || slot == EquipSlot.PET_EQUIP) return null;
         short primarySlot = (short) slot.getPrimarySlot();
         if (primarySlot == 0) return null;
+        if (primarySlot == (short) -11
+                && !isWeaponCompatible(receiver, ii.getWeaponType(candidate.getItemId()))) return null;
+        if (!isRecommendationCandidate(receiver, ii, candidate, primarySlot, scope)) return null;
 
         Inventory receiverEquippedInv = receiver.getInventory(InventoryType.EQUIPPED);
 
         // Run the DP with the candidate added to the receiver's pool — recommend iff the
         // optimizer actually chose to equip it. This is the same oracle autoEquip uses, so
         // the bot only requests items it would put on.
-        OptimizerResult opt = runOptimizerWithExtras(receiver, List.of(candidate));
+        OptimizerResult opt = runOptimizerWithExtras(receiver, List.of(candidate), scope);
         if (opt.weapon() == candidate) {
             Equip cur = (Equip) receiverEquippedInv.getItem((short) -11);
             return new EquipRecommendation((short) -11, cur, candidate);
@@ -956,6 +1074,11 @@ class BotEquipManager {
             }
         }
         return null;
+    }
+
+    static boolean shouldReserveOwnedItem(Character bot, Item item) {
+        return findRecommendationForItem(bot, bot, item, RecommendationScope.IMMEDIATE) != null
+                || findRecommendationForItem(bot, bot, item, RecommendationScope.FUTURE) != null;
     }
 
     static String recommendationSummary(Character receiver, Character holder, int maxItems) {
@@ -1518,6 +1641,21 @@ class BotEquipManager {
         return strictlyBetter;
     }
 
+    private static List<Equip> pruneDominated(ItemInformationProvider ii, List<Equip> items) {
+        if (items == null || items.size() <= 1) return items;
+        List<Equip> kept = new ArrayList<>(items.size());
+        for (Equip a : items) {
+            boolean dominated = false;
+            for (Equip b : items) {
+                if (a == b) continue;
+                if (!sameFutureTrack(ii, a, b)) continue;
+                if (dominates(b, a)) { dominated = true; break; }
+            }
+            if (!dominated) kept.add(a);
+        }
+        return kept.isEmpty() ? items : kept;
+    }
+
     /**
      * Prune for lookahead pools where reqs differ across items. {@code b} dominates {@code a}
      * only if b's stats ≥ a's AND b's reqs ≤ a's — otherwise a weaker but easier-to-wear
@@ -1548,6 +1686,13 @@ class BotEquipManager {
             if (bs.getOrDefault(key, 0) > as.getOrDefault(key, 0)) return false;
         }
         return true;
+    }
+
+    private static boolean sameFutureTrack(ItemInformationProvider ii, Equip a, Equip b) {
+        String slotA = ii.getEquipmentSlot(a.getItemId());
+        String slotB = ii.getEquipmentSlot(b.getItemId());
+        if (!Objects.equals(slotA, slotB)) return false;
+        return ii.getWeaponType(a.getItemId()) == ii.getWeaponType(b.getItemId());
     }
 
     private static int[] statVec(Equip e) {
