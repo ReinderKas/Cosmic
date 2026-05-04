@@ -239,8 +239,8 @@ public class BotEntry {
     public server.bots.pq.BotKpqState kpq = new server.bots.pq.BotKpqState();
     public BotScriptRuntime script = new BotScriptRuntime();
 
-    // Equips received from the owner in a trade — excluded from automatic re-offer batches.
-    // Cleared when owner explicitly requests all equips back.
+    // Equips received from the owner during the current trade session.
+    // Cleared when that trade session finishes or is cancelled.
     Set<Item> ownerGivenItems = Collections.newSetFromMap(new IdentityHashMap<>());
 
     // Last reason an edge execution was blocked (for debug logs)

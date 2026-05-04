@@ -175,7 +175,6 @@ class BotInventoryManager {
             if (trade.isPartnerConfirmed()) {
                 completeTradeAndThank(entry, bot, trade);
                 BotEquipManager.autoEquip(bot, owner, null);
-                entry.ownerGivenItems.removeIf(item -> !hasItem(bot, item));
             }
             return;
         }
@@ -200,9 +199,6 @@ class BotInventoryManager {
         if (trade.isPartnerConfirmed()) {
             completeTradeAndThank(entry, bot, trade);
             BotEquipManager.autoEquip(bot, owner, null);
-            // Any received equip that autoEquip equipped is now in the EQUIPPED bag — remove
-            // it from ownerGivenItems since it's no longer in the EQUIP bag anyway.
-            entry.ownerGivenItems.removeIf(item -> !hasItem(bot, item));
         }
     }
 
@@ -264,11 +260,6 @@ class BotInventoryManager {
             startTradeMesoTransfer(category, entry, bot);
             return;
         }
-        // Explicit "give equips" request — owner wants everything, including items they gave back.
-        if ("equips".equals(category)) {
-            entry.ownerGivenItems.clear();
-        }
-
         Character owner = entry.owner;
         if (owner == null) {
             BotManager.getInstance().botReply(entry, "can't find you to trade!");
@@ -608,6 +599,7 @@ class BotInventoryManager {
         entry.pendingTradeBotDone  = false;
         entry.pendingTradeSingleBatch = false;
         entry.pendingPotShareBudget = 0;
+        entry.ownerGivenItems.clear();
         // Safety net: if any items were temporarily unequipped for a trade that ended without
         // completing (declined invite / cancel / timeout), the per-slot restore above may fail
         // (slot occupied, item lost via window-swap bookkeeping). Re-run autoEquip so empty
@@ -853,7 +845,7 @@ class BotInventoryManager {
             });
             case "equips" -> {
                 collectFromBag(bot, result, InventoryType.EQUIP,
-                        item -> !entry.ownerGivenItems.contains(item));
+                        item -> true);
                 List<Item> sorted = sortEquipsForTrade(result, bot);
                 result.clear();
                 result.addAll(sorted);
@@ -1074,8 +1066,7 @@ class BotInventoryManager {
         Set<Item> selfKeep = BotEquipManager.collectPotentialSelfUpgradeItems(bot);
         List<Item> result = new ArrayList<>();
         collectFromBag(bot, result, InventoryType.EQUIP, item ->
-                !entry.ownerGivenItems.contains(item)
-                        && !selfKeep.contains(item)
+                !selfKeep.contains(item)
                         && !BotOfferManager.isReservedForOtherRecipients(entry, bot, item));
         return sortEquipsForTrade(result, bot);
     }
