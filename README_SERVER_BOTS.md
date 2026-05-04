@@ -61,47 +61,66 @@ jason stop - only jason will stop
 | `follow <name>` | follows party member or sibling bot |
 | `stop` / `stay` / `wait` / `hold on` / `idle` / `park here` | Bot stops moving |
 | `move here` / `go here` / `move` / `here` | Bot moves to your exact position and stops (Handy for party quest puzzles) |
-| `grind` / `farm` / `hunt` / `kill mobs` / `auto on` | Bot starts combat AI |
+| `grind` / `farm` / `hunt` / `kill mobs` / `auto on` / `go get exp` | Bot starts combat AI |
+| `farm here` / `grind here` / `sentry` / `camp` / `guard mode` / `post up` / `anchor here` | Bot grinds from your current spot instead of following |
+| `fidget` | Trigger a small idle/social fidget |
 
 ### Info
 
 | Say | Effect |
 |---|---|
 | `stats` / `str` / `dex` / `int` / `luk` / `level` | Level and stat summary |
-| `range` / `damage` / `dmg` / `watk` | Damage range |
+| `range` / `damage` / `dmg` / `watk` | Damage range and hardest-mob hit chance |
+| `speed` / `jump` / `movement stats` | Movement stat breakdown |
 | `build` / `ap` / `sp` | AP/SP allocation |
 | `skills` | Skill tree summary |
 | `inventory` / `inv` / `items` / `equips` | Inventory summary |
 | `mesos` / `cash` | Meso count |
+| `exp` / `xp` / `experience` | EXP progress |
 | `slots` | Free inventory slot count |
 | `scrolls` | Scrolls on hand |
 | `pots` / `potions` | HP/MP pot count |
-| `buffs` | buffs preference
+| `buffs?` / `buff list` | Buff-pot mode and active/available buff summary |
 | `debug stats` / `attack cooldown` | Attack timing internals |
+| `crit` / `crit debug` | Crit rate / multiplier breakdown |
+| `pot debug` / `autopot debug` | Auto-pot selection/debug info |
+| `buff debug` / `active buffs` | Buff consumable debug state |
+| `skill buff debug` | Skill-buff debug state |
 | `help` / `commands` | Prints command list |
 
 ### Support (buffs & heals for the party)
 
 | Say | Effect |
 |---|---|
-| `support on` / `support off` | Toggle skill support (idk what this is, ai generated, not tested, probably try to use buff skill on party member) |
-| `heals on` / `heals off` | Toggle HP heal casting on party members (cleric, not tested) |
+| `support on` / `support off` | Toggle party support/heal behavior |
+| `heals on` / `heals off` | Toggle HP heal casting on party members |
 | `buff on` / `buff off` | Toggle buff pot usage |
 | `buff cheap` | Use worst available buff pots |
 | `buff max` / `buff best` | Use best available buff pots |
 | `buffs?` / `what buffs` / `buff list` | List active and available buffs |
 
+### Supplies
+
+| Say | Effect |
+|---|---|
+| `need hp pot` / `need health pot` | Ask bots/owner flow for HP pot help |
+| `need mp pot` / `need mana pot` | Ask bots/owner flow for MP pot help |
+| `need pot` / `running low on pots` | Ask for whichever pot type is needed more |
+| `need ammo` / `low on arrows` / `low on bolts` | Ask for ammo help when using bow/crossbow |
+
 ### Gear
 
-Bots auto equip best gear available (damage range * attack speed) > all stats sum as tie breaker
-TODO: actually filter by class / type / skills they can use
+Bots auto-equip the best available gear they can use. They can also recommend gear for you, request current upgrades from you, and trade away non-reserved spare gear.
 
 | Say | Effect |
 |---|---|
 | `any upgrades?` / `better gear` / `recommended gear` | Check if bot has better gear available for you |
 | `request?` / `need anything?` / `what do you need` | Check if you have better gear available for the bot |
 | `trade recommended gear` / `trade upgrades` | Bot trades its recommended gear to you |
-| `trade <item name>` | can also do this
+| `autoequip` / `optimize gear` | Force a gear optimization pass |
+| `autoequip debug` / `optimize gear debug` | Explain optimizer picks and dump verbose output |
+| `unequip everything` | Unequip all non-cash gear |
+| `unequip hat` / `unequip weapon` / `unequip ring` / etc | Unequip a specific slot |
 
 ### Trading & Dropping Items
 
@@ -112,17 +131,18 @@ Verbs: `trade [me] <type/name>`, `give [me] <type/name>`, `drop <type/name>`, `p
 | `trade` | Open a trade window (you want to give them something) |
 | `trade me scrolls` / `give me scrolls` | Trade all scrolls |
 | `trade pots` | Trade all potions |
+| `trade buff` | Trade buff potions |
 | `trade equips` | Trade all equips |
+| `trade trash` / `trade junk` | Trade only unreserved/disposable equips |
 | `trade use` | Trade all use-tab items |
 | `trade etc` | Trade etc/junk items |
-| `trade buff` / `give me buff items` | Trade buff potions |
 | `trade 100k` / `give mesos` | Trade mesos |
 | `trade <item name>` | Trade a named item |
 | `trade <slot>` | Unequip then trade the item ex. `trade hat` |
 | `show me your <slot>` / `can I see your <slot>` | Unequip then trade the item ex. `show me your hat` |
+| `show me your junk` / `show your junk` | Alias for `trade trash` |
 | `drop scrolls` / `drop equips` / etc | Drop category to ground |
-| `unequip everything` | Unequip all gear |
-| `unequip hat` / `unequip weapon` / etc | Unequip a specific slot |
+| `give me <item name>` / `pass me <item name>` | Same named-item trade flow with alternate verbs |
 
 ### Build & Job
 
@@ -130,6 +150,8 @@ Verbs: `trade [me] <type/name>`, `give [me] <type/name>`, `drop <type/name>`, `p
 |-------------------------------------------|-------------------------|
 | `respec sp` / `reset skills` / `reset sp` | Refund and re-assign SP |
 | `respec ap` / `reset ap`                  | Refund and re-assign AP |
+| `change build`                            | Re-prompt AP build selection |
+| job name in chat while prompted           | Pick the requested advancement/build option |
 
 ## Notes
 - Bot characters can be logged into as normal accounts (user = bot name, password = `botbot`) to manually equip or manage inventory.
