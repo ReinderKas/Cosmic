@@ -189,7 +189,7 @@ public class BotEntry {
     Map<Item, Short> pendingTradeRestoreSlots = new IdentityHashMap<>();
 
     // Message queue
-    final ArrayDeque<String> msgQueue = new ArrayDeque<>();
+    final ArrayDeque<BotChatManager.QueuedMessage> msgQueue = new ArrayDeque<>();
     boolean msgSending = false;
 
     // Generic scripted task queue. Per-map scripts enqueue small primitives

@@ -8,6 +8,7 @@ import server.maps.MapleMap;
 
 import java.util.List;
 import java.util.Locale;
+import java.lang.reflect.Method;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -317,5 +318,36 @@ class BotChatManagerTest {
         assertTrue(BotChatManager.isApRespecCommand("reset ap"));
         assertTrue(BotChatManager.isApRespecCommand("rebuild ap"));
         assertFalse(BotChatManager.isApRespecCommand("respec"));
+    }
+
+    @Test
+    void shouldMarkQueuedRepliesAsOwnerDirected() {
+        BotEntry entry = new BotEntry(null, null, null);
+        entry.msgSending = true;
+
+        BotChatManager.queueBotReply(entry, "owner reply");
+        BotChatManager.queueBotSay(entry, "party chatter");
+
+        BotChatManager.QueuedMessage first = entry.msgQueue.poll();
+        BotChatManager.QueuedMessage second = entry.msgQueue.poll();
+        assertEquals("owner reply", first.text);
+        assertTrue(first.ownerDirected);
+        assertEquals("party chatter", second.text);
+        assertFalse(second.ownerDirected);
+    }
+
+    @Test
+    void shouldQueueHelpAsOwnerDirectedReply() throws Exception {
+        BotEntry entry = new BotEntry(null, null, null);
+        entry.msgSending = true;
+
+        Method reportHelp = BotChatManager.class.getDeclaredMethod("reportHelp", BotEntry.class);
+        reportHelp.setAccessible(true);
+        reportHelp.invoke(null, entry);
+
+        assertEquals(5, entry.msgQueue.size());
+        for (BotChatManager.QueuedMessage message : entry.msgQueue) {
+            assertTrue(message.ownerDirected);
+        }
     }
 }

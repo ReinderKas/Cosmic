@@ -345,7 +345,7 @@ public class BotManager {
             if (entry == null || entry.bot == null || entry.bot.getId() == target.getId()) {
                 continue;
             }
-            BotChatManager.queueBotSay(entry, randomReply(List.of(
+            BotChatManager.queueBotReply(entry, randomReply(List.of(
                     "ok",
                     "k",
                     "sure",
@@ -924,7 +924,7 @@ public class BotManager {
             List<BotEntry> fEntries = bots.get(owner.getId());
             if (typeStr == null) {
                 String help = "formations: stagger/split/random/spread/left/right <px>, stack, tight, loose | snap <px/on/off>";
-                if (fEntries != null && !fEntries.isEmpty()) BotChatManager.queueBotSay(fEntries.get(0), help);
+                if (fEntries != null && !fEntries.isEmpty()) BotChatManager.queueBotReply(fEntries.get(0), help);
                 else owner.yellowMessage(help);
                 return;
             }
@@ -935,7 +935,7 @@ public class BotManager {
                 int newSnapRange;
                 if (qualifier == null) {
                     String status = current.snapRange() > 0 ? "on (" + current.snapRange() + "px)" : "off";
-                    if (fEntries != null && !fEntries.isEmpty()) BotChatManager.queueBotSay(fEntries.get(0), "snap: " + status);
+                    if (fEntries != null && !fEntries.isEmpty()) BotChatManager.queueBotReply(fEntries.get(0), "snap: " + status);
                     else owner.yellowMessage("snap: " + status);
                     return;
                 } else if (qualifier.equalsIgnoreCase("off")) {
@@ -949,7 +949,7 @@ public class BotManager {
                 ownerFormations.put(owner.getId(), fs);
                 String status = newSnapRange > 0 ? "on (" + newSnapRange + "px)" : "off";
                 if (fEntries != null && !fEntries.isEmpty())
-                    BotChatManager.queueBotSay(fEntries.get(0), "snap: " + status);
+                    BotChatManager.queueBotReply(fEntries.get(0), "snap: " + status);
                 return;
             }
             String pxToken = fm.group(2);
@@ -978,7 +978,7 @@ public class BotManager {
                 for (int i = 0; i < fEntries.size(); i++) fEntries.get(i).followOffsetX = fs.offsetFor(i, fEntries.size());
                 if (!fEntries.isEmpty()) {
                     String label = typeStr.toLowerCase() + (px > 0 ? " " + px + "px" : "");
-                    BotChatManager.queueBotSay(fEntries.get(0), "formation: " + label);
+                    BotChatManager.queueBotReply(fEntries.get(0), "formation: " + label);
                 }
             }
             return;

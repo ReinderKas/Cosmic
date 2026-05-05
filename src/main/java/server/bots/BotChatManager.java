@@ -30,6 +30,15 @@ public class BotChatManager {
     private static final String SKILL_TREE_CHOICE_ACTION = "skill_tree_choice";
 
     private record LearnedSkill(int id, String name, int level) {}
+    static final class QueuedMessage {
+        final String text;
+        final boolean ownerDirected;
+
+        QueuedMessage(String text, boolean ownerDirected) {
+            this.text = text;
+            this.ownerDirected = ownerDirected;
+        }
+    }
 
     // --- helper prefix used in several info patterns ---
     // optional preamble: "what's/tell me/check … your/ur" or nothing at all
@@ -892,7 +901,7 @@ public class BotChatManager {
             BotManager.after(BotManager.randMs(900, 1100), () -> {
                 entry.bot.changeFaceExpression(Emote.HAPPY.getValue());
                 BotFidgetManager.maybeStartGreetingFidget(entry, ThreadLocalRandom.current().nextInt(100));
-                queueBotSay(entry, BotManager.randomReply(GREETING_REPLIES));
+                queueBotReply(entry, BotManager.randomReply(GREETING_REPLIES));
                 checkBotStatus(entry, entry.bot);
             });
         }
@@ -1077,16 +1086,28 @@ public class BotChatManager {
     // -------------------------------------------------------------------------
 
     public static void queueBotSay(BotEntry entry, String message) {
-        queueBotSayWithEstimatedDelay(entry, message);
+        queueMessageWithEstimatedDelay(entry, message, false);
+    }
+
+    static void queueBotReply(BotEntry entry, String message) {
+        queueMessageWithEstimatedDelay(entry, message, true);
     }
 
     static long queueBotSayWithEstimatedDelay(BotEntry entry, String message) {
+        return queueMessageWithEstimatedDelay(entry, message, false);
+    }
+
+    static long queueBotReplyWithEstimatedDelay(BotEntry entry, String message) {
+        return queueMessageWithEstimatedDelay(entry, message, true);
+    }
+
+    private static long queueMessageWithEstimatedDelay(BotEntry entry, String message, boolean ownerDirected) {
         long estimatedDelayMs;
         synchronized (entry.msgQueue) {
             estimatedDelayMs = entry.msgSending
                     ? (long) (entry.msgQueue.size() + 1) * 5_200L
                     : 0L;
-            entry.msgQueue.add(message);
+            entry.msgQueue.add(new QueuedMessage(message, ownerDirected));
             if (!entry.msgSending) {
                 entry.msgSending = true;
                 drainMsgQueue(entry);
@@ -1096,28 +1117,32 @@ public class BotChatManager {
     }
 
     private static void drainMsgQueue(BotEntry entry) {
-        String msg;
+        QueuedMessage msg;
         synchronized (entry.msgQueue) {
             msg = entry.msgQueue.poll();
             if (msg == null) { entry.msgSending = false; return; }
         }
-        BotManager.getInstance().botReply(entry, msg);
+        if (msg.ownerDirected) {
+            BotManager.getInstance().botReply(entry, msg.text);
+        } else {
+            BotManager.getInstance().botSay(entry, msg.text);
+        }
         BotManager.after(BotManager.randMs(4900, 5100), () -> drainMsgQueue(entry));
     }
 
     // Status check — called on spawn, grind start, greeting, and level-up
     static void checkBotStatus(BotEntry entry, Character bot) {
         String jobPrompt = BotBuildManager.buildJobPrompt(entry, bot);
-        if (jobPrompt != null) queueBotSay(entry, jobPrompt);
+        if (jobPrompt != null) queueBotReply(entry, jobPrompt);
         String spPrompt = BotBuildManager.buildSpVariantPrompt(entry, bot);
         if (spPrompt != null) {
-            queueBotSay(entry, spPrompt);
+            queueBotReply(entry, spPrompt);
         } else {
             BotBuildManager.autoAssignSp(entry, bot);
         }
         String apPrompt = BotBuildManager.buildApPrompt(entry, bot);
         if (apPrompt != null) {
-            queueBotSay(entry, apPrompt);
+            queueBotReply(entry, apPrompt);
         } else {
             BotBuildManager.autoAssignAp(entry, bot);
         }
@@ -1185,7 +1210,7 @@ public class BotChatManager {
     }
 
     private static void reportStats(BotEntry entry, Character bot) {
-        queueBotSay(entry, String.format("lv%d %s | str %d dex %d int %d luk %d | hp %d/%d mp %d/%d",
+        queueBotReply(entry, String.format("lv%d %s | str %d dex %d int %d luk %d | hp %d/%d mp %d/%d",
                 bot.getLevel(), jobDisplayName(bot.getJob()),
                 bot.getStr(), bot.getDex(), bot.getInt(), bot.getLuk(),
                 bot.getHp(), bot.getCurrentMaxHp(),
@@ -1193,7 +1218,7 @@ public class BotChatManager {
     }
 
     private static void reportRange(BotEntry entry, Character bot) {
-        queueBotSay(entry, buildRangeReport(bot));
+        queueBotReply(entry, buildRangeReport(bot));
     }
 
     static String buildRangeReport(Character bot) {
@@ -1248,12 +1273,12 @@ public class BotChatManager {
 
     private static void reportMovementStats(BotEntry entry, Character bot) {
         for (String line : buildMovementStatsReport(bot)) {
-            queueBotSay(entry, line);
+            queueBotReply(entry, line);
         }
     }
 
     private static void reportBuild(BotEntry entry, Character bot) {
-        queueBotSay(entry, String.format("build: str %d / dex %d / int %d / luk %d, %d ap left",
+        queueBotReply(entry, String.format("build: str %d / dex %d / int %d / luk %d, %d ap left",
                 bot.getStr(), bot.getDex(), bot.getInt(), bot.getLuk(),
                 bot.getRemainingAp()));
     }
@@ -1266,7 +1291,7 @@ public class BotChatManager {
 
         Map<Integer, List<LearnedSkill>> skillTrees = collectLearnedSkillTrees(bot);
         if (skillTrees.isEmpty()) {
-            queueBotSay(entry, "no job skills yet " + bot.getRemainingSp() + " SP left");
+            queueBotReply(entry, "no job skills yet " + bot.getRemainingSp() + " SP left");
             return;
         }
 
@@ -1277,7 +1302,7 @@ public class BotChatManager {
         }
 
         entry.pendingAction = SKILL_TREE_CHOICE_ACTION;
-        queueBotSay(entry, skillTreeChoicePrompt(skillTrees));
+        queueBotReply(entry, skillTreeChoicePrompt(skillTrees));
     }
 
     private static void reportBeginnerSkills(BotEntry entry, Character bot) {
@@ -1285,7 +1310,7 @@ public class BotChatManager {
         int beginnerSpLeft = getRemainingBeginnerSp(bot);
 
         if (beginnerSkills.isEmpty()) {
-            queueBotSay(entry, "no learned beginner skills yet " + beginnerSpLeft + " beginner SP left");
+            queueBotReply(entry, "no learned beginner skills yet " + beginnerSpLeft + " beginner SP left");
             return;
         }
 
@@ -1299,19 +1324,19 @@ public class BotChatManager {
             line.append(skill.name()).append(" lv").append(skill.level());
         }
         line.append(" | ").append(beginnerSpLeft).append(" beginner SP left");
-        queueBotSay(entry, line.toString());
+        queueBotReply(entry, line.toString());
     }
 
     private static void reportInventory(BotEntry entry, Character bot) {
-        queueBotSay(entry, BotInventoryManager.inventorySummary(bot));
+        queueBotReply(entry, BotInventoryManager.inventorySummary(bot));
     }
 
     private static void reportMesos(BotEntry entry, Character bot) {
-        queueBotSay(entry, buildMesoReport(bot.getMeso()));
+        queueBotReply(entry, buildMesoReport(bot.getMeso()));
     }
 
     private static void reportExp(BotEntry entry, Character bot) {
-        queueBotSay(entry, buildExpReport(bot.getExp(), bot.getLevel()));
+        queueBotReply(entry, buildExpReport(bot.getExp(), bot.getLevel()));
     }
 
     static String buildExpReport(int currentExp, int level) {
@@ -1328,7 +1353,7 @@ public class BotChatManager {
     }
 
     private static void reportInventorySlots(BotEntry entry, Character bot) {
-        queueBotSay(entry, BotInventoryManager.slotsReport(bot));
+        queueBotReply(entry, BotInventoryManager.slotsReport(bot));
     }
 
     private static void reportScrolls(BotEntry entry, Character bot) {
@@ -1337,18 +1362,18 @@ public class BotChatManager {
             int id = item.getItemId();
             if (ItemConstants.isEquipScroll(id)) count += item.getQuantity();
         }
-        queueBotSay(entry, count > 0
+        queueBotReply(entry, count > 0
                 ? "I have " + count + " scroll" + (count != 1 ? "s" : "") + " on me"
                 : "no scrolls on me");
     }
 
     private static void reportPotions(BotEntry entry, Character bot) {
         int[] counts = BotPotionManager.countPotions(bot);
-        queueBotSay(entry, buildPotionReport(counts[0], counts[1]));
+        queueBotReply(entry, buildPotionReport(counts[0], counts[1]));
     }
 
     private static void reportPotDebug(BotEntry entry, Character bot) {
-        queueBotSay(entry, BotPotionManager.autopotDebugReport(bot));
+        queueBotReply(entry, BotPotionManager.autopotDebugReport(bot));
     }
 
     static String buildPotionReport(int hp, int mp) {
@@ -1461,7 +1486,7 @@ public class BotChatManager {
     }
 
     private static void reportDebugStats(BotEntry entry, Character bot) {
-        queueBotSay(entry, BotCombatManager.describeDebugStats(entry, bot));
+        queueBotReply(entry, BotCombatManager.describeDebugStats(entry, bot));
     }
 
     private static void reportCritDebug(BotEntry entry, Character bot) {
@@ -1471,13 +1496,13 @@ public class BotChatManager {
 
         int critPct = (int) Math.round(crit.critChance() * 100);
         if (critPct == 0) {
-            queueBotSay(entry, "i can't crit (my job doesn't have a crit passive)");
+            queueBotReply(entry, "i can't crit (my job doesn't have a crit passive)");
             return;
         }
 
         int critMin = (int) Math.min(99999, Math.floor(dmg.minDamage() * crit.critMultiplier()));
         int critMax = (int) Math.min(99999, Math.floor(dmg.maxDamage() * crit.critMultiplier()));
-        queueBotSay(entry, String.format(
+        queueBotReply(entry, String.format(
                 "crit: %d%% chance, %.2fx multiplier | base %d-%d | crit %d-%d",
                 critPct, crit.critMultiplier(),
                 dmg.minDamage(), dmg.maxDamage(),
@@ -1486,22 +1511,22 @@ public class BotChatManager {
 
     private static void reportBuffDebug(BotEntry entry, Character bot) {
         for (String line : BotBuffManager.getDebugLines(entry, bot)) {
-            queueBotSay(entry, line);
+            queueBotReply(entry, line);
         }
     }
 
     private static void reportSkillBuffDebug(BotEntry entry, Character bot) {
         for (String line : BotCombatManager.getSkillBuffDebugLines(entry, bot)) {
-            queueBotSay(entry, line);
+            queueBotReply(entry, line);
         }
     }
 
     private static void reportHelp(BotEntry entry) {
-        queueBotSay(entry, "commands: follow, stop, move here, fidget, grind, stats, speed, skills, inventory, mesos, exp, slots, scrolls, pots, debug stats, crit, respec, respec ap");
-        queueBotSay(entry, "support: support on/off, heals on/off, buff on/off, buff cheap/max, proactive offers on/off, buff debug, skill buff debug");
-        queueBotSay(entry, "gear: ask 'any upgrades?' or say 'trade recommended gear'");
-        queueBotSay(entry, "supplies: need hp pot, need mp pot, need pot, need ammo");
-        queueBotSay(entry, "trade: mesos, scrolls, pots, equips, etc, or named items");
+        queueBotReply(entry, "commands: follow, stop, move here, fidget, grind, stats, speed, skills, inventory, mesos, exp, slots, scrolls, pots, debug stats, crit, respec, respec ap");
+        queueBotReply(entry, "support: support on/off, heals on/off, buff on/off, buff cheap/max, proactive offers on/off, buff debug, skill buff debug");
+        queueBotReply(entry, "gear: ask 'any upgrades?' or say 'trade recommended gear'");
+        queueBotReply(entry, "supplies: need hp pot, need mp pot, need pot, need ammo");
+        queueBotReply(entry, "trade: mesos, scrolls, pots, equips, etc, or named items");
     }
 
     static boolean isRespecCommand(String message) {
@@ -1648,11 +1673,11 @@ public class BotChatManager {
     private static void reportRecommendedGear(BotEntry entry, Character bot) {
         Character owner = entry.owner;
         if (owner == null) {
-            queueBotSay(entry, "can't check your gear rn");
+            queueBotReply(entry, "can't check your gear rn");
             return;
         }
         if (!BotOfferManager.offerBestRecommendedGear(entry, bot, owner)) {
-            queueBotSay(entry, "no better gear for you rn");
+            queueBotReply(entry, "no better gear for you rn");
         }
         entry.nextGearSuggestionAt = System.currentTimeMillis() + 60_000L;
     }
@@ -1728,7 +1753,7 @@ public class BotChatManager {
         BotPotionManager.OwnerPotShareResult result = BotPotionManager.offerPotShareToOwner(entry, forHp);
         if (result == BotPotionManager.OwnerPotShareResult.NO_DONOR) {
             String type = forHp ? "hp" : "mp";
-            queueBotSay(entry, String.format(BotManager.randomReply(OWNER_POT_SHORTAGE_REPLIES), type));
+            queueBotReply(entry, String.format(BotManager.randomReply(OWNER_POT_SHORTAGE_REPLIES), type));
         }
     }
 
@@ -1739,12 +1764,12 @@ public class BotChatManager {
         }
         WeaponType weaponType = BotAttackExecutionProvider.getEquippedWeaponType(owner);
         if (weaponType != WeaponType.BOW && weaponType != WeaponType.CROSSBOW) {
-            queueBotSay(entry, BotManager.randomReply(AMMO_NOT_NEEDED_REPLIES));
+            queueBotReply(entry, BotManager.randomReply(AMMO_NOT_NEEDED_REPLIES));
             return;
         }
         BotAmmoManager.OwnerAmmoShareResult result = BotAmmoManager.offerAmmoShareToOwner(entry, weaponType);
         if (result == BotAmmoManager.OwnerAmmoShareResult.NO_DONOR) {
-            queueBotSay(entry, BotManager.randomReply(OWNER_AMMO_SHORTAGE_REPLIES));
+            queueBotReply(entry, BotManager.randomReply(OWNER_AMMO_SHORTAGE_REPLIES));
         }
     }
 
@@ -1752,7 +1777,7 @@ public class BotChatManager {
         Map<Integer, List<LearnedSkill>> skillTrees = collectLearnedSkillTrees(bot);
         if (skillTrees.isEmpty()) {
             entry.pendingAction = null;
-            queueBotSay(entry, "no job skills yet");
+            queueBotReply(entry, "no job skills yet");
             return;
         }
 
@@ -1765,7 +1790,7 @@ public class BotChatManager {
 
         Integer treeId = resolveSkillTreeChoice(message, skillTrees);
         if (treeId == null) {
-            queueBotSay(entry, skillTreeChoicePrompt(skillTrees));
+            queueBotReply(entry, skillTreeChoicePrompt(skillTrees));
             return;
         }
 
@@ -1834,7 +1859,7 @@ public class BotChatManager {
 
     private static void queueSkillTreeReport(BotEntry entry, int treeId, List<LearnedSkill> skills) {
         if (skills == null || skills.isEmpty()) {
-            queueBotSay(entry, "no learned skills in " + skillTreeLabel(treeId));
+            queueBotReply(entry, "no learned skills in " + skillTreeLabel(treeId));
             return;
         }
 
@@ -1849,7 +1874,7 @@ public class BotChatManager {
             boolean needsSeparator = countOnLine > 0;
             int extraChars = piece.length() + (needsSeparator ? 2 : 0);
             if ((line.length() + extraChars > 100 || countOnLine >= 3) && countOnLine > 0) {
-                queueBotSay(entry, line.toString());
+                queueBotReply(entry, line.toString());
                 line = new StringBuilder(followupPrefix);
                 countOnLine = 0;
                 needsSeparator = false;
@@ -1863,7 +1888,7 @@ public class BotChatManager {
         }
 
         if (countOnLine > 0) {
-            queueBotSay(entry, line.toString());
+            queueBotReply(entry, line.toString());
         }
     }
 

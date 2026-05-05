@@ -75,12 +75,12 @@ final class BotOfferManager {
             return;
         }
         if (entry.pendingAction != null || entry.pendingTradeCategory != null || hasOfferReservation(entry)) {
-            BotManager.getInstance().botSay(bot, "busy rn, ask me again in a bit");
+            BotManager.getInstance().botReply(entry, "busy rn, ask me again in a bit");
             return;
         }
         List<BotEquipManager.EquipRecommendation> recs = BotEquipManager.findRecommendedEquips(bot, owner);
         if (recs.isEmpty()) {
-            BotManager.getInstance().botSay(bot, "nothing i need from you rn, im good!");
+            BotManager.getInstance().botReply(entry, "nothing i need from you rn, im good!");
             return;
         }
         Item candidate = recs.get(0).candidate();
@@ -178,7 +178,7 @@ final class BotOfferManager {
             if (entry.pendingLootOfferBotRequesting) {
                 clearPendingOffer(entry);
                 BotManager.after(BotManager.randMs(400, 600), () ->
-                        BotManager.getInstance().botSay(entry.bot, "ty! inv me?"));
+                        BotManager.getInstance().botReply(entry, "ty! inv me?"));
             } else {
                 Item item = entry.pendingLootOfferItem;
                 entry.pendingDropCategory = null;
@@ -194,8 +194,13 @@ final class BotOfferManager {
         }
         if (NEGATIVE_CONFIRM_PATTERN.matcher(message).find()) {
             clearPendingOffer(entry);
-            BotManager.after(BotManager.randMs(400, 600), () ->
-                    BotManager.getInstance().botSay(entry.bot, "ok, keeping it for now"));
+            BotManager.after(BotManager.randMs(400, 600), () -> {
+                if (entry.owner != null && speaker.getId() == entry.owner.getId()) {
+                    BotManager.getInstance().botReply(entry, "ok, keeping it for now");
+                } else {
+                    BotManager.getInstance().botSay(entry.bot, "ok, keeping it for now");
+                }
+            });
             return true;
         }
 

@@ -41,7 +41,7 @@ class BotBuildManager {
     static void setApBuild(BotEntry entry, ApBuild build, String confirmMsg) {
         entry.apBuild = build;
         entry.apPromptSent = false;
-        BotManager.getInstance().botSay(entry.bot, confirmMsg);
+        BotManager.getInstance().botReply(entry, confirmMsg);
         autoAssignAp(entry, entry.bot);
     }
 
