@@ -1170,11 +1170,8 @@ class BotInventoryManager {
         return collectEquipsGroup(EquipsGroup.NORMAL, entry, bot);
     }
 
-    /** Job-only wearability gate: level/stat/fame reqs treated as satisfied. */
     private static boolean isOwnClassEquip(Character bot, ItemInformationProvider ii, Equip equip) {
-        return ii.meetsEquipRequirements(equip, bot.getJob(), Short.MAX_VALUE,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE);
+        return BotEquipManager.isOwnClassEquip(bot, ii, equip);
     }
 
     /** Score used to order own-class equips worst-to-best: 4*watk + matk + main + sec/2. */

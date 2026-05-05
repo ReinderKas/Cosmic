@@ -34,6 +34,7 @@ import server.maps.MapleMap;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -914,6 +915,13 @@ class BotEquipManager {
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, bot.getFame());
     }
 
+    /** Job-only wearability gate: level/stat/fame reqs treated as satisfied. */
+    static boolean isOwnClassEquip(Character bot, ItemInformationProvider ii, Equip equip) {
+        return ii.meetsEquipRequirements(equip, bot.getJob(), Short.MAX_VALUE,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE);
+    }
+
     static boolean futureOnlyBlocked(Character bot, ItemInformationProvider ii, Equip equip) {
         // Pass huge level/stat values: if it still fails, job or fame is blocking, skip.
         return ii.meetsEquipRequirements(equip, bot.getJob(), Integer.MAX_VALUE / 4,
@@ -1080,47 +1088,161 @@ class BotEquipManager {
                 || findRecommendationForItem(bot, bot, item, RecommendationScope.FUTURE) != null;
     }
 
+    /**
+     * Stat dimensions that count when deciding whether to reserve a bag item for the bot's
+     * own future use. Excludes WDEF/MDEF/HP/MP/AVD/SPD/JUMP — those don't drive the bot's
+     * combat output and shouldn't override "trade away" for trash gear.
+     */
+    enum RelevantStat {
+        STR, DEX, INT, LUK, WATK, MATK, ACC;
+        int of(Equip e) {
+            return switch (this) {
+                case STR  -> e.getStr();
+                case DEX  -> e.getDex();
+                case INT  -> e.getInt();
+                case LUK  -> e.getLuk();
+                case WATK -> e.getWatk();
+                case MATK -> e.getMatk();
+                case ACC  -> e.getAcc();
+            };
+        }
+    }
+
+    private static final EnumSet<RelevantStat> ALL_RELEVANT_STATS = EnumSet.allOf(RelevantStat.class);
+
+    /**
+     * Per-class stat tracks to consider when reserving items as "I might want this later".
+     * Warriors and STR-pirates need ACC (low natural DEX); DEX-based classes get ACC from
+     * stat scaling and don't need it on gear.
+     */
+    static EnumSet<RelevantStat> relevantStatsFor(Job job) {
+        if (job == null) return ALL_RELEVANT_STATS.clone();
+        if (isMageJob(job)) return EnumSet.of(RelevantStat.INT, RelevantStat.LUK, RelevantStat.MATK);
+        int id = job.getId();
+        int branch = id / 100;
+        // Warriors: 1xx (Adventurer), 11xx (Dawn Warrior), 21xx (Aran).
+        if (branch == 1 || branch == 11 || branch == 21)
+            return EnumSet.of(RelevantStat.STR, RelevantStat.DEX, RelevantStat.WATK, RelevantStat.ACC);
+        // Bowmen: 3xx (Adventurer), 13xx (Wind Archer).
+        if (branch == 3 || branch == 13)
+            return EnumSet.of(RelevantStat.DEX, RelevantStat.STR, RelevantStat.WATK);
+        // Thieves: 4xx (Adventurer), 14xx (Night Walker).
+        if (branch == 4 || branch == 14)
+            return EnumSet.of(RelevantStat.LUK, RelevantStat.DEX, RelevantStat.WATK);
+        // Pirate base (500): could specialize either way — include both with ACC.
+        if (id == 500)
+            return EnumSet.of(RelevantStat.STR, RelevantStat.DEX, RelevantStat.WATK, RelevantStat.ACC);
+        // STR pirates: 51x (Brawler/Marauder/Buccaneer), 15xx (Thunder Breaker).
+        if (id / 10 == 51 || branch == 15)
+            return EnumSet.of(RelevantStat.STR, RelevantStat.DEX, RelevantStat.WATK, RelevantStat.ACC);
+        // DEX pirates: 52x (Gunslinger/Outlaw/Corsair).
+        if (id / 10 == 52)
+            return EnumSet.of(RelevantStat.DEX, RelevantStat.STR, RelevantStat.WATK);
+        return ALL_RELEVANT_STATS.clone();
+    }
+
+    /**
+     * Pure-logic Pareto filter on the relevant-stat subset. Keeps any bag item that has at
+     * least one positive relevant stat AND is not Pareto-dominated by some {@code baseline}
+     * item. Future-tier candidates (bag items not in baseline) are NOT compared against each
+     * other — only the naked-wearable baseline pool can dominate them. This keeps every future
+     * upgrade option open even when one is strictly better than another, since the bot may
+     * unlock them at different points.
+     */
+    static Set<Equip> selectItemsBeatingBaseline(EnumSet<RelevantStat> relevant,
+                                                 Collection<Equip> bagItems,
+                                                 Collection<Equip> baseline) {
+        Set<Equip> keep = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Equip c : bagItems) {
+            if (!hasPositiveRelevant(relevant, c)) continue;
+            if (anyDominates(relevant, baseline, c)) continue;
+            keep.add(c);
+        }
+        return keep;
+    }
+
+    private static boolean hasPositiveRelevant(EnumSet<RelevantStat> relevant, Equip e) {
+        for (RelevantStat s : relevant) if (s.of(e) > 0) return true;
+        return false;
+    }
+
+    private static boolean anyDominates(EnumSet<RelevantStat> relevant, Collection<Equip> pool, Equip c) {
+        for (Equip o : pool) {
+            if (o == c) continue;
+            if (paretoDominates(relevant, o, c)) return true;
+        }
+        return false;
+    }
+
+    /** True if {@code a}'s relevant-stat vector is ≥ {@code b}'s on every axis and strictly > on one. */
+    private static boolean paretoDominates(EnumSet<RelevantStat> relevant, Equip a, Equip b) {
+        boolean strictlyGreater = false;
+        for (RelevantStat s : relevant) {
+            int va = s.of(a), vb = s.of(b);
+            if (va < vb) return false;
+            if (va > vb) strictlyGreater = true;
+        }
+        return strictlyGreater;
+    }
+
     static Set<Item> collectPotentialSelfUpgradeItems(Character bot) {
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
         Inventory equipInv = bot.getInventory(InventoryType.EQUIP);
         Inventory equippedInv = bot.getInventory(InventoryType.EQUIPPED);
-        Map<Short, List<Equip>> bySlot = new LinkedHashMap<>();
-        Set<Item> bagItems = Collections.newSetFromMap(new IdentityHashMap<>());
+        StatSnapshot naked = nakedBase(bot, ii, equippedInv);
+        EnumSet<RelevantStat> relevant = relevantStatsFor(bot.getJob());
+
+        Map<Short, List<Equip>> bagBySlot = new LinkedHashMap<>();
+        Map<Short, List<Equip>> baselineBySlot = new LinkedHashMap<>();
 
         for (Item item : equipInv.list()) {
             if (!(item instanceof Equip equip) || ii.isCash(item.getItemId())) continue;
-            String textSlot = ii.getEquipmentSlot(item.getItemId());
-            if (textSlot == null) continue;
-            EquipSlot slot = EquipSlot.getFromTextSlot(textSlot);
-            if (slot == null || slot == EquipSlot.PET_EQUIP) continue;
-            short primarySlot = (short) slot.getPrimarySlot();
-            if (primarySlot == 0) continue;
-            if (primarySlot == (short) -11
+            Short slot = primarySlotKey(ii, equip);
+            if (slot == null) continue;
+            if (slot == (short) -11
                     && !isWeaponCompatible(bot, ii.getWeaponType(equip.getItemId()))) continue;
-            if (!futureOnlyBlocked(bot, ii, equip)) continue;
-            short key = isRingSlot(primarySlot) ? (short) -12 : primarySlot;
-            bySlot.computeIfAbsent(key, k -> new ArrayList<>()).add(equip);
-            bagItems.add(item);
+            if (!isOwnClassEquip(bot, ii, equip)) continue;
+            bagBySlot.computeIfAbsent(slot, k -> new ArrayList<>()).add(equip);
+            if (meetsReqsNaked(bot, ii, naked, equip)) {
+                baselineBySlot.computeIfAbsent(slot, k -> new ArrayList<>()).add(equip);
+            }
         }
         for (Item item : equippedInv.list()) {
             if (!(item instanceof Equip equip) || ii.isCash(item.getItemId())) continue;
-            short position = equip.getPosition();
-            if (position == (short) -11
+            short pos = equip.getPosition();
+            if (pos == (short) -11
                     && !isWeaponCompatible(bot, ii.getWeaponType(equip.getItemId()))) continue;
-            if (!futureOnlyBlocked(bot, ii, equip)) continue;
-            short key = isRingSlot(position) ? (short) -12 : position;
-            bySlot.computeIfAbsent(key, k -> new ArrayList<>()).add(equip);
+            if (!isOwnClassEquip(bot, ii, equip)) continue;
+            short slot = isRingSlot(pos) ? (short) -12 : pos;
+            // Equipped items count as wearable-now (they ARE worn) — feed them into baseline,
+            // but never into the candidate set (worn items aren't tradeable here).
+            if (meetsReqsNaked(bot, ii, naked, equip)) {
+                baselineBySlot.computeIfAbsent(slot, k -> new ArrayList<>()).add(equip);
+            }
         }
 
         Set<Item> keep = Collections.newSetFromMap(new IdentityHashMap<>());
-        for (List<Equip> pool : bySlot.values()) {
-            for (Equip equip : pruneDominatedSameTrackWithReqs(ii, pool)) {
-                if (bagItems.contains(equip)) {
-                    keep.add(equip);
-                }
-            }
+        for (Map.Entry<Short, List<Equip>> entry : bagBySlot.entrySet()) {
+            List<Equip> baseline = baselineBySlot.getOrDefault(entry.getKey(), List.of());
+            keep.addAll(selectItemsBeatingBaseline(relevant, entry.getValue(), baseline));
         }
         return keep;
+    }
+
+    private static Short primarySlotKey(ItemInformationProvider ii, Equip equip) {
+        String textSlot = ii.getEquipmentSlot(equip.getItemId());
+        if (textSlot == null) return null;
+        EquipSlot slot = EquipSlot.getFromTextSlot(textSlot);
+        if (slot == null || slot == EquipSlot.PET_EQUIP) return null;
+        short primary = (short) slot.getPrimarySlot();
+        if (primary == 0) return null;
+        return isRingSlot(primary) ? (short) -12 : primary;
+    }
+
+    private static boolean meetsReqsNaked(Character bot, ItemInformationProvider ii,
+                                          StatSnapshot naked, Equip equip) {
+        return ii.meetsEquipRequirements(equip, bot.getJob(), bot.getLevel(),
+                naked.str(), naked.dex(), naked.int_(), naked.luk(), bot.getFame());
     }
 
     static String recommendationSummary(Character receiver, Character holder, int maxItems) {
