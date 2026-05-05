@@ -1192,14 +1192,18 @@ class BotEquipManager {
         StatSnapshot naked = nakedBase(bot, ii, equippedInv);
         EnumSet<RelevantStat> relevant = relevantStatsFor(bot.getJob());
 
-        Map<Short, List<Equip>> bagBySlot = new LinkedHashMap<>();
-        Map<Short, List<Equip>> baselineBySlot = new LinkedHashMap<>();
+        // Bucket by WZ text-slot ("Ma" top, "MaPn" overall, "Pn" pants, "Wp" weapon, ...)
+        // so different tracks don't dominate each other — an overall and a top both live at
+        // primary slot -5 but represent mutually-exclusive equip choices and shouldn't be
+        // Pareto-compared.
+        Map<String, List<Equip>> bagBySlot = new LinkedHashMap<>();
+        Map<String, List<Equip>> baselineBySlot = new LinkedHashMap<>();
 
         for (Item item : equipInv.list()) {
             if (!(item instanceof Equip equip) || ii.isCash(item.getItemId())) continue;
-            Short slot = primarySlotKey(ii, equip);
+            String slot = textSlotKey(ii, equip);
             if (slot == null) continue;
-            if (slot == (short) -11
+            if (isWeaponSlot(slot)
                     && !isWeaponCompatible(bot, ii.getWeaponType(equip.getItemId()))) continue;
             if (!isOwnClassEquip(bot, ii, equip)) continue;
             bagBySlot.computeIfAbsent(slot, k -> new ArrayList<>()).add(equip);
@@ -1209,11 +1213,11 @@ class BotEquipManager {
         }
         for (Item item : equippedInv.list()) {
             if (!(item instanceof Equip equip) || ii.isCash(item.getItemId())) continue;
-            short pos = equip.getPosition();
-            if (pos == (short) -11
+            String slot = textSlotKey(ii, equip);
+            if (slot == null) continue;
+            if (isWeaponSlot(slot)
                     && !isWeaponCompatible(bot, ii.getWeaponType(equip.getItemId()))) continue;
             if (!isOwnClassEquip(bot, ii, equip)) continue;
-            short slot = isRingSlot(pos) ? (short) -12 : pos;
             // Equipped items count as wearable-now (they ARE worn) — feed them into baseline,
             // but never into the candidate set (worn items aren't tradeable here).
             if (meetsReqsNaked(bot, ii, naked, equip)) {
@@ -1222,22 +1226,22 @@ class BotEquipManager {
         }
 
         Set<Item> keep = Collections.newSetFromMap(new IdentityHashMap<>());
-        for (Map.Entry<Short, List<Equip>> entry : bagBySlot.entrySet()) {
+        for (Map.Entry<String, List<Equip>> entry : bagBySlot.entrySet()) {
             List<Equip> baseline = baselineBySlot.getOrDefault(entry.getKey(), List.of());
             keep.addAll(selectItemsBeatingBaseline(relevant, entry.getValue(), baseline));
         }
         return keep;
     }
 
-    private static Short primarySlotKey(ItemInformationProvider ii, Equip equip) {
+    private static String textSlotKey(ItemInformationProvider ii, Equip equip) {
         String textSlot = ii.getEquipmentSlot(equip.getItemId());
         if (textSlot == null) return null;
         EquipSlot slot = EquipSlot.getFromTextSlot(textSlot);
         if (slot == null || slot == EquipSlot.PET_EQUIP) return null;
-        short primary = (short) slot.getPrimarySlot();
-        if (primary == 0) return null;
-        return isRingSlot(primary) ? (short) -12 : primary;
+        return textSlot;
     }
+
+    private static boolean isWeaponSlot(String textSlot) { return "Wp".equals(textSlot); }
 
     private static boolean meetsReqsNaked(Character bot, ItemInformationProvider ii,
                                           StatSnapshot naked, Equip equip) {
