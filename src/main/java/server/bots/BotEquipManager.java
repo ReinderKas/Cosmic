@@ -1978,8 +1978,7 @@ class BotEquipManager {
         Map<String, Integer> bs = ii.getEquipStats(b.getItemId());
         Map<String, Integer> as = ii.getEquipStats(a.getItemId());
         if (bs == null || as == null) return bs == as;
-        // reqJob is a job mask — different masks aren't comparable; require equal to be safe.
-        if (bs.getOrDefault("reqJob", 0).intValue() != as.getOrDefault("reqJob", 0).intValue()) return false;
+        if (!reqJobAtLeastAsEasy(bs.getOrDefault("reqJob", 0), as.getOrDefault("reqJob", 0))) return false;
         for (String key : new String[]{"reqSTR", "reqDEX", "reqINT", "reqLUK", "reqPOP"}) {
             if (bs.getOrDefault(key, 0) > as.getOrDefault(key, 0)) return false;
         }
@@ -1991,11 +1990,15 @@ class BotEquipManager {
         Map<String, Integer> bs = hooks.getEquipStats(b.getItemId());
         Map<String, Integer> as = hooks.getEquipStats(a.getItemId());
         if (bs == null || as == null) return bs == as;
-        if (bs.getOrDefault("reqJob", 0).intValue() != as.getOrDefault("reqJob", 0).intValue()) return false;
+        if (!reqJobAtLeastAsEasy(bs.getOrDefault("reqJob", 0), as.getOrDefault("reqJob", 0))) return false;
         for (String key : new String[]{"reqSTR", "reqDEX", "reqINT", "reqLUK", "reqPOP"}) {
             if (bs.getOrDefault(key, 0) > as.getOrDefault(key, 0)) return false;
         }
         return true;
+    }
+
+    private static boolean reqJobAtLeastAsEasy(int betterReqJob, int worseReqJob) {
+        return betterReqJob == 0 || betterReqJob == worseReqJob;
     }
 
     private static boolean sameFutureTrack(ItemInformationProvider ii, Equip a, Equip b) {

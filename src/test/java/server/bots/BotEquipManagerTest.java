@@ -456,12 +456,12 @@ class BotEquipManagerTest {
         Equip ivoryPant1 = equipWithIdStats(1060076, 0, 1, 2);
 
         BotEquipManager.SelfReserveHooks hooks = mock(BotEquipManager.SelfReserveHooks.class);
-        stubReserveItem(hooks, ivoryTop8, "Ma", 50, 1, 180, 0, 0, 0, 20);
-        stubReserveItem(hooks, ivoryTop7, "Ma", 50, 1, 180, 0, 0, 0, 20);
-        stubReserveItem(hooks, ivoryTop3, "Ma", 50, 1, 180, 0, 0, 0, 20);
-        stubReserveItem(hooks, ivoryPant6, "Pn", 50, 1, 180, 0, 0, 0, 20);
-        stubReserveItem(hooks, ivoryPant2, "Pn", 50, 1, 180, 0, 0, 0, 20);
-        stubReserveItem(hooks, ivoryPant1, "Pn", 50, 1, 180, 0, 0, 0, 20);
+        stubReserveItem(hooks, Job.SPEARMAN, ivoryTop8, "Ma", 50, 1, 180, 0, 0, 0, 20);
+        stubReserveItem(hooks, Job.SPEARMAN, ivoryTop7, "Ma", 50, 1, 180, 0, 0, 0, 20);
+        stubReserveItem(hooks, Job.SPEARMAN, ivoryTop3, "Ma", 50, 1, 180, 0, 0, 0, 20);
+        stubReserveItem(hooks, Job.SPEARMAN, ivoryPant6, "Pn", 50, 1, 180, 0, 0, 0, 20);
+        stubReserveItem(hooks, Job.SPEARMAN, ivoryPant2, "Pn", 50, 1, 180, 0, 0, 0, 20);
+        stubReserveItem(hooks, Job.SPEARMAN, ivoryPant1, "Pn", 50, 1, 180, 0, 0, 0, 20);
 
         Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks,
                 List.of(ivoryTop8, ivoryTop7, ivoryTop3, ivoryPant6, ivoryPant2, ivoryPant1));
@@ -483,14 +483,34 @@ class BotEquipManagerTest {
         Equip itemB = equipWithIdStats(2000002, 0, 7, 0);
 
         BotEquipManager.SelfReserveHooks hooks = mock(BotEquipManager.SelfReserveHooks.class);
-        stubReserveItem(hooks, itemA, "Ma", 50, 1, 180, 0, 0, 0, 20);
-        stubReserveItem(hooks, itemB, "Ma", 50, 1, 180, 0, 0, 0, 20);
+        stubReserveItem(hooks, Job.SPEARMAN, itemA, "Ma", 50, 1, 180, 0, 0, 0, 20);
+        stubReserveItem(hooks, Job.SPEARMAN, itemB, "Ma", 50, 1, 180, 0, 0, 0, 20);
 
         Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks, List.of(itemA, itemB));
 
         assertTrue(keep.contains(itemA));
         assertTrue(keep.contains(itemB),
                 "same req signature but different itemId should not dominate");
+    }
+
+    @Test
+    void selfReserveRejectsStrictlyWorseHigherReqBowmanGlove() {
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.HUNTER);
+
+        Equip currentAllClassGlove = equipWithIdStats(1082000, 0, 8, 0);
+        Equip worseBowmanGlove = equipWithIdStats(1082100, 0, 2, 0);
+
+        BotEquipManager.SelfReserveHooks hooks = mock(BotEquipManager.SelfReserveHooks.class);
+        stubReserveItem(hooks, Job.HUNTER, currentAllClassGlove, "Gv", 10, 0, 0, 0, 0, 0, 0);
+        stubReserveItem(hooks, Job.HUNTER, worseBowmanGlove, "Gv", 35, 4, 0, 0, 0, 0, 0);
+
+        Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks,
+                List.of(currentAllClassGlove, worseBowmanGlove));
+
+        assertTrue(keep.contains(currentAllClassGlove));
+        assertFalse(keep.contains(worseBowmanGlove),
+                "proactive future pool should not keep a strictly worse glove with higher level/job reqs");
     }
 
     private static Equip mageOverall(int int_, int luk) {
@@ -518,13 +538,13 @@ class BotEquipManagerTest {
         return e;
     }
 
-    private static void stubReserveItem(BotEquipManager.SelfReserveHooks hooks, Equip equip, String slot,
+    private static void stubReserveItem(BotEquipManager.SelfReserveHooks hooks, Job job, Equip equip, String slot,
                                         int reqLevel, int reqJob, int reqStr, int reqDex,
                                         int reqInt, int reqLuk, int reqPop) {
         int itemId = equip.getItemId();
         when(hooks.isCash(itemId)).thenReturn(false);
         when(hooks.getEquipmentSlot(itemId)).thenReturn(slot);
-        when(hooks.meetsReqs(equip, Job.SPEARMAN, Short.MAX_VALUE,
+        when(hooks.meetsReqs(equip, job, Short.MAX_VALUE,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
         when(hooks.getEquipLevelReq(itemId)).thenReturn(reqLevel);
