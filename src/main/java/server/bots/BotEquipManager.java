@@ -335,15 +335,18 @@ class BotEquipManager {
         sb.append("range:   ").append(BotChatManager.buildRangeReport(bot, mob)).append('\n');
 
         sb.append("\n--- equipped ---\n");
-        sb.append(itemHeader());
+        sb.append(itemHeader(false));
         for (Item it : eqdInv.list()) {
-            if (it instanceof Equip e) appendItemRow(sb, ii, e, e.getPosition());
+            if (it instanceof Equip e) appendItemRow(sb, ii, e, e.getPosition(), null);
         }
 
         sb.append("\n--- inventory (equip bag) ---\n");
-        sb.append(itemHeader());
+        sb.append(itemHeader(true));
         for (Item it : eqpInv.list()) {
-            if (it instanceof Equip e) appendItemRow(sb, ii, e, e.getPosition());
+            if (it instanceof Equip e) {
+                boolean reserveSelf = shouldReserveOwnedItem(bot, ii, e);
+                appendItemRow(sb, ii, e, e.getPosition(), reserveSelf);
+            }
         }
 
         sb.append("\n--- candidate pools by slot ---\n");
@@ -414,21 +417,24 @@ class BotEquipManager {
         }
     }
 
-    private static String itemHeader() {
-        return String.format("%-3s %-30s %-7s %4s %4s %4s %4s %4s %4s %4s %4s %4s %4s %5s %5s   reqs%n",
-                "pos", "name", "slot", "STR", "DEX", "INT", "LUK", "WAK", "MAK", "WDF", "MDF", "ACC", "AVD", "HP", "MP");
+    private static String itemHeader(boolean includeSelfReserve) {
+        return String.format("%-3s %-30s %-7s %4s %4s %4s %4s %4s %4s %4s %4s %4s %4s %5s %5s%s   reqs%n",
+                "pos", "name", "slot", "STR", "DEX", "INT", "LUK", "WAK", "MAK", "WDF", "MDF", "ACC", "AVD", "HP", "MP",
+                includeSelfReserve ? "  SELF" : "");
     }
 
-    private static void appendItemRow(StringBuilder sb, ItemInformationProvider ii, Equip e, short pos) {
+    private static void appendItemRow(StringBuilder sb, ItemInformationProvider ii, Equip e, short pos,
+                                      Boolean selfReserve) {
         String name = ii.getName(e.getItemId());
         if (name == null) name = "id=" + e.getItemId();
         if (name.length() > 30) name = name.substring(0, 30);
         String textSlot = ii.getEquipmentSlot(e.getItemId());
-        sb.append(String.format("%-3d %-30s %-7s %4d %4d %4d %4d %4d %4d %4d %4d %4d %4d %5d %5d   ",
+        sb.append(String.format("%-3d %-30s %-7s %4d %4d %4d %4d %4d %4d %4d %4d %4d %4d %5d %5d%s   ",
                 pos, name, textSlot == null ? "?" : textSlot,
                 e.getStr(), e.getDex(), e.getInt(), e.getLuk(),
                 e.getWatk(), e.getMatk(), e.getWdef(), e.getMdef(),
-                e.getAcc(), e.getAvoid(), e.getHp(), e.getMp()));
+                e.getAcc(), e.getAvoid(), e.getHp(), e.getMp(),
+                selfReserve == null ? "" : String.format("  %-4s", selfReserve ? "Y" : "N")));
         // Reqs from WZ stat map.
         Map<String, Integer> stats = ii.getEquipStats(e.getItemId());
         if (stats != null) {
@@ -621,6 +627,44 @@ class BotEquipManager {
                 @Override public boolean meetsReqs(Equip e, Job job, int lvl, int s, int d, int i, int l, int f) {
                     return ii.meetsEquipRequirements(e, botJob, max, max, max, max, max, fame);
                 }
+            };
+        }
+    }
+
+    interface EquipUsefulnessHooks {
+        boolean isCash(int itemId);
+        String getEquipmentSlot(int itemId);
+        WeaponType getWeaponType(int itemId);
+        boolean meetsReqs(Equip equip, Job job, int level, int str, int dex, int int_, int luk, int fame);
+
+        static EquipUsefulnessHooks from(ItemInformationProvider ii) {
+            return new EquipUsefulnessHooks() {
+                @Override public boolean isCash(int itemId) { return ii.isCash(itemId); }
+                @Override public String getEquipmentSlot(int itemId) { return ii.getEquipmentSlot(itemId); }
+                @Override public WeaponType getWeaponType(int itemId) { return ii.getWeaponType(itemId); }
+                @Override public boolean meetsReqs(Equip equip, Job job, int level, int str, int dex,
+                                                   int int_, int luk, int fame) {
+                    return ii.meetsEquipRequirements(equip, job, level, str, dex, int_, luk, fame);
+                }
+            };
+        }
+    }
+
+    interface SelfReserveHooks extends EquipUsefulnessHooks {
+        int getEquipLevelReq(int itemId);
+        Map<String, Integer> getEquipStats(int itemId);
+
+        static SelfReserveHooks from(ItemInformationProvider ii) {
+            return new SelfReserveHooks() {
+                @Override public boolean isCash(int itemId) { return ii.isCash(itemId); }
+                @Override public String getEquipmentSlot(int itemId) { return ii.getEquipmentSlot(itemId); }
+                @Override public WeaponType getWeaponType(int itemId) { return ii.getWeaponType(itemId); }
+                @Override public boolean meetsReqs(Equip equip, Job job, int level, int str, int dex,
+                                                   int int_, int luk, int fame) {
+                    return ii.meetsEquipRequirements(equip, job, level, str, dex, int_, luk, fame);
+                }
+                @Override public int getEquipLevelReq(int itemId) { return ii.getEquipLevelReq(itemId); }
+                @Override public Map<String, Integer> getEquipStats(int itemId) { return ii.getEquipStats(itemId); }
             };
         }
     }
@@ -978,6 +1022,14 @@ class BotEquipManager {
         return findRecommendedEquips(receiver, holder, RecommendationScope.FUTURE);
     }
 
+    static List<EquipRecommendation> findRecommendedEquipsFromItems(Character receiver, Collection<Equip> holderItems) {
+        return buildRecommendations(receiver, holderItems, RecommendationScope.IMMEDIATE);
+    }
+
+    static List<EquipRecommendation> findFutureRecommendedEquipsFromItems(Character receiver, Collection<Equip> holderItems) {
+        return buildRecommendations(receiver, holderItems, RecommendationScope.FUTURE);
+    }
+
     private static List<EquipRecommendation> findRecommendedEquips(Character receiver, Character holder,
                                                                    RecommendationScope scope) {
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
@@ -1076,8 +1128,29 @@ class BotEquipManager {
     }
 
     static boolean shouldReserveOwnedItem(Character bot, Item item) {
+        if (item instanceof Equip equip) {
+            return shouldReserveOwnedItem(bot, ItemInformationProvider.getInstance(), equip);
+        }
         return findRecommendationForItem(bot, bot, item, RecommendationScope.IMMEDIATE) != null
                 || findRecommendationForItem(bot, bot, item, RecommendationScope.FUTURE) != null;
+    }
+
+    static boolean shouldReserveOwnedItem(Character bot, EquipUsefulnessHooks hooks, Equip item) {
+        return isEquipUsefulToBot(bot, hooks, item);
+    }
+
+    static boolean shouldReserveOwnedItem(Character bot, ItemInformationProvider ii, Equip item) {
+        return selectOwnedItemsForSelfReserve(bot, SelfReserveHooks.from(ii), collectOwnedEquips(bot, ii)).contains(item);
+    }
+
+    static boolean wouldReserveIncomingItem(Character bot, ItemInformationProvider ii, Equip item) {
+        List<Equip> owned = collectOwnedEquips(bot, ii);
+        owned.add(item);
+        return selectOwnedItemsForSelfReserve(bot, SelfReserveHooks.from(ii), owned).contains(item);
+    }
+
+    static boolean isEquipUsefulToBot(Character recipient, ItemInformationProvider ii, Equip item) {
+        return isEquipUsefulToBot(recipient, EquipUsefulnessHooks.from(ii), item);
     }
 
     /**
@@ -1112,35 +1185,21 @@ class BotEquipManager {
         if (isMageJob(job)) return EnumSet.of(RelevantStat.INT, RelevantStat.LUK, RelevantStat.MATK);
         int id = job.getId();
         int branch = id / 100;
-        // Warriors: 1xx (Adventurer), 11xx (Dawn Warrior), 21xx (Aran).
         if (branch == 1 || branch == 11 || branch == 21)
             return EnumSet.of(RelevantStat.STR, RelevantStat.DEX, RelevantStat.WATK, RelevantStat.ACC);
-        // Bowmen: 3xx (Adventurer), 13xx (Wind Archer).
         if (branch == 3 || branch == 13)
             return EnumSet.of(RelevantStat.DEX, RelevantStat.STR, RelevantStat.WATK);
-        // Thieves: 4xx (Adventurer), 14xx (Night Walker).
         if (branch == 4 || branch == 14)
             return EnumSet.of(RelevantStat.LUK, RelevantStat.DEX, RelevantStat.WATK);
-        // Pirate base (500): could specialize either way — include both with ACC.
         if (id == 500)
             return EnumSet.of(RelevantStat.STR, RelevantStat.DEX, RelevantStat.WATK, RelevantStat.ACC);
-        // STR pirates: 51x (Brawler/Marauder/Buccaneer), 15xx (Thunder Breaker).
         if (id / 10 == 51 || branch == 15)
             return EnumSet.of(RelevantStat.STR, RelevantStat.DEX, RelevantStat.WATK, RelevantStat.ACC);
-        // DEX pirates: 52x (Gunslinger/Outlaw/Corsair).
         if (id / 10 == 52)
             return EnumSet.of(RelevantStat.DEX, RelevantStat.STR, RelevantStat.WATK);
         return ALL_RELEVANT_STATS.clone();
     }
 
-    /**
-     * Pure-logic Pareto filter on the relevant-stat subset. Keeps any bag item that has at
-     * least one positive relevant stat AND is not Pareto-dominated by some {@code baseline}
-     * item. Future-tier candidates (bag items not in baseline) are NOT compared against each
-     * other — only the naked-wearable baseline pool can dominate them. This keeps every future
-     * upgrade option open even when one is strictly better than another, since the bot may
-     * unlock them at different points.
-     */
     static Set<Equip> selectItemsBeatingBaseline(EnumSet<RelevantStat> relevant,
                                                  Collection<Equip> bagItems,
                                                  Collection<Equip> baseline) {
@@ -1166,7 +1225,6 @@ class BotEquipManager {
         return false;
     }
 
-    /** True if {@code a}'s relevant-stat vector is ≥ {@code b}'s on every axis and strictly > on one. */
     private static boolean paretoDominates(EnumSet<RelevantStat> relevant, Equip a, Equip b) {
         boolean strictlyGreater = false;
         for (RelevantStat s : relevant) {
@@ -1177,45 +1235,127 @@ class BotEquipManager {
         return strictlyGreater;
     }
 
-    /**
-     * True if {@code item} (from any inventory) is a potential upgrade for {@code recipient}:
-     * job-eligible, has at least one relevant stat, and not dominated by what the recipient
-     * currently has equipped in the same WZ text-slot. Shared by self-reserve, sibling-reserve,
-     * and the sibling gear-offer check so all three use identical criteria.
-     */
-    static boolean isEquipUsefulToBot(Character recipient, ItemInformationProvider ii, Equip item) {
-        if (!isOwnClassEquip(recipient, ii, item)) return false;
-        String slot = textSlotKey(ii, item);
+    static boolean isEquipUsefulToBot(Character recipient, EquipUsefulnessHooks hooks, Equip item) {
+        if (!isOwnClassEquip(recipient, hooks, item)) return false;
+        String slot = textSlotKey(hooks, item);
         if (slot == null) return false;
-        if (isWeaponSlot(slot) && !isWeaponCompatible(recipient, ii.getWeaponType(item.getItemId()))) return false;
+        if (isWeaponSlot(slot) && !isWeaponCompatible(recipient, hooks.getWeaponType(item.getItemId()))) return false;
         EnumSet<RelevantStat> relevant = relevantStatsFor(recipient.getJob());
         if (!hasPositiveRelevant(relevant, item)) return false;
         Inventory equippedInv = recipient.getInventory(InventoryType.EQUIPPED);
         List<Equip> baseline = new ArrayList<>();
         for (Item it : equippedInv.list()) {
-            if (!(it instanceof Equip e) || ii.isCash(e.getItemId())) continue;
-            if (slot.equals(textSlotKey(ii, e))) baseline.add(e);
+            if (!(it instanceof Equip e) || hooks.isCash(e.getItemId())) continue;
+            if (slot.equals(textSlotKey(hooks, e))) baseline.add(e);
         }
         return !anyDominates(relevant, baseline, item);
     }
 
     static Set<Item> collectPotentialSelfUpgradeItems(Character bot) {
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
-        Inventory equipInv = bot.getInventory(InventoryType.EQUIP);
         Set<Item> keep = Collections.newSetFromMap(new IdentityHashMap<>());
-        for (Item item : equipInv.list()) {
-            if (!(item instanceof Equip equip) || ii.isCash(item.getItemId())) continue;
-            if (isEquipUsefulToBot(bot, ii, equip)) keep.add(equip);
+        keep.addAll(selectOwnedItemsForSelfReserve(bot, SelfReserveHooks.from(ii), collectOwnedBagEquips(bot, ii)));
+        return keep;
+    }
+
+    static Set<Equip> selectOwnedItemsForSelfReserve(Character bot, ItemInformationProvider ii,
+                                                     Collection<Equip> ownedItems) {
+        return selectOwnedItemsForSelfReserve(bot, SelfReserveHooks.from(ii), ownedItems);
+    }
+
+    static Set<Equip> selectOwnedItemsForSelfReserve(Character bot, SelfReserveHooks hooks,
+                                                     Collection<Equip> ownedItems) {
+        EnumSet<RelevantStat> relevant = relevantStatsFor(bot.getJob());
+        Map<String, List<Equip>> byTrack = new LinkedHashMap<>();
+        for (Equip equip : ownedItems) {
+            if (equip == null || hooks.isCash(equip.getItemId())) continue;
+            if (!isOwnClassEquip(bot, hooks, equip)) continue;
+            if (!hasPositiveRelevant(relevant, equip)) continue;
+            String track = selfReserveTrackKey(bot, hooks, equip);
+            if (track == null) continue;
+            byTrack.computeIfAbsent(track, ignored -> new ArrayList<>()).add(equip);
+        }
+
+        Set<Equip> keep = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (List<Equip> trackItems : byTrack.values()) {
+            for (Equip candidate : trackItems) {
+                boolean dominated = false;
+                for (Equip other : trackItems) {
+                    if (other == candidate) continue;
+                    if (dominatesForSelfReserve(hooks, relevant, other, candidate)) {
+                        dominated = true;
+                        break;
+                    }
+                }
+                if (!dominated) keep.add(candidate);
+            }
         }
         return keep;
     }
 
-    private static String textSlotKey(ItemInformationProvider ii, Equip equip) {
-        String textSlot = ii.getEquipmentSlot(equip.getItemId());
+    private static List<Equip> collectOwnedEquips(Character bot, ItemInformationProvider ii) {
+        List<Equip> owned = new ArrayList<>();
+        owned.addAll(collectOwnedBagEquips(bot, ii));
+        Inventory equippedInv = bot.getInventory(InventoryType.EQUIPPED);
+        for (Item item : equippedInv.list()) {
+            if (item instanceof Equip equip && !ii.isCash(equip.getItemId())) owned.add(equip);
+        }
+        return owned;
+    }
+
+    private static List<Equip> collectOwnedBagEquips(Character bot, ItemInformationProvider ii) {
+        List<Equip> owned = new ArrayList<>();
+        Inventory equipInv = bot.getInventory(InventoryType.EQUIP);
+        for (Item item : equipInv.list()) {
+            if (item instanceof Equip equip && !ii.isCash(equip.getItemId())) owned.add(equip);
+        }
+        return owned;
+    }
+
+    private static String selfReserveTrackKey(Character bot, EquipUsefulnessHooks hooks, Equip equip) {
+        String slot = textSlotKey(hooks, equip);
+        if (slot == null) return null;
+        if (!isWeaponSlot(slot)) return slot;
+        WeaponType wt = hooks.getWeaponType(equip.getItemId());
+        if (!isWeaponCompatible(bot, wt)) return null;
+        return slot + ":" + wt;
+    }
+
+    private static boolean dominatesForSelfReserve(SelfReserveHooks hooks, EnumSet<RelevantStat> relevant,
+                                                   Equip better, Equip worse) {
+        if (!paretoDominates(relevant, better, worse)) return false;
+        if (!reqsAtLeastAsEasy(hooks, better, worse)) return false;
+        if (sameRequirementSignature(hooks, better, worse) && better.getItemId() != worse.getItemId()) return false;
+        return true;
+    }
+
+    private static boolean sameRequirementSignature(SelfReserveHooks hooks, Equip a, Equip b) {
+        if (hooks.getEquipLevelReq(a.getItemId()) != hooks.getEquipLevelReq(b.getItemId())) return false;
+        Map<String, Integer> as = hooks.getEquipStats(a.getItemId());
+        Map<String, Integer> bs = hooks.getEquipStats(b.getItemId());
+        if (as == null || bs == null) return as == bs;
+        for (String key : new String[]{"reqJob", "reqSTR", "reqDEX", "reqINT", "reqLUK", "reqPOP"}) {
+            if (as.getOrDefault(key, 0).intValue() != bs.getOrDefault(key, 0).intValue()) return false;
+        }
+        return true;
+    }
+
+    private static boolean isOwnClassEquip(Character bot, EquipUsefulnessHooks hooks, Equip equip) {
+        return hooks.meetsReqs(equip, bot.getJob(), Short.MAX_VALUE,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE);
+    }
+
+    private static String textSlotKey(EquipUsefulnessHooks hooks, Equip equip) {
+        String textSlot = hooks.getEquipmentSlot(equip.getItemId());
         if (textSlot == null) return null;
         EquipSlot slot = EquipSlot.getFromTextSlot(textSlot);
         if (slot == null || slot == EquipSlot.PET_EQUIP) return null;
         return textSlot;
+    }
+
+    private static String textSlotKey(ItemInformationProvider ii, Equip equip) {
+        return textSlotKey(EquipUsefulnessHooks.from(ii), equip);
     }
 
     private static boolean isWeaponSlot(String textSlot) { return "Wp".equals(textSlot); }
@@ -1839,6 +1979,18 @@ class BotEquipManager {
         Map<String, Integer> as = ii.getEquipStats(a.getItemId());
         if (bs == null || as == null) return bs == as;
         // reqJob is a job mask — different masks aren't comparable; require equal to be safe.
+        if (bs.getOrDefault("reqJob", 0).intValue() != as.getOrDefault("reqJob", 0).intValue()) return false;
+        for (String key : new String[]{"reqSTR", "reqDEX", "reqINT", "reqLUK", "reqPOP"}) {
+            if (bs.getOrDefault(key, 0) > as.getOrDefault(key, 0)) return false;
+        }
+        return true;
+    }
+
+    private static boolean reqsAtLeastAsEasy(SelfReserveHooks hooks, Equip b, Equip a) {
+        if (hooks.getEquipLevelReq(b.getItemId()) > hooks.getEquipLevelReq(a.getItemId())) return false;
+        Map<String, Integer> bs = hooks.getEquipStats(b.getItemId());
+        Map<String, Integer> as = hooks.getEquipStats(a.getItemId());
+        if (bs == null || as == null) return bs == as;
         if (bs.getOrDefault("reqJob", 0).intValue() != as.getOrDefault("reqJob", 0).intValue()) return false;
         for (String key : new String[]{"reqSTR", "reqDEX", "reqINT", "reqLUK", "reqPOP"}) {
             if (bs.getOrDefault(key, 0) > as.getOrDefault(key, 0)) return false;

@@ -205,6 +205,15 @@ class BotChatManagerTest {
     }
 
     @Test
+    void shouldParseProactiveOfferToggleCommands() {
+        assertTrue(BotChatManager.isProactiveOffersOnCommand("proactive offers on"));
+        assertTrue(BotChatManager.isProactiveOffersOnCommand("future upgrades on"));
+        assertTrue(BotChatManager.isProactiveOffersOffCommand("proactive offers off"));
+        assertTrue(BotChatManager.isProactiveOffersOffCommand("offers future off"));
+        assertFalse(BotChatManager.isProactiveOffersOnCommand("trade recommended gear"));
+    }
+
+    @Test
     void shouldBuildMovementStatsReportUsingGameStatsAndDerivedPhysics() {
         Character bot = mock(Character.class);
         MapleMap map = mock(MapleMap.class);

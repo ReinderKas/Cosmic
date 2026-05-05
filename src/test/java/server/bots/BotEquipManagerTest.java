@@ -3,6 +3,8 @@ package server.bots;
 import client.Character;
 import client.Job;
 import client.inventory.Equip;
+import client.inventory.Inventory;
+import client.inventory.InventoryType;
 import client.inventory.WeaponType;
 import constants.skills.Crusader;
 import constants.skills.DragonKnight;
@@ -397,6 +399,100 @@ class BotEquipManagerTest {
                 "item should not be reserved when mage sibling already wears a strictly better overall");
     }
 
+    @Test
+    void shouldReserveUsefulHunterShoesForSelfFromJohnLog() {
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.HUNTER);
+        when(bot.getInventory(InventoryType.EQUIPPED)).thenReturn(mock(Inventory.class));
+
+        Inventory equipped = bot.getInventory(InventoryType.EQUIPPED);
+        Equip wornBoots = mock(Equip.class);
+        Equip redPierre = mock(Equip.class);
+        when(equipped.list()).thenReturn(List.of(wornBoots));
+
+        when(wornBoots.getItemId()).thenReturn(1072082);
+        when(wornBoots.getStr()).thenReturn((short) 0);
+        when(wornBoots.getDex()).thenReturn((short) 5);
+        when(wornBoots.getInt()).thenReturn((short) 0);
+        when(wornBoots.getLuk()).thenReturn((short) 0);
+        when(wornBoots.getWatk()).thenReturn((short) 0);
+        when(wornBoots.getMatk()).thenReturn((short) 0);
+        when(wornBoots.getAcc()).thenReturn((short) 0);
+
+        when(redPierre.getItemId()).thenReturn(1072132);
+        when(redPierre.getStr()).thenReturn((short) 8);
+        when(redPierre.getDex()).thenReturn((short) 0);
+        when(redPierre.getInt()).thenReturn((short) 0);
+        when(redPierre.getLuk()).thenReturn((short) 0);
+        when(redPierre.getWatk()).thenReturn((short) 0);
+        when(redPierre.getMatk()).thenReturn((short) 0);
+        when(redPierre.getAcc()).thenReturn((short) 0);
+
+        BotEquipManager.EquipUsefulnessHooks hooks = mock(BotEquipManager.EquipUsefulnessHooks.class);
+        when(hooks.isCash(1072082)).thenReturn(false);
+        when(hooks.isCash(1072132)).thenReturn(false);
+        when(hooks.getEquipmentSlot(1072082)).thenReturn("So");
+        when(hooks.getEquipmentSlot(1072132)).thenReturn("So");
+        when(hooks.meetsReqs(wornBoots, Job.HUNTER, Short.MAX_VALUE,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+        when(hooks.meetsReqs(redPierre, Job.HUNTER, Short.MAX_VALUE,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+        assertTrue(BotEquipManager.shouldReserveOwnedItem(bot, hooks, redPierre),
+                "John's +8 STR Red Pierre Shoes should stay reserved for self ahead of owner/sibling offers");
+    }
+
+    @Test
+    void selfReserveSameReqSameItemIdKeepsOnlyBestIvoryCopies() {
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.SPEARMAN);
+
+        Equip ivoryTop8 = equipWithIdStats(1040087, 0, 8, 0);
+        Equip ivoryTop7 = equipWithIdStats(1040087, 0, 7, 0);
+        Equip ivoryTop3 = equipWithIdStats(1040087, 0, 3, 0);
+        Equip ivoryPant6 = equipWithIdStats(1060076, 0, 6, 4);
+        Equip ivoryPant2 = equipWithIdStats(1060076, 0, 2, 0);
+        Equip ivoryPant1 = equipWithIdStats(1060076, 0, 1, 2);
+
+        BotEquipManager.SelfReserveHooks hooks = mock(BotEquipManager.SelfReserveHooks.class);
+        stubReserveItem(hooks, ivoryTop8, "Ma", 50, 1, 180, 0, 0, 0, 20);
+        stubReserveItem(hooks, ivoryTop7, "Ma", 50, 1, 180, 0, 0, 0, 20);
+        stubReserveItem(hooks, ivoryTop3, "Ma", 50, 1, 180, 0, 0, 0, 20);
+        stubReserveItem(hooks, ivoryPant6, "Pn", 50, 1, 180, 0, 0, 0, 20);
+        stubReserveItem(hooks, ivoryPant2, "Pn", 50, 1, 180, 0, 0, 0, 20);
+        stubReserveItem(hooks, ivoryPant1, "Pn", 50, 1, 180, 0, 0, 0, 20);
+
+        Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks,
+                List.of(ivoryTop8, ivoryTop7, ivoryTop3, ivoryPant6, ivoryPant2, ivoryPant1));
+
+        assertTrue(keep.contains(ivoryTop8));
+        assertFalse(keep.contains(ivoryTop7));
+        assertFalse(keep.contains(ivoryTop3));
+        assertTrue(keep.contains(ivoryPant6));
+        assertFalse(keep.contains(ivoryPant2));
+        assertFalse(keep.contains(ivoryPant1));
+    }
+
+    @Test
+    void selfReserveSameReqDifferentItemIdDoesNotDominate() {
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.SPEARMAN);
+
+        Equip itemA = equipWithIdStats(2000001, 0, 8, 0);
+        Equip itemB = equipWithIdStats(2000002, 0, 7, 0);
+
+        BotEquipManager.SelfReserveHooks hooks = mock(BotEquipManager.SelfReserveHooks.class);
+        stubReserveItem(hooks, itemA, "Ma", 50, 1, 180, 0, 0, 0, 20);
+        stubReserveItem(hooks, itemB, "Ma", 50, 1, 180, 0, 0, 0, 20);
+
+        Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks, List.of(itemA, itemB));
+
+        assertTrue(keep.contains(itemA));
+        assertTrue(keep.contains(itemB),
+                "same req signature but different itemId should not dominate");
+    }
+
     private static Equip mageOverall(int int_, int luk) {
         Equip e = mock(Equip.class);
         when(e.getStr()).thenReturn((short) 0);
@@ -407,6 +503,38 @@ class BotEquipManagerTest {
         when(e.getMatk()).thenReturn((short) 0);
         when(e.getAcc()).thenReturn((short) 0);
         return e;
+    }
+
+    private static Equip equipWithIdStats(int itemId, int str, int dex, int acc) {
+        Equip e = mock(Equip.class);
+        when(e.getItemId()).thenReturn(itemId);
+        when(e.getStr()).thenReturn((short) str);
+        when(e.getDex()).thenReturn((short) dex);
+        when(e.getInt()).thenReturn((short) 0);
+        when(e.getLuk()).thenReturn((short) 0);
+        when(e.getWatk()).thenReturn((short) 0);
+        when(e.getMatk()).thenReturn((short) 0);
+        when(e.getAcc()).thenReturn((short) acc);
+        return e;
+    }
+
+    private static void stubReserveItem(BotEquipManager.SelfReserveHooks hooks, Equip equip, String slot,
+                                        int reqLevel, int reqJob, int reqStr, int reqDex,
+                                        int reqInt, int reqLuk, int reqPop) {
+        int itemId = equip.getItemId();
+        when(hooks.isCash(itemId)).thenReturn(false);
+        when(hooks.getEquipmentSlot(itemId)).thenReturn(slot);
+        when(hooks.meetsReqs(equip, Job.SPEARMAN, Short.MAX_VALUE,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+        when(hooks.getEquipLevelReq(itemId)).thenReturn(reqLevel);
+        when(hooks.getEquipStats(itemId)).thenReturn(java.util.Map.of(
+                "reqJob", reqJob,
+                "reqSTR", reqStr,
+                "reqDEX", reqDex,
+                "reqINT", reqInt,
+                "reqLUK", reqLuk,
+                "reqPOP", reqPop));
     }
 
     private static Set<Equip> identitySet(Equip... items) {

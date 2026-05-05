@@ -254,6 +254,12 @@ public class BotChatManager {
     private static final Pattern BUFF_MAX_PATTERN = Pattern.compile(
             "\\bbuff\\s+(pots?\\s+)?(max|best|good)\\b",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern PROACTIVE_OFFERS_ON_PATTERN = Pattern.compile(
+            "\\b(?:(?:proactive|future)\\s+(?:offers?|upgrades?)\\s+on|offers?\\s+(?:proactive|future)\\s+on)\\b",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern PROACTIVE_OFFERS_OFF_PATTERN = Pattern.compile(
+            "\\b(?:(?:proactive|future)\\s+(?:offers?|upgrades?)\\s+off|offers?\\s+(?:proactive|future)\\s+off)\\b",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern BUFF_LIST_PATTERN = Pattern.compile(
             "\\bbuff\\s+(pots?\\s+)?list\\b|\\bbuffs?\\s*\\?|\\bwhat\\s+buffs?\\b|\\bwhich\\s+buffs?\\b",
             Pattern.CASE_INSENSITIVE);
@@ -752,6 +758,20 @@ public class BotChatManager {
                 entry.buffCheapMode = false;
                 entry.lastBuffScanMs = 0;
                 BotManager.getInstance().botReply(entry, "ok, using best buff pots");
+            });
+            return;
+        }
+        if (PROACTIVE_OFFERS_OFF_PATTERN.matcher(message).find()) {
+            BotManager.after(BotManager.randMs(500, 700), () -> {
+                entry.proactiveUpgradeOffers = false;
+                BotManager.getInstance().botReply(entry, "ok, only offering immediate upgrades");
+            });
+            return;
+        }
+        if (PROACTIVE_OFFERS_ON_PATTERN.matcher(message).find()) {
+            BotManager.after(BotManager.randMs(500, 700), () -> {
+                entry.proactiveUpgradeOffers = true;
+                BotManager.getInstance().botReply(entry, "ok, proactive upgrade offers on");
             });
             return;
         }
@@ -1478,7 +1498,7 @@ public class BotChatManager {
 
     private static void reportHelp(BotEntry entry) {
         queueBotSay(entry, "commands: follow, stop, move here, fidget, grind, stats, speed, skills, inventory, mesos, exp, slots, scrolls, pots, debug stats, crit, respec, respec ap");
-        queueBotSay(entry, "support: support on/off, heals on/off, buff on/off, buff cheap/max, buff debug, skill buff debug");
+        queueBotSay(entry, "support: support on/off, heals on/off, buff on/off, buff cheap/max, proactive offers on/off, buff debug, skill buff debug");
         queueBotSay(entry, "gear: ask 'any upgrades?' or say 'trade recommended gear'");
         queueBotSay(entry, "supplies: need hp pot, need mp pot, need pot, need ammo");
         queueBotSay(entry, "trade: mesos, scrolls, pots, equips, etc, or named items");
@@ -1498,6 +1518,14 @@ public class BotChatManager {
 
     static boolean isMoveHereCommand(String message) {
         return matchesWholeCommand(MOVE_HERE_PATTERN, message);
+    }
+
+    static boolean isProactiveOffersOnCommand(String message) {
+        return PROACTIVE_OFFERS_ON_PATTERN.matcher(message).find();
+    }
+
+    static boolean isProactiveOffersOffCommand(String message) {
+        return PROACTIVE_OFFERS_OFF_PATTERN.matcher(message).find();
     }
 
     static boolean isFollowCommand(String message) {
