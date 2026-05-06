@@ -31,6 +31,7 @@ public class Foothold implements Comparable<Foothold> {
     private final Point p2;
     private final int id;
     private int next, prev;
+    private boolean forbidFallDown;
 
     public Foothold(Point p1, Point p2, int id) {
         this.p1 = p1;
@@ -43,16 +44,33 @@ public class Foothold implements Comparable<Foothold> {
     }
 
     /**
-     * A wall foothold is collidable (blocks airborne movement) only if both ends of its
-     * prev/next chain eventually reach a non-wall (ground) foothold.  Platform-edge walls
-     * have one open end (prev=0 or next=0 before reaching ground) and should not collide.
+     * A wall foothold is collidable when the lower endpoint is connected into a foothold
+     * chain that eventually reaches non-wall ground. Real client collision in maps such as
+     * 193000000 treats bottom-anchored, open-top walls as solid. The open lower-end case is
+     * still non-collidable so ledge edges do not become side walls.
      */
     public static boolean isCollidableWall(Foothold wall, java.util.Map<Integer, Foothold> footholdsById) {
         if (wall == null || !wall.isWall()) {
             return false;
         }
-        return chainReachesGround(wall, true, footholdsById)
-                && chainReachesGround(wall, false, footholdsById);
+        Point lowerEndpoint = wall.getY1() >= wall.getY2() ? wall.p1 : wall.p2;
+        return linkedChainReachesGroundAtEndpoint(wall, wall.prev, false, lowerEndpoint, footholdsById)
+                || linkedChainReachesGroundAtEndpoint(wall, wall.next, true, lowerEndpoint, footholdsById);
+    }
+
+    private static boolean linkedChainReachesGroundAtEndpoint(Foothold wall,
+                                                              int linkedId,
+                                                              boolean followNext,
+                                                              Point endpoint,
+                                                              java.util.Map<Integer, Foothold> footholdsById) {
+        if (linkedId == 0) {
+            return false;
+        }
+        Foothold linked = footholdsById.get(linkedId);
+        if (linked == null || !touchesPoint(linked, endpoint)) {
+            return false;
+        }
+        return chainReachesGround(wall, followNext, footholdsById);
     }
 
     private static boolean chainReachesGround(Foothold start, boolean followNext,
@@ -71,6 +89,11 @@ public class Foothold implements Comparable<Foothold> {
             depth++;
         }
         return false;
+    }
+
+    private static boolean touchesPoint(Foothold foothold, Point point) {
+        return (foothold.getX1() == point.x && foothold.getY1() == point.y)
+                || (foothold.getX2() == point.x && foothold.getY2() == point.y);
     }
 
     public int getX1() {
@@ -136,5 +159,13 @@ public class Foothold implements Comparable<Foothold> {
 
     public void setPrev(int prev) {
         this.prev = prev;
+    }
+
+    public boolean isForbidFallDown() {
+        return forbidFallDown;
+    }
+
+    public void setForbidFallDown(boolean forbidFallDown) {
+        this.forbidFallDown = forbidFallDown;
     }
 }

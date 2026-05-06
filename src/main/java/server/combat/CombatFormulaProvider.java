@@ -23,8 +23,20 @@ import constants.skills.Rogue;
 import constants.skills.Shadower;
 import constants.skills.ThunderBreaker;
 import constants.skills.WindArcher;
+import constants.game.GameConstants;
+import constants.skills.Buccaneer;
+import constants.skills.Crusader;
+import constants.skills.DarkKnight;
+import constants.skills.DawnWarrior;
+import constants.skills.Hero;
+import constants.skills.Marauder;
+import constants.skills.Paladin;
+import constants.skills.WhiteKnight;
+import net.server.PlayerBuffValueHolder;
 import net.server.channel.handlers.AbstractDealDamageHandler;
 import server.StatEffect;
+import server.life.Element;
+import server.life.ElementalEffectiveness;
 import server.life.Monster;
 
 import java.util.ArrayList;
@@ -188,44 +200,337 @@ public final class CombatFormulaProvider {
         return damageLines;
     }
 
+    // Default target count for Cleric Heal damage: caster + 1 target. Resolves to the 4.0× target
+    // multiplier, which algebraically matches the old (INT*4.8 + LUK*4) Cosmic formula —
+    // unaffected callers (non-Heal or tests) keep their existing numbers.
+    private static final int DEFAULT_HEAL_TARGET_COUNT = 2;
+
     public DamageProfile resolveDamageProfile(Character bot, int skillId, int skillLevel, boolean magicAttack) {
+        return resolveDamageProfile(bot, skillId, skillLevel, magicAttack, DEFAULT_HEAL_TARGET_COUNT);
+    }
+
+    /**
+     * Variant used by Heal path: the client's damage-vs-undead formula includes a target multiplier
+     * of {@code 1.5 + 5 / N} where N is the number of targets including the caster. Callers that
+     * know how many undead are being hit (e.g. {@code BotCombatManager.sendHealAttack}) should pass
+     * {@code undeadCount + 1} so the bot's Heal damage matches what a real client would send.
+     *
+     * @param healTargetCount N in the formula — caster + undead mobs. Ignored for non-Heal skills.
+     */
+    public DamageProfile resolveDamageProfile(Character bot, int skillId, int skillLevel,
+                                              boolean magicAttack, int healTargetCount) {
         Skill skill = skillId != 0 ? SkillFactory.getSkill(skillId) : null;
         StatEffect effect = skill != null && skillLevel > 0 ? skill.getEffect(skillLevel) : null;
-        return resolveDamageProfile(bot, skillId, effect, magicAttack);
+        return resolveDamageProfile(bot, skillId, effect, magicAttack, healTargetCount);
     }
 
     public DamageProfile resolveDamageProfile(Character bot, int skillId, StatEffect effect, boolean magicAttack) {
+        return resolveDamageProfile(bot, skillId, effect, magicAttack, DEFAULT_HEAL_TARGET_COUNT);
+    }
+
+    public DamageProfile resolveDamageProfile(Character bot, int skillId, StatEffect effect,
+                                              boolean magicAttack, int healTargetCount) {
         if (effect != null && effect.getFixDamage() > 0) {
             int fixedDamage = Math.max(1, effect.getFixDamage());
             return new DamageProfile(fixedDamage, fixedDamage, magicAttack, true);
         }
 
         return magicAttack
-                ? resolveMagicDamageProfile(bot, skillId, effect)
+                ? resolveMagicDamageProfile(bot, skillId, effect, healTargetCount)
                 : resolvePhysicalDamageProfile(bot, skillId, effect);
     }
 
     public AbstractDealDamageHandler.AttackTarget makeTarget(Character bot, Monster monster, int hits,
                                                       DamageProfile damageProfile, int hitDelayMs) {
-        int[] adjustedDamage = damageProfile.alwaysHit()
-                ? new int[]{damageProfile.minDamage(), damageProfile.maxDamage()}
-                : applyMonsterDefense(bot, monster, damageProfile.minDamage(), damageProfile.maxDamage(),
-                damageProfile.magicAttack());
+        return makeTarget(bot, monster, hits, 0, damageProfile, hitDelayMs);
+    }
+
+    public AbstractDealDamageHandler.AttackTarget makeTarget(Character bot, Monster monster, int hits,
+                                                      int skillId, DamageProfile damageProfile, int hitDelayMs) {
         int normalizedHitDelay = Math.max(0, Math.min(Short.MAX_VALUE, hitDelayMs));
         if (damageProfile.alwaysHit()) {
-            List<Integer> lines = rollDamageLines(hits, adjustedDamage[0], adjustedDamage[1], 1.0d);
+            List<Integer> lines = rollDamageLines(hits, damageProfile.minDamage(), damageProfile.maxDamage(), 1.0d);
             return new AbstractDealDamageHandler.AttackTarget((short) normalizedHitDelay, lines);
-        } else if (!damageProfile.magicAttack()) {
+        }
+        long rawMin = applyCharacterDamageModifiers(damageProfile.minDamage(), bot, skillId);
+        long rawMax = applyCharacterDamageModifiers(damageProfile.maxDamage(), bot, skillId);
+        boolean elementalResetActive = bot.getBuffedValue(BuffStat.ELEMENTAL_RESET) != null;
+        rawMax = applySkillElementalMultiplier(rawMax, skillId, monster, elementalResetActive);
+        rawMin = applySkillElementalMultiplier(rawMin, skillId, monster, elementalResetActive);
+        // parseDamage omits STRONG penalty as anti-cheat headroom; bots apply it for realism
+        if (skillId != 0 && !elementalResetActive && monster != null) {
+            Skill elemSkill = SkillFactory.getSkill(skillId);
+            if (elemSkill != null && elemSkill.getElement() != Element.NEUTRAL
+                    && monster.getElementalEffectiveness(elemSkill.getElement()) == ElementalEffectiveness.STRONG) {
+                rawMax = Math.max(1, rawMax / 2);
+                rawMin = Math.max(1, rawMin / 2);
+            }
+        }
+        rawMax = applyWkChargeElementalBonus(rawMax, bot, monster);
+        rawMin = applyWkChargeElementalBonus(rawMin, bot, monster);
+        int modMax = (int) Math.min(Integer.MAX_VALUE, rawMax);
+        int modMin = (int) Math.min(modMax, Math.max(1, (int) rawMin));
+        int[] adjustedDamage = applyMonsterDefense(bot, monster, modMin, modMax, damageProfile.magicAttack());
+        boolean shadowPartner = hits > 1 && bot.getBuffEffect(BuffStat.SHADOWPARTNER) != null;
+        if (!damageProfile.magicAttack()) {
             CritProfile crit = resolveCritProfile(bot);
             double hitChance = calculateMobHitChance(bot, monster, false);
+            if (skillId == Buccaneer.BARRAGE || skillId == ThunderBreaker.BARRAGE) {
+                return rollBarrageDamageLines(hits, adjustedDamage, hitChance, crit, normalizedHitDelay);
+            }
+            if (shadowPartner) {
+                return rollWithShadowPartnerPhysical(hits, adjustedDamage, hitChance, crit, normalizedHitDelay);
+            }
             CritDamageResult result = rollDamageLinesWithCrit(hits, adjustedDamage[0], adjustedDamage[1],
                     hitChance, crit.critChance(), crit.critMultiplier());
             return new AbstractDealDamageHandler.AttackTarget((short) normalizedHitDelay,
                     result.lines(), result.critIndices());
         } else {
+            if (shadowPartner) {
+                return rollWithShadowPartnerMagic(bot, monster, hits, adjustedDamage, normalizedHitDelay);
+            }
             List<Integer> lines = rollDamageLines(bot, monster, hits, adjustedDamage[0], adjustedDamage[1], true);
             return new AbstractDealDamageHandler.AttackTarget((short) normalizedHitDelay, lines);
         }
+    }
+
+    /**
+     * Deterministic counterpart to {@link #makeTarget}: estimates the total damage the bot should
+     * deal to one monster after character modifiers, elemental effects, accuracy, crits, Shadow
+     * Partner, and monster defense. Used by bot planning so skill choice is based on expected output
+     * instead of raw skill percentages.
+     */
+    public double estimateExpectedDamage(Character bot, Monster monster, int hits, int skillId,
+                                         DamageProfile damageProfile) {
+        int normalizedHits = Math.max(0, hits);
+        if (normalizedHits == 0 || damageProfile == null) {
+            return 0.0d;
+        }
+        if (damageProfile.alwaysHit()) {
+            return averageDamage(damageProfile.minDamage(), damageProfile.maxDamage()) * normalizedHits;
+        }
+
+        long rawMin = applyCharacterDamageModifiers(damageProfile.minDamage(), bot, skillId);
+        long rawMax = applyCharacterDamageModifiers(damageProfile.maxDamage(), bot, skillId);
+        boolean elementalResetActive = bot.getBuffedValue(BuffStat.ELEMENTAL_RESET) != null;
+        rawMax = applySkillElementalMultiplier(rawMax, skillId, monster, elementalResetActive);
+        rawMin = applySkillElementalMultiplier(rawMin, skillId, monster, elementalResetActive);
+        if (skillId != 0 && !elementalResetActive && monster != null) {
+            Skill elemSkill = SkillFactory.getSkill(skillId);
+            if (elemSkill != null && elemSkill.getElement() != Element.NEUTRAL
+                    && monster.getElementalEffectiveness(elemSkill.getElement()) == ElementalEffectiveness.STRONG) {
+                rawMax = Math.max(1, rawMax / 2);
+                rawMin = Math.max(1, rawMin / 2);
+            }
+        }
+        rawMax = applyWkChargeElementalBonus(rawMax, bot, monster);
+        rawMin = applyWkChargeElementalBonus(rawMin, bot, monster);
+
+        int modMax = (int) Math.min(Integer.MAX_VALUE, rawMax);
+        int modMin = (int) Math.min(modMax, Math.max(1, (int) rawMin));
+        int[] adjustedDamage = applyMonsterDefense(bot, monster, modMin, modMax, damageProfile.magicAttack());
+        double hitChance = calculateMobHitChance(bot, monster, damageProfile.magicAttack());
+        boolean shadowPartner = normalizedHits > 1 && bot.getBuffEffect(BuffStat.SHADOWPARTNER) != null;
+        if (damageProfile.magicAttack()) {
+            if (shadowPartner) {
+                int mainHits = normalizedHits / 2;
+                int partnerHits = normalizedHits - mainHits;
+                double mainAverage = averageDamage(adjustedDamage[0], adjustedDamage[1]);
+                double partnerAverage = averageDamage(Math.max(1, Math.min(adjustedDamage[1] / 2, adjustedDamage[0] / 2)),
+                        Math.max(1, adjustedDamage[1] / 2));
+                return hitChance * (mainAverage * mainHits + partnerAverage * partnerHits);
+            }
+            return hitChance * averageDamage(adjustedDamage[0], adjustedDamage[1]) * normalizedHits;
+        }
+
+        CritProfile crit = resolveCritProfile(bot);
+        if (skillId == Buccaneer.BARRAGE || skillId == ThunderBreaker.BARRAGE) {
+            double total = 0.0d;
+            for (int j = 0; j < normalizedHits; j++) {
+                int scaledMin = adjustedDamage[0];
+                int scaledMax = adjustedDamage[1];
+                if (j > 3) {
+                    int factor = 1 << (j - 3);
+                    scaledMax = (int) Math.min(Integer.MAX_VALUE, (long) adjustedDamage[1] * factor);
+                    scaledMin = (int) Math.min(scaledMax, (long) adjustedDamage[0] * factor);
+                }
+                total += expectedPhysicalLineDamage(scaledMin, scaledMax, hitChance, crit);
+            }
+            return total;
+        }
+        if (shadowPartner) {
+            int mainHits = normalizedHits / 2;
+            int partnerHits = normalizedHits - mainHits;
+            int partnerMax = Math.max(1, adjustedDamage[1] / 2);
+            int partnerMin = Math.max(1, Math.min(partnerMax, adjustedDamage[0] / 2));
+            return expectedPhysicalLineDamage(adjustedDamage[0], adjustedDamage[1], hitChance, crit) * mainHits
+                    + expectedPhysicalLineDamage(partnerMin, partnerMax, hitChance, crit) * partnerHits;
+        }
+        return expectedPhysicalLineDamage(adjustedDamage[0], adjustedDamage[1], hitChance, crit) * normalizedHits;
+    }
+
+    private double expectedPhysicalLineDamage(int minDamage, int maxDamage, double hitChance, CritProfile crit) {
+        double average = averageDamage(minDamage, maxDamage);
+        double critChance = Math.max(0.0d, Math.min(1.0d, crit.critChance()));
+        double critMultiplier = Math.max(1.0d, crit.critMultiplier());
+        return hitChance * average * (1.0d + critChance * (critMultiplier - 1.0d));
+    }
+
+    private double averageDamage(int minDamage, int maxDamage) {
+        int normalizedMin = Math.max(0, minDamage);
+        int normalizedMax = Math.max(normalizedMin, maxDamage);
+        return (normalizedMin + normalizedMax) / 2.0d;
+    }
+
+    private AbstractDealDamageHandler.AttackTarget rollWithShadowPartnerPhysical(
+            int hits, int[] adjustedDamage, double hitChance, CritProfile crit, int normalizedHitDelay) {
+        int mainHits = hits / 2;
+        int partnerHits = hits - mainHits;
+        int partnerMax = Math.max(1, adjustedDamage[1] / 2);
+        int partnerMin = Math.max(1, Math.min(partnerMax, adjustedDamage[0] / 2));
+        CritDamageResult main = rollDamageLinesWithCrit(mainHits, adjustedDamage[0], adjustedDamage[1],
+                hitChance, crit.critChance(), crit.critMultiplier());
+        CritDamageResult partner = rollDamageLinesWithCrit(partnerHits, partnerMin, partnerMax,
+                hitChance, crit.critChance(), crit.critMultiplier());
+        List<Integer> lines = new ArrayList<>(main.lines());
+        lines.addAll(partner.lines());
+        Set<Integer> critIndices = new HashSet<>(main.critIndices());
+        for (int idx : partner.critIndices()) {
+            critIndices.add(mainHits + idx);
+        }
+        return new AbstractDealDamageHandler.AttackTarget((short) normalizedHitDelay, lines, critIndices);
+    }
+
+    private AbstractDealDamageHandler.AttackTarget rollWithShadowPartnerMagic(
+            Character bot, Monster monster, int hits, int[] adjustedDamage, int normalizedHitDelay) {
+        int mainHits = hits / 2;
+        int partnerHits = hits - mainHits;
+        int partnerMax = Math.max(1, adjustedDamage[1] / 2);
+        int partnerMin = Math.max(1, Math.min(partnerMax, adjustedDamage[0] / 2));
+        List<Integer> lines = new ArrayList<>(rollDamageLines(bot, monster, mainHits, adjustedDamage[0], adjustedDamage[1], true));
+        lines.addAll(rollDamageLines(bot, monster, partnerHits, partnerMin, partnerMax, true));
+        return new AbstractDealDamageHandler.AttackTarget((short) normalizedHitDelay, lines);
+    }
+
+    // Barrage hits j>3 deal 2^(j-3)x damage — matches parseDamage lines 847-851
+    private AbstractDealDamageHandler.AttackTarget rollBarrageDamageLines(
+            int hits, int[] adjustedDamage, double hitChance, CritProfile crit, int normalizedHitDelay) {
+        List<Integer> lines = new ArrayList<>(hits);
+        Set<Integer> critIndices = new HashSet<>();
+        for (int j = 0; j < hits; j++) {
+            int scaledMin = adjustedDamage[0];
+            int scaledMax = adjustedDamage[1];
+            if (j > 3) {
+                int factor = 1 << (j - 3); // 2^(j-3)
+                scaledMax = (int) Math.min(Integer.MAX_VALUE, (long) adjustedDamage[1] * factor);
+                scaledMin = (int) Math.min(scaledMax, (long) adjustedDamage[0] * factor);
+            }
+            CritDamageResult hit = rollDamageLinesWithCrit(1, scaledMin, scaledMax,
+                    hitChance, crit.critChance(), crit.critMultiplier());
+            lines.addAll(hit.lines());
+            if (!hit.critIndices().isEmpty()) {
+                critIndices.add(j);
+            }
+        }
+        return new AbstractDealDamageHandler.AttackTarget((short) normalizedHitDelay, lines, critIndices);
+    }
+
+    /** Shared with AbstractDealDamageHandler.parseDamage — keep in sync. */
+    public long applySkillElementalMultiplier(long damage, int skillId, Monster monster, boolean elementalResetActive) {
+        if (skillId == 0 || elementalResetActive) return damage;
+        Skill skill = SkillFactory.getSkill(skillId);
+        if (skill == null || skill.getElement() == Element.NEUTRAL) return damage;
+        if (monster == null) return (long) (damage * 1.5);
+        ElementalEffectiveness eff = monster.getElementalEffectiveness(skill.getElement());
+        if (eff == ElementalEffectiveness.WEAK) return (long) (damage * 1.5);
+        // STRONG intentionally not penalized — matches parseDamage commented-out headroom
+        return damage;
+    }
+
+    /** Shared with AbstractDealDamageHandler.parseDamage — keep in sync. */
+    public long applyWkChargeElementalBonus(long damage, Character chr, Monster monster) {
+        if (chr.getBuffEffect(BuffStat.WK_CHARGE) == null) return damage;
+        int sourceId = chr.getBuffSource(BuffStat.WK_CHARGE);
+        int level = chr.getBuffedValue(BuffStat.WK_CHARGE);
+        if (monster == null) return (long) (damage * 1.5);
+        Element chargeElement;
+        boolean isHoly;
+        if (sourceId == WhiteKnight.BW_FIRE_CHARGE || sourceId == WhiteKnight.SWORD_FIRE_CHARGE) {
+            chargeElement = Element.FIRE; isHoly = false;
+        } else if (sourceId == WhiteKnight.BW_ICE_CHARGE || sourceId == WhiteKnight.SWORD_ICE_CHARGE) {
+            chargeElement = Element.ICE; isHoly = false;
+        } else if (sourceId == WhiteKnight.BW_LIT_CHARGE || sourceId == WhiteKnight.SWORD_LIT_CHARGE) {
+            chargeElement = Element.LIGHTING; isHoly = false;
+        } else if (sourceId == Paladin.BW_HOLY_CHARGE || sourceId == Paladin.SWORD_HOLY_CHARGE) {
+            chargeElement = Element.HOLY; isHoly = true;
+        } else {
+            return damage;
+        }
+        if (monster.getStats().getEffectiveness(chargeElement) == ElementalEffectiveness.WEAK) {
+            double base = isHoly ? 1.2 : 1.05;
+            return (long) (damage * (base + level * 0.015));
+        }
+        return damage;
+    }
+
+    /**
+     * Character-level damage multipliers shared with parseDamage.
+     * Intentionally matches parseDamage anti-cheat headrooms (Berserk unconditional, etc.).
+     */
+    public long applyCharacterDamageModifiers(long damage, Character chr, int skillId) {
+        Integer comboBuff = chr.getBuffedValue(BuffStat.COMBO);
+        if (comboBuff != null && comboBuff > 0) {
+            int comboId = chr.isCygnus() ? DawnWarrior.COMBO : Crusader.COMBO;
+            int advComboId = chr.isCygnus() ? DawnWarrior.ADVANCED_COMBO : Hero.ADVANCED_COMBO;
+            if (comboBuff > 6) {
+                StatEffect ceffect = SkillFactory.getSkill(advComboId).getEffect(chr.getSkillLevel(advComboId));
+                damage = (long) Math.floor(damage * (ceffect.getDamage() + 50) / 100 + 0.20 + (comboBuff - 5) * 0.04);
+            } else {
+                int skillLv = chr.getSkillLevel(comboId);
+                if (skillLv > 0) {
+                    StatEffect ceffect = SkillFactory.getSkill(comboId).getEffect(skillLv);
+                    damage = (long) Math.floor(damage * (ceffect.getDamage() + 50) / 100 + Math.floor((comboBuff - 1) * (skillLv / 6)) / 100);
+                }
+            }
+            if (GameConstants.isFinisherSkill(skillId)) {
+                int orbs = comboBuff - 1;
+                if (orbs == 2) {
+                    damage = (long) (damage * 1.2);
+                } else if (orbs == 3) {
+                    damage = (long) (damage * 1.54);
+                } else if (orbs == 4) {
+                    damage *= 2;
+                } else if (orbs >= 5) {
+                    damage = (long) (damage * 2.5);
+                }
+            }
+        }
+        if (chr.getEnergyBar() == 15000) {
+            int energyChargeId = chr.isCygnus() ? ThunderBreaker.ENERGY_CHARGE : Marauder.ENERGY_CHARGE;
+            Skill energySkill = SkillFactory.getSkill(energyChargeId);
+            if (energySkill != null) {
+                int lvl = chr.getSkillLevel(energySkill);
+                if (lvl > 0) {
+                    // Integer division matches parseDamage headroom exactly
+                    damage *= (100 + energySkill.getEffect(lvl).getDamage()) / 100;
+                }
+            }
+        }
+        int bonusDmgBuff = 100;
+        for (PlayerBuffValueHolder pbvh : chr.getAllBuffs()) {
+            bonusDmgBuff += pbvh.effect.getDamage() - 100;
+        }
+        if (bonusDmgBuff != 100) {
+            damage = (long) Math.ceil(damage * bonusDmgBuff / 100.0f);
+        }
+        int berserkLvl = chr.getSkillLevel(DarkKnight.BERSERK);
+        if (berserkLvl > 0) {
+            int hpThreshold = SkillFactory.getSkill(DarkKnight.BERSERK).getEffect(berserkLvl).getX();
+            if (chr.getHp() * 100 / chr.getCurrentMaxHp() < hpThreshold) {
+                damage *= 2;
+            }
+        }
+        return damage;
     }
 
     /**
@@ -339,14 +644,24 @@ public final class CombatFormulaProvider {
         return normalizeDamageProfile(minDamage, maxDamage, false, false);
     }
 
-    private DamageProfile resolveMagicDamageProfile(Character bot, int skillId, StatEffect effect) {
+    private DamageProfile resolveMagicDamageProfile(Character bot, int skillId, StatEffect effect, int healTargetCount) {
         long maxDamage;
         long minDamage;
         if (skillId == Cleric.HEAL && effect != null) {
-            maxDamage = Math.round((bot.getTotalInt() * 4.8d + bot.getTotalLuk() * 4.0d)
-                    * bot.getTotalMagic() / 1000.0d);
-            maxDamage = maxDamage * Math.max(0, effect.getHp()) / 100L;
-            minDamage = Math.max(1L, Math.round(maxDamage * 0.8d));
+            // Client-side GMS v83 formula (credit: Russt / Devil's Sunrise via Ayumilove / SouthPerry):
+            //   MAX = (INT*1.2 + LUK) * MATK / 1000 * TargetMultiplier * HealRate%
+            //   MIN = (INT*0.3 + LUK) * MATK / 1000 * TargetMultiplier * HealRate%
+            //   TargetMultiplier = 1.5 + 5 / N   (N = caster + undead hit)
+            // The prior (INT*4.8 + LUK*4) shortcut hard-coded N=2 (4.0×), making solo clerics
+            // underdamage by ~40% vs a real client that rolls 6.5× for N=1. HealRate% is the WZ
+            // "hp" field on the skill effect (10→300 across Heal lv1→30).
+            double targetMultiplier = 1.5d + 5.0d / Math.max(1, healTargetCount);
+            double matkOverK = bot.getTotalMagic() / 1000.0d;
+            double baseMax = (bot.getTotalInt() * 1.2d + bot.getTotalLuk()) * matkOverK * targetMultiplier;
+            double baseMin = (bot.getTotalInt() * 0.3d + bot.getTotalLuk()) * matkOverK * targetMultiplier;
+            int healRate = Math.max(0, effect.getHp());
+            maxDamage = Math.round(baseMax) * healRate / 100L;
+            minDamage = Math.max(1L, Math.round(baseMin) * healRate / 100L);
         } else {
             int matk = bot.getTotalMagic();
             int totalInt = bot.getTotalInt();
@@ -431,9 +746,10 @@ public final class CombatFormulaProvider {
     private int getFlatAccuracy(Character bot) {
         Integer buffedAccuracy = bot.getBuffedValue(BuffStat.ACC);
         int buffAccuracy = buffedAccuracy != null ? buffedAccuracy : 0;
+        int passiveSkillAccuracy = getPassiveSkillAccuracy(bot);
         var equippedInventory = bot.getInventory(InventoryType.EQUIPPED);
         if (equippedInventory == null) {
-            return buffAccuracy;
+            return buffAccuracy + passiveSkillAccuracy;
         }
 
         int equipAccuracy = 0;
@@ -442,7 +758,58 @@ public final class CombatFormulaProvider {
                 equipAccuracy += equip.getAcc();
             }
         }
-        return buffAccuracy + equipAccuracy;
+        return buffAccuracy + passiveSkillAccuracy + equipAccuracy;
+    }
+
+    /**
+     * Weapon Mastery skill IDs. In v83 WZ, these store the per-level accuracy bonus in the
+     * `x` field (and the mastery percent tier in `mastery`); the `acc` field is absent.
+     * Non-weapon "mastery" skills (Shield/High/Magic/Stun) don't grant weapon accuracy and
+     * are intentionally excluded.
+     */
+    private static final Set<Integer> WEAPON_MASTERY_SKILLS = Set.of(
+            constants.skills.Fighter.SWORD_MASTERY,
+            constants.skills.Fighter.AXE_MASTERY,
+            constants.skills.Page.SWORD_MASTERY,
+            constants.skills.Page.BW_MASTERY,
+            constants.skills.Spearman.SPEAR_MASTERY,
+            constants.skills.Spearman.POLEARM_MASTERY,
+            constants.skills.Hunter.BOW_MASTERY,
+            constants.skills.Crossbowman.CROSSBOW_MASTERY,
+            constants.skills.Assassin.CLAW_MASTERY,
+            constants.skills.Bandit.DAGGER_MASTERY,
+            constants.skills.Brawler.KNUCKLER_MASTERY,
+            constants.skills.Gunslinger.GUN_MASTERY,
+            constants.skills.DawnWarrior.SWORD_MASTERY,
+            constants.skills.WindArcher.BOW_MASTERY,
+            constants.skills.NightWalker.CLAW_MASTERY,
+            constants.skills.ThunderBreaker.KNUCKLER_MASTERY,
+            constants.skills.Aran.POLEARM_MASTERY
+    );
+
+    /**
+     * Sum of accuracy from leveled passive skills (mastery `x` field + any `acc` field on
+     * other passives) that the client adds to its hit formula but the server otherwise
+     * never sees. Active buffs contribute via {@link BuffStat#ACC} and are skipped here.
+     */
+    public int getPassiveSkillAccuracy(Character bot) {
+        int total = 0;
+        try {
+            for (var entry : bot.getSkills().entrySet()) {
+                int level = entry.getValue().skillevel;
+                if (level <= 0) continue;
+                Skill skill = entry.getKey();
+                StatEffect effect = skill.getEffect(level);
+                if (effect == null || effect.isOverTime()) continue;
+                total += effect.getAcc();
+                if (WEAPON_MASTERY_SKILLS.contains(skill.getId())) {
+                    total += effect.getX();
+                }
+            }
+        } catch (Throwable t) {
+            return 0;
+        }
+        return total;
     }
 
     private int getFlatAvoidability(Character bot) {

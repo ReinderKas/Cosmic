@@ -60,11 +60,16 @@ final class BotPotionManager {
     private BotPotionManager() {
     }
 
-    static int[] countPotions(Character bot) {
-        List<Item> items = bot.getInventory(InventoryType.USE).list().stream()
-                .filter(item -> BotInventoryManager.isRecoveryPotion(item.getItemId()))
+    /** Single source of truth: items the bot has that count as recovery pots. */
+    static List<Item> recoveryPotions(Character bot) {
+        return bot.getInventory(InventoryType.USE).list().stream()
+                .filter(item -> item.getQuantity() > 0
+                        && BotInventoryManager.isRecoveryPotion(item.getItemId()))
                 .toList();
-        return countPotions(items, BotInventoryManager::itemEffect);
+    }
+
+    static int[] countPotions(Character bot) {
+        return countPotions(recoveryPotions(bot), BotInventoryManager::itemEffect);
     }
 
     static int[] countPotions(List<Item> items, Function<Integer, StatEffect> effectLookup) {
@@ -86,55 +91,128 @@ final class BotPotionManager {
         return new int[]{hp, mp};
     }
 
-    static void setupAutopotForBot(Character bot) {
-        ItemInformationProvider infoProvider = ItemInformationProvider.getInstance();
+    /**
+     * Autopot selection priority, best (lowest ordinal) → worst:
+     *   1. FLAT_SINGLE — e.g. 50 HP only
+     *   2. FLAT_MIXED  — e.g. 50 HP + 50 MP
+     *   3. RATE_SINGLE — e.g. 20% HP only
+     *   4. RATE_MIXED  — e.g. 20% HP + 20% MP
+     * Within the same tier, the smaller recovery value wins (burn cheap pots first;
+     * preserve big pots for emergencies). Buff potions (statups present) are excluded.
+     */
+    enum PotionTier {
+        FLAT_SINGLE,
+        FLAT_MIXED,
+        RATE_SINGLE,
+        RATE_MIXED
+    }
+
+    /** Result of classifying an item for a slot: tier + the slot-stat magnitude used for tie-breaking. */
+    record PotionRanking(PotionTier tier, double value) {
+        boolean betterThan(PotionRanking other) {
+            if (other == null) return true;
+            int t = Integer.compare(this.tier.ordinal(), other.tier.ordinal());
+            if (t != 0) return t < 0;
+            return this.value < other.value; // smaller value preferred within tier
+        }
+    }
+
+    static PotionRanking classifyForSlot(StatEffect fx, boolean hpSlot) {
+        if (fx == null) {
+            return null;
+        }
+        int flatPrim    = Math.max(0, hpSlot ? fx.getHp()     : fx.getMp());
+        int flatOther   = Math.max(0, hpSlot ? fx.getMp()     : fx.getHp());
+        double ratePrim  = Math.max(0.0, hpSlot ? fx.getHpRate() : fx.getMpRate());
+        double rateOther = Math.max(0.0, hpSlot ? fx.getMpRate() : fx.getHpRate());
+
+        if (flatPrim == 0 && ratePrim == 0.0) {
+            return null; // does not restore the slot's stat
+        }
+
+        boolean hasFlat = flatPrim > 0 || flatOther > 0;
+        boolean hasRate = ratePrim > 0 || rateOther > 0;
+
+        if (hasFlat && !hasRate) {
+            boolean mixed = flatPrim > 0 && flatOther > 0;
+            return new PotionRanking(mixed ? PotionTier.FLAT_MIXED : PotionTier.FLAT_SINGLE, flatPrim);
+        }
+        if (hasRate && !hasFlat) {
+            boolean mixed = ratePrim > 0 && rateOther > 0;
+            return new PotionRanking(mixed ? PotionTier.RATE_MIXED : PotionTier.RATE_SINGLE, ratePrim);
+        }
+        // Hybrid flat+rate: rank as worst tier (mixed rate) so flat-only pots always win.
+        return new PotionRanking(PotionTier.RATE_MIXED, ratePrim > 0 ? ratePrim : flatPrim);
+    }
+
+    /** Pair of best autopot picks for the HP and MP slots over the bot's recovery pots. */
+    record AutopotChoice(int hpItemId, PotionRanking hpRank, int mpItemId, PotionRanking mpRank) {}
+
+    /** Shared selection used by both keybind setup and the debug report. */
+    static AutopotChoice computeAutopotChoice(Character bot) {
         int hpItemId = -1;
         int mpItemId = -1;
-        int bestHp = 0;
-        int bestMp = 0;
-        for (Item item : bot.getInventory(InventoryType.USE).list()) {
-            if (item.getQuantity() <= 0) {
-                continue;
-            }
-
-            StatEffect effect;
-            try {
-                effect = infoProvider.getItemEffect(item.getItemId());
-            } catch (Exception exception) {
-                continue;
-            }
+        PotionRanking bestHp = null;
+        PotionRanking bestMp = null;
+        for (Item item : recoveryPotions(bot)) {
+            StatEffect effect = BotInventoryManager.itemEffect(item.getItemId());
             if (effect == null) {
                 continue;
             }
-
-            int hpGain = resolveEffectiveRecoveryAmount(bot, effect, true);
-            if (hpGain > bestHp) {
-                bestHp = hpGain;
+            PotionRanking hpRank = classifyForSlot(effect, true);
+            if (hpRank != null && hpRank.betterThan(bestHp)) {
+                bestHp = hpRank;
                 hpItemId = item.getItemId();
             }
-
-            int mpGain = resolveEffectiveRecoveryAmount(bot, effect, false);
-            if (mpGain > bestMp) {
-                bestMp = mpGain;
+            PotionRanking mpRank = classifyForSlot(effect, false);
+            if (mpRank != null && mpRank.betterThan(bestMp)) {
+                bestMp = mpRank;
                 mpItemId = item.getItemId();
             }
         }
+        return new AutopotChoice(hpItemId, bestHp, mpItemId, bestMp);
+    }
 
-        if (hpItemId > 0) {
-            bot.changeKeybinding(91, new KeyBinding(2, hpItemId));
+    static void setupAutopotForBot(Character bot) {
+        AutopotChoice choice = computeAutopotChoice(bot);
+
+        if (choice.hpItemId() > 0) {
+            bot.changeKeybinding(91, new KeyBinding(2, choice.hpItemId()));
             bot.setAutopotHpAlert(BotManager.cfg.AUTOPOT_HP_THRESH);
         } else {
             bot.getKeymap().remove(91);
             bot.setAutopotHpAlert(0f);
         }
 
-        if (mpItemId > 0) {
-            bot.changeKeybinding(92, new KeyBinding(2, mpItemId));
+        if (choice.mpItemId() > 0) {
+            bot.changeKeybinding(92, new KeyBinding(2, choice.mpItemId()));
             bot.setAutopotMpAlert(BotManager.cfg.AUTOPOT_MP_THRESH);
         } else {
             bot.getKeymap().remove(92);
             bot.setAutopotMpAlert(0f);
         }
+    }
+
+    /** Owner-facing diagnostic: counts vs. selected items for each slot. */
+    static String autopotDebugReport(Character bot) {
+        int[] cnt = countPotions(bot);
+        AutopotChoice choice = computeAutopotChoice(bot);
+        ItemInformationProvider iip = ItemInformationProvider.getInstance();
+        return "pots: " + cnt[0] + " hp / " + cnt[1] + " mp"
+                + " | hp slot: " + describeChoice(iip, choice.hpItemId(), choice.hpRank())
+                + " | mp slot: " + describeChoice(iip, choice.mpItemId(), choice.mpRank());
+    }
+
+    private static String describeChoice(ItemInformationProvider iip, int itemId, PotionRanking rank) {
+        if (itemId <= 0 || rank == null) {
+            return "none";
+        }
+        String name = iip.getName(itemId);
+        if (name == null) name = String.valueOf(itemId);
+        String value = rank.tier().name().startsWith("FLAT_")
+                ? String.valueOf((int) rank.value())
+                : String.format("%.0f%%", rank.value() * 100);
+        return name + " (" + rank.tier().name() + "/" + value + ")";
     }
 
     static String grindStartMessage(Character bot) {
@@ -172,6 +250,7 @@ final class BotPotionManager {
         if (!entry.grinding && !entry.following) {
             return;
         }
+        BotAmmoManager.tickAmmoShareCheck(entry, bot);
 
         int[] pots = countPotions(bot);
         if (pots[0] >= BotManager.cfg.POT_LOW_WARN) {
@@ -190,8 +269,7 @@ final class BotPotionManager {
             return;
         }
         if (pots[0] < BotManager.cfg.POT_STOP && bot.getHp() < bot.getMaxHp() * 0.4f) {
-            entry.grinding = false;
-            entry.following = true;
+            BotManager.getInstance().issueFollowOwner(entry);
             BotManager.getInstance().botSay(bot, "low on pots!! walking to you");
             bot.changeFaceExpression(Emote.GLARE.getValue());
         }
@@ -200,6 +278,7 @@ final class BotPotionManager {
     static void checkPotShareOnModeStart(BotEntry entry, Character bot) {
         entry.potShareRequestedHp = false;
         entry.potShareRequestedMp = false;
+        BotAmmoManager.checkAmmoShareOnModeStart(entry, bot);
         int[] pots = countPotions(bot);
         if (pots[0] < BotManager.cfg.POT_LOW_WARN && requestPotShare(entry, bot, true)) {
             entry.potShareRequestedHp = true;
@@ -232,7 +311,7 @@ final class BotPotionManager {
         bot.addMPHP(hpRecovery, mpRecovery);
     }
 
-    private static boolean requestPotShare(BotEntry entry, Character bot, boolean forHp) {
+    static boolean requestPotShare(BotEntry entry, Character bot, boolean forHp) {
         Character owner = entry.owner;
         if (owner == null || bot.getTrade() != null || entry.pendingTradeCategory != null) {
             return false;
@@ -250,11 +329,54 @@ final class BotPotionManager {
 
         BotManager.getInstance().botSay(bot, BotManager.randomReply(forHp ? POT_REQUEST_HP_MSGS : POT_REQUEST_MP_MSGS));
 
-        List<BotEntry> siblings = BotManager.getInstance().getBotEntries(owner.getId());
+        PotDonorPlan plan = selectPotDonor(owner, bot, entry, forHp);
+        if (plan == null) {
+            categoryBackoff.put(owner.getId(), now + 10 * 60_000L);
+            return true;
+        }
+
+        if (!plan.qualifies()) {
+            categoryBackoff.put(owner.getId(), now + 10 * 60_000L);
+            String ownerName = owner.getName();
+            List<String> noQualMessages = List.of(
+                    "low too, maybe " + ownerName + " has some?",
+                    "wish i could help, try " + ownerName + "?",
+                    "i'm low too :/ check with " + ownerName,
+                    "barely have any myself, ask " + ownerName);
+            BotManager.after(BotManager.randMs(4000, 6000), () ->
+                    BotManager.getInstance().botSay(plan.entry().bot, BotManager.randomReply(noQualMessages)));
+        } else {
+            schedulePotShare(plan, bot, forHp, BotManager.randMs(2000, 3000));
+        }
+        return true;
+    }
+
+    enum OwnerPotShareResult {
+        OFFERED,
+        NO_DONOR,
+        BLOCKED
+    }
+
+    static OwnerPotShareResult offerPotShareToOwner(BotEntry entry, boolean forHp) {
+        Character owner = entry.owner;
+        if (owner == null || owner.getTrade() != null) {
+            return OwnerPotShareResult.BLOCKED;
+        }
+
+        PotDonorPlan plan = selectPotDonor(owner, owner, null, forHp);
+        if (plan == null || !plan.qualifies()) {
+            return OwnerPotShareResult.NO_DONOR;
+        }
+
+        schedulePotShare(plan, owner, forHp, BotManager.randMs(900, 1400));
+        return OwnerPotShareResult.OFFERED;
+    }
+
+    private static PotDonorPlan selectPotDonor(Character owner, Character recipient, BotEntry excludedEntry, boolean forHp) {
         BotEntry bestEntry = null;
         int bestCount = 0;
-        for (BotEntry sibling : siblings) {
-            if (sibling == entry || sibling.bot == null || sibling.bot.getMapId() != bot.getMapId()) {
+        for (BotEntry sibling : BotManager.getInstance().getBotEntries(owner.getId())) {
+            if (sibling == excludedEntry || sibling.bot == null || sibling.bot.getMapId() != recipient.getMapId()) {
                 continue;
             }
             int[] pots = countPotions(sibling.bot);
@@ -264,42 +386,35 @@ final class BotPotionManager {
                 bestEntry = sibling;
             }
         }
+        return bestEntry != null ? new PotDonorPlan(bestEntry, bestCount) : null;
+    }
 
-        if (bestEntry == null) {
-            categoryBackoff.put(owner.getId(), now + 10 * 60_000L);
-            return true;
-        }
-
-        BotEntry donorEntry = bestEntry;
+    private static void schedulePotShare(PotDonorPlan plan, Character recipient, boolean forHp, long initialDelayMs) {
+        BotEntry donorEntry = plan.entry();
         Character donorBot = donorEntry.bot;
-        boolean qualifies = bestCount > BotManager.cfg.POT_LOW_WARN * 3;
-        int maxQty = bestCount / 3;
-        Character needyBot = bot;
-        if (qualifies) {
-            BotManager.after(BotManager.randMs(2000, 3000), () -> {
-                if (donorBot.getTrade() != null || donorEntry.pendingTradeCategory != null) {
-                    return;
-                }
-                List<Item> items = BotInventoryManager.collectPotShareItems(donorBot, forHp, maxQty);
-                if (items.isEmpty()) {
-                    return;
-                }
-                BotManager.getInstance().botSay(donorBot, BotManager.randomReply(forHp ? POT_OFFER_HP_MSGS : POT_OFFER_MP_MSGS));
-                BotManager.after(BotManager.randMs(900, 1100), () ->
-                        BotInventoryManager.startPotShareTransfer(items, needyBot, donorEntry, donorBot, maxQty));
-            });
-        } else {
-            categoryBackoff.put(owner.getId(), now + 10 * 60_000L);
-            String ownerName = owner.getName();
-            List<String> noQualMessages = List.of(
-                    "low too, maybe " + ownerName + " has some?",
-                    "wish i could help, try " + ownerName + "?",
-                    "i'm low too :/ check with " + ownerName,
-                    "barely have any myself, ask " + ownerName);
-            BotManager.after(BotManager.randMs(4000, 6000), () ->
-                    BotManager.getInstance().botSay(donorBot, BotManager.randomReply(noQualMessages)));
+        int maxQty = plan.donationQty();
+        BotManager.after(initialDelayMs, () -> {
+            if (donorBot.getTrade() != null || donorEntry.pendingTradeCategory != null || recipient.getTrade() != null) {
+                return;
+            }
+            List<Item> items = BotInventoryManager.collectPotShareItems(donorBot, forHp, maxQty);
+            if (items.isEmpty()) {
+                return;
+            }
+            BotManager.getInstance().botSay(donorBot, BotManager.randomReply(forHp ? POT_OFFER_HP_MSGS : POT_OFFER_MP_MSGS));
+            BotManager.after(BotManager.randMs(900, 1100), () ->
+                    BotInventoryManager.startPotShareTransfer(items, recipient, donorEntry, donorBot, maxQty));
+        });
+    }
+
+    private record PotDonorPlan(BotEntry entry, int count) {
+        boolean qualifies() {
+            return count > BotManager.cfg.POT_LOW_WARN * 3;
         }
-        return true;
+
+        int donationQty() {
+            return count / 3;
+        }
     }
 
     private static int calculatePassiveHpRecovery(BotEntry entry, Character bot) {
@@ -329,7 +444,7 @@ final class BotPotionManager {
         if (entry.inAir || entry.climbing) {
             return false;
         }
-        return entry.lastDesiredDirection == 0
+        return entry.moveDir == 0
                 && BotPhysicsEngine.isStandingStance(BotPhysicsEngine.resolveStance(entry));
     }
 
@@ -369,19 +484,4 @@ final class BotPotionManager {
         return Math.max(0, (bot.getInt() / 10) * level);
     }
 
-    private static int resolveEffectiveRecoveryAmount(Character bot, StatEffect effect, boolean hp) {
-        if (effect == null) {
-            return 0;
-        }
-        int flat = hp ? effect.getHp() : effect.getMp();
-        if (flat > 0) {
-            return flat;
-        }
-        double rate = hp ? effect.getHpRate() : effect.getMpRate();
-        if (rate <= 0) {
-            return 0;
-        }
-        int max = hp ? bot.getCurrentMaxHp() : bot.getCurrentMaxMp();
-        return (int) Math.ceil(max * rate);
-    }
 }

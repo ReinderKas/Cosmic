@@ -84,6 +84,10 @@ class BotMovementManager {
 
         public int JUMP_Y_THRESH = 30;
         public int TELEPORT_DIST = 4000;
+        // Tighter teleport trigger when the bot has slipped outside the map's VR rectangle.
+        // Long falls below VRBottom never collide with anything and otherwise wait until the
+        // 4000 Manhattan threshold; this lets us recover sooner once we know the bot is OOB.
+        public int OOB_TELEPORT_DIST = 600;
         public int FOLLOW_Y_CAP = 200; // max vertical distance for Y-snapped follow target
     }
 
@@ -251,16 +255,16 @@ class BotMovementManager {
     }
 
     private static void applyClimbAction(BotEntry entry, Character bot, MoveAction action) {
-        int climbDir = switch (action.type()) {
+        entry.climbVerticalDir = switch (action.type()) {
             case CLIMB_UP -> -1;
             case CLIMB_DOWN -> 1;
             default -> 0;
         };
 
-        if (climbDir == 0) {
+        if (entry.climbVerticalDir == 0) {
             BotPhysicsEngine.holdClimb(entry, bot);
         } else {
-            BotPhysicsEngine.advanceClimb(entry, bot, climbDir);
+            BotPhysicsEngine.advanceClimb(entry, bot);
         }
         broadcastMovement(entry);
     }
@@ -293,6 +297,7 @@ class BotMovementManager {
     static void tickAirborne(BotEntry entry, Point targetPos) {
         long startedAt = System.nanoTime();
         try {
+            entry.swimming = false;
             BotPhysicsEngine.tickMotionTimers(entry);
 
             Character bot = entry.bot;
@@ -302,12 +307,13 @@ class BotMovementManager {
                 return;
             }
 
-            // Air steering is only for freeform airborne control.
-            // Committed nav jumps/drops must follow the same fixed ballistic path used by
-            // graph generation and canExecuteJumpFromCurrentPosition; steering here causes
-            // diagonal jumps onto sloped/angled platforms to overshoot or undershoot.
-            if (targetPos != null && shouldApplyAirSteering(entry)) {
-                BotPhysicsEngine.applyAirSteering(entry, targetPos.x - botPos.x);
+            // Set air steering intent. Gated by shouldApplyAirSteering to preserve
+            // fixed ballistic path for committed nav jumps/drops.
+            // If fidget manager already set moveDir (non-zero), preserve it.
+            if (entry.moveDir == 0 && targetPos != null && shouldApplyAirSteering(entry)) {
+                int dx = targetPos.x - botPos.x;
+                entry.moveDir = Math.abs(dx) > BotPhysicsEngine.cfg.SWIM_ARRIVAL_RADIUS_PX
+                        ? Integer.signum(dx) : 0;
             }
 
             BotPhysicsEngine.AirborneStepResult result = BotPhysicsEngine.stepAirborne(entry, bot);
@@ -315,6 +321,10 @@ class BotMovementManager {
                 if (successfullyGrabbedRope(entry, bot, bot.getPosition())) {
                     return;
                 }
+                broadcastMovement(entry);
+                return;
+            }
+            if (result == BotPhysicsEngine.AirborneStepResult.CEILING) {
                 broadcastMovement(entry);
                 return;
             }
@@ -382,9 +392,99 @@ class BotMovementManager {
                 && entry.navEdge.launchStepX != 0);
     }
 
+    static void tickSwimming(BotEntry entry, Point targetPos) {
+        long startedAt = System.nanoTime();
+        try {
+            BotPhysicsEngine.tickMotionTimers(entry);
+            computeSwimIntents(entry, targetPos);
+            BotPhysicsEngine.applySwimMotion(entry);
+            broadcastMovement(entry);
+        } finally {
+            BotPerformanceMonitor.record("move-swim", System.nanoTime() - startedAt);
+        }
+    }
+
+    /**
+     * Translate a nav target into the discrete swim controls the real client exposes:
+     * steer L/R (continuous), JUMP burst (one-shot), UP/DOWN held.
+     * No continuous velocity steering — physics integrates the intents.
+     */
+    private static void computeSwimIntents(BotEntry entry, Point targetPos) {
+        // Capture last vertical hold for hysteresis. Without sticky-middle,
+        // a target sinking faster than the bot's UP-terminal sink rate causes
+        // dy to oscillate across the LEVEL_BAND boundary every tick — bot
+        // alternates UP-hold (slow sink) and free-sink, visibly stuttering.
+        int prevVerticalHold = entry.swimVerticalHold;
+
+        // Default to "no input": bot drifts under swim gravity.
+        entry.swimMoveDir = 0;
+        entry.swimVerticalHold = 0;
+        entry.swimJumpRequested = false;
+
+        // Player can't dispatch movement input (strafe/jump/up/down) while
+        // CUserLocal::IsAttacking is true. Mirror that here: during animation
+        // lock the integrator still ticks (drag + gravity, collision) but no
+        // intent is set, so the bot just floats in place.
+        if (entry.attackCooldownMs > 0) {
+            return;
+        }
+
+        if (targetPos == null) {
+            // Idle in water — hold UP so the bot doesn't sink endlessly.
+            entry.swimVerticalHold = -1;
+            return;
+        }
+
+        Point pos = entry.bot.getPosition();
+        int dx = targetPos.x - pos.x;
+        int dy = targetPos.y - pos.y;
+
+        // Horizontal steer.
+        int hRadius = BotPhysicsEngine.cfg.SWIM_ARRIVAL_RADIUS_PX;
+        if (dx >  hRadius) entry.swimMoveDir =  1;
+        else if (dx < -hRadius) entry.swimMoveDir = -1;
+
+        // Arrival band: bot is essentially on top of the target both axes.
+        // Hold UP just to maintain altitude, no burst, no horizontal push —
+        // prevents the jump/sink oscillation when bot overshoots target by a
+        // few px (was: any dy<0 fired a 1000+ px/s burst, then bot fell back
+        // through level, repeat).
+        int levelBand = BotPhysicsEngine.cfg.SWIM_LEVEL_BAND_PX;
+        if (Math.abs(dx) <= hRadius && Math.abs(dy) <= levelBand) {
+            entry.swimMoveDir = 0;
+            entry.swimVerticalHold = -1;
+            return;
+        }
+
+        // Vertical intent with hysteresis around band boundaries. The middle
+        // band (LEVEL < dy <= DOWN) is "sticky" — we keep whichever hold was
+        // active last tick so the bot doesn't flip-flop between UP and free
+        // sink as dy crosses LEVEL_BAND each frame while chasing a target
+        // that sinks faster than UP-terminal.
+        long now = System.currentTimeMillis();
+        int jumpTrigger = BotPhysicsEngine.cfg.SWIM_JUMP_TRIGGER_DY_PX;
+        int downBand = BotPhysicsEngine.cfg.SWIM_DOWN_BAND_PX;
+        if (dy <= -jumpTrigger && now >= entry.swimNextJumpAtMs) {
+            entry.swimJumpRequested = true;
+            entry.swimNextJumpAtMs = now + BotPhysicsEngine.cfg.SWIM_JUMP_COOLDOWN_MS;
+            entry.swimVerticalHold = -1;
+        } else if (dy <= levelBand) {
+            entry.swimVerticalHold = -1;        // clearly above target → UP
+        } else if (dy > downBand) {
+            entry.swimVerticalHold = 1;         // clearly far below → DOWN
+        } else {
+            // Middle band: persist last hold to avoid stutter. If we were
+            // sinking (free or DOWN), keep that — UP would just slow our
+            // descent and let target pull further away. If we were UP-holding
+            // and now drifted past LEVEL, switch to free sink so we catch up.
+            entry.swimVerticalHold = prevVerticalHold > 0 ? 1 : 0;
+        }
+    }
+
     static void tickGrounded(BotEntry entry, Point targetPos) {
         long startedAt = System.nanoTime();
         try {
+            entry.swimming = false;
             Character bot = entry.bot;
 
             BotPhysicsEngine.tickMotionTimers(entry);
@@ -399,6 +499,25 @@ class BotMovementManager {
             if (entry.downJumpPending) {
                 performDownJump(entry);
                 return;
+            }
+
+            // Swim maps: if standing on a platform with the target directly
+            // below (e.g. owner mid-water under our feet), drop through. The
+            // grounded path otherwise just walks to the target X and stalls
+            // on the platform because there's no graph drop edge in swim
+            // (graph routing is short-circuited for swim maps).
+            if (targetPos != null
+                    && bot.getMap() != null
+                    && bot.getMap().isSwim()
+                    && !currentFh.isForbidFallDown()) {
+                int dy = targetPos.y - botPos.y;
+                int dx = Math.abs(targetPos.x - botPos.x);
+                if (dy > BotPhysicsEngine.cfg.SWIM_LEVEL_BAND_PX
+                        && dx <= BotPhysicsEngine.cfg.SWIM_ARRIVAL_RADIUS_PX * 4) {
+                    BotPhysicsEngine.queueDownJump(entry, bot);
+                    broadcastMovement(entry);
+                    return;
+                }
             }
 
             targetPos = adjustGrindingTargetPosition(entry, currentFh, targetPos);
@@ -418,13 +537,16 @@ class BotMovementManager {
     /**
      * Stop-distance used when navPreciseTarget is true.
      * WALK edges use 4px to absorb terrain micro-bumps on sloped footholds.
-     * All other precise edge types (JUMP, straight DROP, CLIMB, PORTAL) use 1px — the bot
-     * must reach the exact entry anchor for jump/climb simulations to succeed reliably.
+     * JUMP and straight down-jump DROP edges use 0px because the bot must walk INTO the
+     * authored launch window, not stop just outside it. Other precise edge types
+     * (CLIMB, PORTAL, non-windowed fallback cases) use 1px to reach the exact anchor.
      */
     static int preciseNavStopDist(BotNavigationGraph.Edge navEdge) {
-        if (navEdge != null && navEdge.type == BotNavigationGraph.EdgeType.JUMP) {
-            // Bot must walk INTO the launch window, not just near it. isWithinJumpLaunchWindow is
-            // a strict >= check, so stopDist=1 would halt the bot exactly 1px before the window.
+        if (navEdge != null
+                && (navEdge.type == BotNavigationGraph.EdgeType.JUMP
+                || (navEdge.type == BotNavigationGraph.EdgeType.DROP && navEdge.launchStepX == 0))) {
+            // Bot must walk INTO the launch window, not just near it. The launch window checks
+            // are strict, so stopDist=1 can halt the bot exactly 1px before the valid range.
             return 0;
         }
         if (navEdge != null && navEdge.type != BotNavigationGraph.EdgeType.WALK) {
@@ -613,7 +735,7 @@ class BotMovementManager {
 
     private static void applyGroundAction(BotEntry entry, Foothold currentFh, MoveAction action) {
         Character bot = entry.bot;
-        entry.lastDesiredDirection = switch (action.type()) {
+        entry.moveDir = switch (action.type()) {
             case WALK, JUMP -> Integer.compare(action.stepX(), 0);
             default -> 0;
         };
@@ -629,7 +751,7 @@ class BotMovementManager {
         }
 
         BotPhysicsEngine.GroundMotion motion =
-                BotPhysicsEngine.applyGroundMotion(entry, bot, currentFh, entry.lastDesiredDirection);
+                BotPhysicsEngine.applyGroundMotion(entry, bot, currentFh);
         if (motion.lostGround()) {
             broadcastMovement(entry);
             return;
@@ -736,13 +858,15 @@ class BotMovementManager {
         int x = bot.getPosition().x;
         int y = bot.getPosition().y;
         BotPhysicsEngine.MovementSnapshot snapshot = BotPhysicsEngine.movementSnapshot(entry);
+        int fhId = resolveBroadcastFhId(entry, bot);
 
         if (entry.movementBroadcastValid
                 && entry.lastBroadcastX == x
                 && entry.lastBroadcastY == y
                 && entry.lastBroadcastVelX == snapshot.velX()
                 && entry.lastBroadcastVelY == snapshot.velY()
-                && entry.lastBroadcastStance == snapshot.stance()) {
+                && entry.lastBroadcastStance == snapshot.stance()
+                && entry.lastBroadcastFh == fhId) {
             return;
         }
 
@@ -752,10 +876,23 @@ class BotMovementManager {
         entry.lastBroadcastVelX = snapshot.velX();
         entry.lastBroadcastVelY = snapshot.velY();
         entry.lastBroadcastStance = snapshot.stance();
-        sendMovementPacket(bot, snapshot);
+        entry.lastBroadcastFh = fhId;
+        sendMovementPacket(bot, snapshot, fhId);
     }
 
-    private static void sendMovementPacket(Character bot, BotPhysicsEngine.MovementSnapshot snapshot) {
+    // Real clients report the foothold ID they're standing on in every move packet; the
+    // client uses it to pick the render z-layer. Without it, bots draw on the top layer
+    // (in front of tiles/walls). While airborne, clients keep sending the last-known
+    // ground fh, so cache it on the bot entry.
+    private static int resolveBroadcastFhId(BotEntry entry, Character bot) {
+        Foothold fh = BotPhysicsEngine.findGroundFoothold(bot.getMap(), bot.getPosition());
+        if (fh != null) {
+            entry.lastGroundFhId = fh.getId();
+        }
+        return entry.lastGroundFhId;
+    }
+
+    private static void sendMovementPacket(Character bot, BotPhysicsEngine.MovementSnapshot snapshot, int fhId) {
         byte[] data = new byte[15];
         data[0] = 1;
         int x = bot.getPosition().x;
@@ -768,6 +905,8 @@ class BotMovementManager {
         data[7] = (byte) (snapshot.velX() >> 8);
         data[8] = (byte) (snapshot.velY() & 0xFF);
         data[9] = (byte) (snapshot.velY() >> 8);
+        data[10] = (byte) (fhId & 0xFF);
+        data[11] = (byte) (fhId >> 8);
         data[12] = (byte) snapshot.stance();
         data[13] = (byte) (BotPhysicsEngine.cfg.TICK_MS & 0xFF);
         data[14] = (byte) (BotPhysicsEngine.cfg.TICK_MS >> 8);

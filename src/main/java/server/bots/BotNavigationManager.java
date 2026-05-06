@@ -59,6 +59,17 @@ final class BotNavigationManager {
                 clearNavigation(entry);
                 return new NavigationDirective(rawTargetPos, false);
             }
+            if (bot.getMap().isSwim()) {
+                // Swim maps don't use a swim-aware nav graph. Airborne motion is handled
+                // by the swim integrator (tickSwimming); on platforms we still need
+                // ledge-drops, ropes, and ground jumps. Engage the heuristic fallback —
+                // it walks off ledges into water, picks up nearby ropes, and jumps onto
+                // higher platforms when useful. tickSwimming consults targetPos directly,
+                // so the same rawTargetPos works for both grounded and airborne paths.
+                entry.graphWarmupFallback = true;
+                clearNavigation(entry);
+                return new NavigationDirective(rawTargetPos, false);
+            }
 
             BotNavigationGraph graph = resolveActiveGraph(bot.getMap(), entry.movementProfile);
             if (graph == null) {
@@ -91,6 +102,14 @@ final class BotNavigationManager {
                 if (refreshedEdge != edge) {
                     edge = refreshedEdge;
                     edgeReused = edge != null;
+                }
+                if (edgeReused) {
+                    BotNavigationGraph.Edge refreshedGroundEdge = refreshCommittedGroundEdge(
+                            graph, entry, bot, startRegionId, targetRegionId, pathTargetPos, edge, runAiTick);
+                    if (refreshedGroundEdge != edge) {
+                        edge = refreshedGroundEdge;
+                        edgeReused = edge != null;
+                    }
                 }
             }
             if (edge == null && runAiTick && startRegionId >= 0 && targetRegionId >= 0 && startRegionId != targetRegionId) {
@@ -178,9 +197,12 @@ final class BotNavigationManager {
         return new BotManager.TargetSnapshot(
                 snapshot.formation(),
                 snapshot.rawOwnerPos(),
+                snapshot.followAnchorPos(),
+                snapshot.followAnchorName(),
                 snapshot.followBasePos(),
                 snapshot.followTargetPos(),
                 snapshot.moveTargetPos(),
+                snapshot.farmAnchorPos(),
                 snapshot.grindTargetPos(),
                 new Point(rawTargetPos),
                 "nav-input");
@@ -231,6 +253,39 @@ final class BotNavigationManager {
 
         BotNavigationGraph.Edge bestEdge = findNextEdge(graph, bot, startRegionId, targetRegionId, targetPos);
         if (sameEdge(edge, bestEdge) || bestEdge == null) {
+            return edge;
+        }
+
+        entry.navEdge = bestEdge;
+        entry.navTargetRegionId = targetRegionId;
+        entry.navTargetPos = null;
+        entry.navPreciseTarget = false;
+        return bestEdge;
+    }
+
+    private static BotNavigationGraph.Edge refreshCommittedGroundEdge(BotNavigationGraph graph,
+                                                                      BotEntry entry,
+                                                                      Character bot,
+                                                                      int startRegionId,
+                                                                      int targetRegionId,
+                                                                      Point targetPos,
+                                                                      BotNavigationGraph.Edge edge,
+                                                                      boolean runAiTick) {
+        if (!runAiTick
+                || edge == null
+                || entry.inAir
+                || entry.climbing
+                || startRegionId < 0
+                || targetRegionId < 0
+                || startRegionId == targetRegionId) {
+            return edge;
+        }
+
+        BotNavigationGraph.Edge bestEdge = findNextEdge(graph, bot, startRegionId, targetRegionId, targetPos);
+        if (bestEdge == null || sameEdge(edge, bestEdge)) {
+            return edge;
+        }
+        if (shouldRetainCommittedGroundEdge(edge, bestEdge)) {
             return edge;
         }
 
@@ -422,6 +477,11 @@ final class BotNavigationManager {
             startClimbing(entry, bot, rope, botPos.y);
             return new NavigationDirective(rawTargetPos, true);
         }
+        if (canAttachToRopeFromTopPlatform(edge, botPos, rope)) {
+            entry.lastEdgeBlockReason = null;
+            startClimbing(entry, bot, rope, edge.endPoint.y);
+            return new NavigationDirective(rawTargetPos, true);
+        }
         if (canGrabRopeFromTopPlatform(edge, botPos, rope)) {
             // Bot is on a platform above the rope top. Do NOT call startClimbing here —
             // that would teleport the bot downward. Instead queue a down-jump and let
@@ -433,9 +493,9 @@ final class BotNavigationManager {
             return new NavigationDirective(rawTargetPos, true);
         }
 
-        if (isReadyForEdge(botPos, edge)) {
+        if (canExecuteGroundRopeJumpEntryFromCurrentPosition(botPos, edge)) {
             entry.lastEdgeBlockReason = null;
-            BotMovementManager.initiateRopeJump(entry, bot, rope.x() - botPos.x);
+            BotMovementManager.initiateRopeJump(entry, bot, edge.launchStepX);
             return new NavigationDirective(rawTargetPos, true);
         }
 
@@ -473,6 +533,10 @@ final class BotNavigationManager {
         }
 
         // Jump off rope
+        Rope sourceRope = findRopeForRegion(bot.getMap(), graph.getRegion(edge.fromRegionId));
+        if (isTopRopeJumpExitReady(sourceRope, botPos, edge) && botPos.y != edge.startPoint.y) {
+            startClimbing(entry, bot, sourceRope, edge.startPoint.y);
+        }
         BotMovementManager.jumpOffRope(entry, bot, edge.launchStepX);
         return new NavigationDirective(rawTargetPos, true);
     }
@@ -487,7 +551,7 @@ final class BotNavigationManager {
         if (edge.launchStepX != 0) {
             return false;
         }
-        if (!isReadyForEdge(botPos, edge)) {
+        if (!isWithinDropLaunchWindow(graph, botPos, edge)) {
             return false;
         }
         return true;
@@ -603,8 +667,18 @@ final class BotNavigationManager {
                                     BotNavigationGraph graph,
                                     Point botPos,
                                     BotNavigationGraph.Edge edge) {
-        if (entry.inAir || edge.launchStepX == 0) {
-            return entry.inAir ? new Point(edge.endPoint) : new Point(edge.startPoint);
+        if (entry.inAir) {
+            return new Point(edge.endPoint);
+        }
+        if (edge.launchStepX == 0) {
+            BotNavigationGraph.Region fromRegion = graph != null ? graph.getRegion(edge.fromRegionId) : null;
+            if (fromRegion == null || fromRegion.isRopeRegion) {
+                return new Point(edge.startPoint);
+            }
+            int targetX = edge.containsLaunchX(botPos.x)
+                    ? botPos.x
+                    : botPos.x < edge.launchMinX ? edge.launchMinX : edge.launchMaxX;
+            return fromRegion.pointAt(targetX);
         }
 
         if (hasReachedDirectionalDropRunway(botPos, edge)) {
@@ -835,6 +909,23 @@ final class BotNavigationManager {
                 && left.endPoint.equals(right.endPoint));
     }
 
+    static boolean shouldRetainCommittedGroundEdge(BotNavigationGraph.Edge current,
+                                                   BotNavigationGraph.Edge replacement) {
+        if (current == null || replacement == null) {
+            return false;
+        }
+        if (current.fromRegionId != replacement.fromRegionId
+                || current.toRegionId != replacement.toRegionId) {
+            return false;
+        }
+        // Equivalent first exits into the same downstream region can trade off a few pixels of
+        // approach cost as the bot shuffles on the source platform. Replacing the committed edge
+        // every AI tick creates oscillation loops like the John 2026-05-01 down-jump trace,
+        // where nav flips between a straight DROP and a nearby JUMP before either can execute.
+        return current.type != BotNavigationGraph.EdgeType.WALK
+                && replacement.type != BotNavigationGraph.EdgeType.WALK;
+    }
+
     private static boolean isEdgeUsable(BotNavigationGraph graph, MapleMap map, BotNavigationGraph.Edge edge) {
         return switch (edge.type) {
             case WALK, JUMP, DROP, CLIMB -> true;
@@ -943,6 +1034,29 @@ final class BotNavigationManager {
         return Math.abs(botPos.y - expectedLaunchPoint.y) <= BotMovementManager.cfg.JUMP_Y_THRESH;
     }
 
+    static boolean isWithinDropLaunchWindow(BotNavigationGraph graph,
+                                            Point botPos,
+                                            BotNavigationGraph.Edge edge) {
+        if (botPos == null
+                || edge.type != BotNavigationGraph.EdgeType.DROP
+                || edge.launchStepX != 0
+                || !edge.containsLaunchX(botPos.x)) {
+            return false;
+        }
+
+        if (graph == null) {
+            return Math.abs(botPos.y - edge.startPoint.y) <= BotMovementManager.cfg.JUMP_Y_THRESH;
+        }
+
+        BotNavigationGraph.Region fromRegion = graph.getRegion(edge.fromRegionId);
+        if (fromRegion == null || fromRegion.isRopeRegion) {
+            return false;
+        }
+
+        Point expectedLaunchPoint = fromRegion.pointAt(botPos.x);
+        return Math.abs(botPos.y - expectedLaunchPoint.y) <= BotMovementManager.cfg.JUMP_Y_THRESH;
+    }
+
     private static int selectedJumpLaunchX(BotEntry entry,
                                            BotNavigationGraph graph,
                                            BotNavigationGraph.Edge edge) {
@@ -1014,8 +1128,15 @@ final class BotNavigationManager {
 
     private static boolean canGrabRopeAtCurrentPosition(Point botPos, Rope rope) {
         return Math.abs(botPos.x - rope.x()) <= BotMovementManager.cfg.ROPE_GRAB_X
-                && botPos.y >= rope.topY()
+                && botPos.y >= BotPhysicsEngine.firstClimbableY(rope)
                 && botPos.y <= rope.bottomY();
+    }
+
+    private static boolean canAttachToRopeFromTopPlatform(BotNavigationGraph.Edge edge, Point botPos, Rope rope) {
+        return Math.abs(botPos.x - rope.x()) <= BotMovementManager.cfg.ROPE_GRAB_X
+                && edge.endPoint.y == BotPhysicsEngine.firstClimbableY(rope)
+                && botPos.y < rope.topY()
+                && rope.topY() - botPos.y <= BotPhysicsEngine.cfg.MAX_SNAP_DROP;
     }
 
     private static boolean canGrabRopeFromTopPlatform(BotNavigationGraph.Edge edge, Point botPos, Rope rope) {
@@ -1028,8 +1149,18 @@ final class BotNavigationManager {
                                                                    BotNavigationGraph.Edge edge,
                                                                    Rope rope) {
         return rope != null && (canGrabRopeAtCurrentPosition(botPos, rope)
+                || canAttachToRopeFromTopPlatform(edge, botPos, rope)
                 || canGrabRopeFromTopPlatform(edge, botPos, rope)
-                || isReadyForEdge(botPos, edge));
+                || canExecuteGroundRopeJumpEntryFromCurrentPosition(botPos, edge));
+    }
+
+    private static boolean canExecuteGroundRopeJumpEntryFromCurrentPosition(Point botPos,
+                                                                           BotNavigationGraph.Edge edge) {
+        if (botPos == null || edge == null || edge.type != BotNavigationGraph.EdgeType.CLIMB) {
+            return false;
+        }
+        return edge.containsLaunchX(botPos.x)
+                && Math.abs(botPos.y - edge.startPoint.y) <= BotMovementManager.cfg.JUMP_Y_THRESH * 2;
     }
 
     private static boolean canExecuteClimbExitFromCurrentPosition(BotNavigationGraph graph,
@@ -1040,11 +1171,14 @@ final class BotNavigationManager {
             return false;
         }
 
-        // Rope-exit jump edges are authored from a specific climb height. Allow launching from
-        // that height or higher on the rope, but never from below it where the jump arc drops
-        // under the intended platform and runtime/graph behavior diverge.
-        if (edge.launchStepX != 0 && botPos.y > edge.startPoint.y) {
-            return false;
+        if (edge.launchStepX != 0 && botPos.y != edge.startPoint.y) {
+            Rope rope = findRopeForRegion(map, graph.getRegion(edge.fromRegionId));
+            if (!isTopRopeJumpExitReady(rope, botPos, edge)) {
+                // Rope-exit jump edges are authored from a specific climb height. Launching from
+                // any other Y changes the ballistic arc; climb movement reaches the authored
+                // first climbable pixel before this executes.
+                return false;
+            }
         }
 
         BotNavigationGraph.Region toRegion = graph.getRegion(edge.toRegionId);
@@ -1058,6 +1192,18 @@ final class BotNavigationManager {
         }
 
         return Math.abs(botPos.y - edge.startPoint.y) <= BotMovementManager.cfg.JUMP_Y_THRESH * 2;
+    }
+
+    private static boolean isTopRopeJumpExitReady(Rope rope, Point botPos, BotNavigationGraph.Edge edge) {
+        if (rope == null || botPos == null || edge == null || edge.launchStepX == 0) {
+            return false;
+        }
+        int firstClimbableY = BotPhysicsEngine.firstClimbableY(rope);
+        return edge.startPoint.x == rope.x()
+                && edge.startPoint.y == firstClimbableY
+                && botPos.x == rope.x()
+                && botPos.y >= firstClimbableY
+                && botPos.y <= firstClimbableY + BotPhysicsEngine.climbStepPerTick() + 2;
     }
 
     private static void startClimbing(BotEntry entry, Character bot, Rope rope, int climbY) {
@@ -1104,11 +1250,12 @@ final class BotNavigationManager {
                                       BotEntry entry,
                                       MapleMap map,
                                       Point botPos) {
-        if (entry.climbing && entry.climbRope != null) {
+        if (entry.climbing || (entry.bot != null && CharacterStance.isClimbing(entry.bot.getStance()))) {
             // Rope climbing state is authoritative. Ground lookup below a rope often resolves to
             // the nearby platform instead of the rope region, which can replan from the wrong side
             // of the rope and bounce between entry/exit climb edges.
-            int ropeRegionId = graph.findRopeRegionId(new Point(entry.climbRope.x(), botPos.y));
+            int ropeX = entry.climbRope != null ? entry.climbRope.x() : botPos.x;
+            int ropeRegionId = graph.findRopeRegionId(new Point(ropeX, botPos.y));
             if (ropeRegionId >= 0) {
                 return ropeRegionId;
             }
@@ -1132,8 +1279,30 @@ final class BotNavigationManager {
         }
 
         Character owner = entry.owner;
-        if (!entry.grinding && owner != null && owner.getMap() == map && targetPos.equals(owner.getPosition())) {
-            return resolveCharacterRegionId(graph, map, owner);
+        Character followAnchor = BotManager.getInstance().resolveFollowAnchor(entry, owner);
+        if (entry.following
+                && entry.moveTarget == null
+                && entry.farmAnchor == null
+                && !entry.shopVisitPending
+                && !entry.grinding
+                && followAnchor != null
+                && followAnchor.getMap() == map) {
+            // Follow mode + owner climbing: prioritise a rope target. The follow
+            // resolver may have already snapped targetPos to a rope's X, so the
+            // exact equality check below would miss — explicitly look for a rope
+            // at targetPos, and fall back to the follow anchor's own rope region if none
+            // is found there. This keeps the bot climbing onto rope alongside
+            // the anchor instead of clamping to the platform below the rope.
+            if (CharacterStance.isClimbing(followAnchor.getStance())) {
+                int ropeRegionId = graph.findRopeRegionId(targetPos);
+                if (ropeRegionId >= 0) {
+                    return ropeRegionId;
+                }
+                return resolveCharacterRegionId(graph, map, followAnchor);
+            }
+            if (targetPos.equals(followAnchor.getPosition())) {
+                return resolveCharacterRegionId(graph, map, followAnchor);
+            }
         }
 
         return resolvePointTargetRegionId(graph, map, targetPos);
@@ -1161,9 +1330,9 @@ final class BotNavigationManager {
         return resolvePointTargetRegionId(graph, map, position);
     }
 
-    private static int resolvePointTargetRegionId(BotNavigationGraph graph,
-                                                  MapleMap map,
-                                                  Point position) {
+    static int resolvePointTargetRegionId(BotNavigationGraph graph,
+                                          MapleMap map,
+                                          Point position) {
         int ropeRegionId = graph.findRopeRegionId(position);
         if (ropeRegionId >= 0 && shouldPreferRopeRegion(map, position)) {
             return ropeRegionId;

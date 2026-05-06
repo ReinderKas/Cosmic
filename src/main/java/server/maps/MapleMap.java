@@ -157,6 +157,7 @@ public class MapleMap {
     private int fieldType;
     private float footholdSpeed = 1.0f;
     private int fieldLimit = 0;
+    private boolean swim = false;
     private int mobCapacity = -1;
     private MonsterAggroCoordinator aggroMonitor = null;   // aggroMonitor activity in sync with itemMonitor
     private ScheduledFuture<?> itemMonitor = null;
@@ -2729,6 +2730,7 @@ public class MapleMap {
     }
 
     private void broadcastMessage(Character source, Packet packet, double rangeSq, Point rangedFrom) {
+        net.packet.logging.MonitoredChrLogger.logBroadcastIfMonitored(source, packet.getBytes());
         chrRLock.lock();
         try {
             for (Character chr : characters) {
@@ -3795,6 +3797,14 @@ public class MapleMap {
 
     public int getFieldLimit() {
         return fieldLimit;
+    }
+
+    public boolean isSwim() {
+        return swim;
+    }
+
+    public void setSwim(boolean swim) {
+        this.swim = swim;
     }
 
     public void allowSummonState(boolean b) {

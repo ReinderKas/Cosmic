@@ -29,3 +29,6 @@ database/docker-pg-db-data
 .DS_Store
 cache/
 tmp/
+.qwen/
+models/
+.m2/

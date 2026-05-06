@@ -41,7 +41,7 @@ class BotBuildManager {
     static void setApBuild(BotEntry entry, ApBuild build, String confirmMsg) {
         entry.apBuild = build;
         entry.apPromptSent = false;
-        BotManager.getInstance().botSay(entry.bot, confirmMsg);
+        BotManager.getInstance().botReply(entry, confirmMsg);
         autoAssignAp(entry, entry.bot);
     }
 
@@ -257,16 +257,16 @@ class BotBuildManager {
             return null;
         }
         if (job.isA(Job.WARRIOR)) {
-            return "what AP build? type 'dexless' or e.g. '25 dex' to set a dex target";
+            return "what AP build? type 'dexless'/'pure' or e.g. '25 dex' to set a dex target";
         }
         if (job.isA(Job.MAGICIAN)) {
-            return "what AP build? type 'lukless' or e.g. '25 luk' to set a luk target";
+            return "what AP build? type 'lukless'/'pure' or e.g. '25 luk' to set a luk target";
         }
         if (job.isA(Job.BOWMAN)) {
-            return "what AP build? type 'strless' or e.g. '25 str' to set a str target";
+            return "what AP build? type 'strless'/'pure' or e.g. '25 str' to set a str target";
         }
         if (job.isA(Job.THIEF)) {
-            return "what AP build? type 'dexless' or e.g. '25 dex' to set a dex target";
+            return "what AP build? type 'dexless'/'pure' or e.g. '25 dex' to set a dex target";
         }
         return null;
     }
@@ -296,8 +296,7 @@ class BotBuildManager {
         }
 
         if (lvl == 8 || lvl == 10 || lvl == 30 || lvl == 70 || lvl == 120) {
-            entry.grinding = false;
-            entry.following = true;
+            BotManager.getInstance().issueFollowOwner(entry);
             BotChatManager.checkBotStatus(entry, bot);
         }
 

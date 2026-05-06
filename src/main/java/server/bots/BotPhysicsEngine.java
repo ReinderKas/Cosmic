@@ -15,6 +15,7 @@ final class BotPhysicsEngine {
     private static final double CLIENT_GROUND_STEP_MS = 8.0;
     private static final double CLIENT_GROUND_STEP_S = CLIENT_GROUND_STEP_MS / 1000.0;
     private static final int REGION_STITCH_GAP_PX = 2;
+    private static final int SYNTHETIC_MAP_BOUND_SIZE = 1 << 18;
     // Max horizontal gap between adjacent foothold endpoints that the bot can walk across.
     // Shared with BotNavigationGraphProvider so walk-edge generation and physics agree.
     static final int WALK_GAP_PX = 12;
@@ -25,13 +26,14 @@ final class BotPhysicsEngine {
         // Values below calibrated against real-client CP_USER_MOVE packet captures
         // (monitored-packets logs for speed=100/jump=100 walk, long-fall terminal
         // velocity, and rope climb/jump). Old values kept in comments for reference.
-        public int WALK_VEL = 125;                  // was 150 (real client walkSpeed = 125 px/s)
-
-        public float GRAVITY_PXS2 = 2000.0f;        // was 2187.5f (measured: exactly 2000 px/s^2)
-        public float JUMP_SPEED_PXS = 555.0f;       // was 562.5f  (measured: -555 px/s jump kick)
-        public float JUMP_DOWN_PXS = 196.0f;        // was 320 (measured: -196 px/s upward kick; old value caused re-land on origin platform)
-        public float JUMP_ROPE_PXS = 375.0f;        // rope-jump finding (NOT applied): real client kick = (±162, -277) — fixed vx 162, vy 277
-        public float MAX_FALL_PXS = 670.0f;         // confirmed exact (terminal velocity sustained in long-fall log)
+        // Ground-truth source: wz/Map.wz/Physics.img.xml (loaded by v83 client into
+        // physcfg @ *[0xbebfa0]+8). Field name listed inline where applicable.
+        public int WALK_VEL = 125;                  // Physics.img walkSpeed
+        public float GRAVITY_PXS2 = 2000.0f;        // Physics.img gravityAcc
+        public float JUMP_SPEED_PXS = 555.0f;       // Physics.img jumpSpeed
+        public float JUMP_DOWN_PXS = 196.0f;        // measured -196 px/s down-jump kick (not in Physics.img)
+        public float JUMP_ROPE_PXS = 375.0f;        // rope-jump finding (NOT applied): real client kick = (±162, -277)
+        public float MAX_FALL_PXS = 670.0f;         // Physics.img fallSpeed
         public double HFORCE_PXS = 16.667;          // was 20.0 (yields 125 px/s walk via hF*GROUNDSLIP/(FRICTION+SLOPEFACTOR))
         public double GROUNDSLIP = 3.0;
         public double FRICTION = 0.3;
@@ -44,6 +46,44 @@ final class BotPhysicsEngine {
         public int MAX_SNAP_DROP = 16;
         public int MAX_SLOPE_UP = 26;
         public int DOWN_JUMP_GRACE_MS = 350;
+
+        // Swim physics. Bot ticks at 50ms (TICK_MS); constants are in px/s and
+        // px/s² so they're tick-rate independent. Ground-truth sources:
+        //   - wz/Map.wz/Physics.img.xml (named doubles: swimSpeed, swimForce,
+        //     swimSpeedDec, floatDrag1, floatDrag2, floatCoefficient, etc.)
+        //   - Angel.idb: CalcFloat@CVecCtrl @ 0x9b2c3c (swim integrator),
+        //     JustJump@CVecCtrl @ 0x9b1d3d (swim jump impulse)
+        public float SWIM_VEL_PXS = 140.0f;          // Physics.img swimSpeed
+        // Constants below are output of an automated least-squares fitter
+        // (`tools/swim_fit.py`) — not hand-tuned. Decodes all swim packet
+        // logs (burst, burst-upheld, upheld, downheld) into 34 (vy0, dur,
+        // vy_end) tuples and fits a linear-drag model dv/dt = g_eff - k·v
+        // via scipy differential_evolution. Quadratic drag term tested but
+        // converged to zero. Re-run after collecting more packet captures.
+        //
+        // Packet terminal sinks from monitored-packets-swim{,-upheld,-downheld}.log:
+        //   no-key  = 140 px/s, UP-held = 42 px/s, DOWN-held = 210 px/s.
+        // Keep these as explicit caps; the fitted acceleration/drag model only
+        // controls how quickly the bot approaches the packet-observed terminal.
+        public float SWIM_GRAVITY_PXS2 = 590.0f;
+        public float SWIM_FRICTION_HZ = 4.21f;
+        public float SWIM_ACCEL_PXS2 = 600.0f;       // horizontal accel (not yet calibrated)
+        public float SWIM_MAX_SPEED_PXS = 800.0f;
+        public int SWIM_ARRIVAL_RADIUS_PX = 8;
+
+        public float SWIM_JUMP_BURST_PXS = 1000.0f;
+        public float SWIM_UP_THRUST_PXS2 = 412.0f;
+        public float SWIM_DOWN_THRUST_PXS2 = 295.0f;
+        public float SWIM_FREE_MAX_SINK_PXS = 140.0f; // observed no-key terminal
+        public float SWIM_DOWN_MAX_SPEED_PXS = 210.0f; // observed DOWN-held terminal
+        public float SWIM_UP_MAX_SINK_PXS = 42.0f;     // observed UP-held terminal
+        // Cooldown reflects observed swim-jump cadence. Jump@CVecCtrl @
+        // 0x9b2202 calls JustJump with no engine cooldown, but in practice
+        // the swim-burst animation gates the next effective jump to ~500ms.
+        public int SWIM_JUMP_COOLDOWN_MS = 500;
+        public int SWIM_LEVEL_BAND_PX = 30;          // |dy| <= this = "same level" → UP hold
+        public int SWIM_DOWN_BAND_PX = 120;          // dy in (level, this] = free sink; > this = DOWN hold
+        public int SWIM_JUMP_TRIGGER_DY_PX = 100;    // dy <= -this px = trigger JUMP burst (with cooldown)
     }
 
     record GroundMotion(int stepX, boolean lostGround) {
@@ -134,6 +174,7 @@ final class BotPhysicsEngine {
     private enum AirCollisionType {
         NONE,
         WALL,
+        CEILING,
         LAND
     }
 
@@ -147,6 +188,7 @@ final class BotPhysicsEngine {
 
     enum AirborneStepResult {
         WALL,
+        CEILING,
         LANDED,
         CONTINUE
     }
@@ -582,7 +624,7 @@ final class BotPhysicsEngine {
         entry.airVelX = 0;
         entry.airSteerVelX = 0.0;
         entry.fixedAirArc = false;
-        entry.lastDesiredDirection = 0;
+        entry.moveDir = 0;
         entry.physX = position.x;
         entry.physY = position.y;
         stopGroundMotion(entry);
@@ -606,6 +648,40 @@ final class BotPhysicsEngine {
 
     static void beginGroundJump(BotEntry entry, Character bot, int airVelX) {
         entry.blockedRopeGrab = null;
+        // In swim maps, physics owns horizontal motion — drop any committed
+        // airVelX/fixedAirArc the caller passed so swim integrator can steer.
+        // Movement layer expresses *intent only* in water.
+        if (bot.getMap() != null && bot.getMap().isSwim()) {
+            airVelX = 0;
+            // Ground jump in water uses the regular jump impulse, but once the
+            // character leaves the foothold the value is in swim px/s units.
+            // Do not route this through launchAirborne's packet velocity
+            // conversion: that path expects px/tick and emits a huge one-tick
+            // velocity when given swim px/s.
+            Point position = bot.getPosition();
+            entry.climbing = false;
+            entry.climbRope = null;
+            entry.inAir = true;
+            entry.swimming = true;
+            entry.crouching = false;
+            entry.physX = position.x;
+            entry.physY = position.y;
+            entry.velY = -profileOrBase(entry.movementProfile).jumpSpeedPxs();
+            stopGroundMotion(entry);
+            entry.climbUpIntent = false;
+            entry.airVelX = 0;
+            entry.airSteerVelX = 0.0;
+            entry.fixedAirArc = false;
+            entry.downJumpPending = false;
+            entry.swimJumpRequested = false;
+            // The first impulse off a foothold is the small ground jump. A
+            // mid-water swim burst may follow later, but not on the next swim
+            // tick just because the steering target is still above the bot.
+            entry.swimNextJumpAtMs = System.currentTimeMillis() + cfg.SWIM_JUMP_COOLDOWN_MS;
+            setMovementVelocity(entry, 0, Math.round(entry.velY));
+            syncCharacterState(entry);
+            return;
+        }
         launchAirborne(entry, bot, bot.getPosition(), -jumpForcePerTick(entry.movementProfile), airVelX, false);
     }
 
@@ -685,6 +761,11 @@ final class BotPhysicsEngine {
                              Foothold foothold,
                              double incomingDeltaX,
                              double incomingDeltaY) {
+        // Fall distance = descent from peak-air-point down to landing point.
+        // `fallPeakPhysY` was maintained in advanceAirbornePosition for this airborne period.
+        double fallDistance = Double.isFinite(entry.fallPeakPhysY)
+                ? Math.max(0.0, position.y - entry.fallPeakPhysY)
+                : 0.0;
         bot.setPosition(position);
         entry.inAir = false;
         entry.climbing = false;
@@ -704,21 +785,31 @@ final class BotPhysicsEngine {
         entry.hspeed = landingGroundHSpeed(bot.getMap(), foothold, incomingDeltaX, incomingDeltaY, entry.movementProfile);
         setMovementVelocity(entry, velocityFromDeltaX(tickDeltaFromGroundHSpeed(bot.getMap(), entry.hspeed, entry.movementProfile)), 0);
         syncCharacterState(entry);
+
+        // Fall-damage check triggers exactly once, at the landing transition, using the
+        // peak-to-landing descent distance. Below-threshold landings are no-ops (no packet).
+        // Reset peak AFTER the check so the next airborne period starts fresh.
+        BotCombatManager.applyFallDamage(entry, bot, (float) fallDistance);
+        entry.fallPeakPhysY = Double.POSITIVE_INFINITY;
     }
 
     static void attachToRope(BotEntry entry, Character bot, Rope rope, int y) {
-        int ropeY = Math.clamp(y, rope.topY(), rope.bottomY());
+        int ropeY = Math.clamp(y, firstClimbableY(rope), rope.bottomY());
         setClimbPosition(entry, bot, rope, ropeY);
     }
 
-    static void advanceClimb(BotEntry entry, Character bot, int verticalDir) {
+   /**
+     * Intent-driven climb integrator. Reads {@link BotEntry#climbVerticalDir} for vertical
+     * direction (-1=up, 0=idle, +1=down). Movement layer sets intent before calling.
+     */
+    static void advanceClimb(BotEntry entry, Character bot) {
         Rope rope = entry.climbRope;
         if (rope == null) {
             beginFall(entry, bot, 0);
             return;
         }
 
-        int climbDir = Integer.compare(verticalDir, 0);
+        int climbDir = Integer.compare(entry.climbVerticalDir, 0);
         if (climbDir == 0) {
             holdClimb(entry, bot);
             return;
@@ -756,9 +847,15 @@ final class BotPhysicsEngine {
         return entry.downJumpGracePeriodMS == 0L;
     }
 
-    static GroundMotion applyGroundMotion(BotEntry entry, Character bot, Foothold foothold, int desiredDir) {
+  /**
+     * Intent-driven ground integrator. Reads {@link BotEntry#moveDir} for horizontal
+     * steer direction (-1/0/+1). Physics owns velocity integration via force/friction model.
+     * Movement layer sets intent before calling; physics never returns velocity to movement.
+     */
+    static GroundMotion applyGroundMotion(BotEntry entry, Character bot, Foothold foothold) {
         MapleMap map = bot.getMap();
         Point currentPos = bot.getPosition();
+        int desiredDir = entry.moveDir;
         GroundStepResult step = simulateGroundMotion(map, currentPos, foothold, desiredDir,
                 new GroundTravelState(entry.physX, entry.hspeed, entry.groundPhysicsCarryMs), entry.movementProfile);
 
@@ -908,14 +1005,187 @@ final class BotPhysicsEngine {
         return new Point((int) Math.round(entry.physX), (int) Math.round(entry.physY));
     }
 
-    static void applyAirSteering(BotEntry entry, int targetDx) {
-        if (targetDx == 0) return;
-        double accel = targetDx > 0 ? cfg.AIR_STEER_ACCEL : -cfg.AIR_STEER_ACCEL;
+    /**
+     * Intent-driven swim integrator. Mirrors wasm Physics::move_swimming, but
+     * the only inputs are discrete intents on {@link BotEntry}:
+     *   swimMoveDir       — -1/0/+1 horizontal steer
+     *   swimVerticalHold  — -1 (UP slow sink) / 0 (free sink) / +1 (DOWN fast sink)
+     *   swimJumpRequested — one-shot upward burst (consumed here)
+     *
+     * Movement layer never writes velY/hspeed directly — the engine owns physics.
+     * On contact with a foothold floor the bot transitions out of swim mode
+     * (entry.inAir = false) so the next tick routes through tickGrounded and the
+     * bot walks normally on the platform. This matches the real client behavior
+     * where SWIMMING physics applies only while airborne underwater.
+     */
+    static void applySwimMotion(BotEntry entry) {
+        Character bot = entry.bot;
+        MapleMap map = bot.getMap();
+        Point pos = bot.getPosition();
+        double t = tickS();
+
+        // First tick after entering swim mode: rebase the integrator on the bot's
+        // authoritative position and discard any committed-airborne state from
+        // the launch (airVelX, fixedAirArc) — swim physics owns motion now.
+        if (!entry.swimming) {
+            entry.physX = pos.x;
+            entry.physY = pos.y;
+            entry.airVelX = 0;
+            entry.airSteerVelX = 0.0;
+            entry.fixedAirArc = false;
+            entry.downJumpPending = false;
+            entry.downJumpGracePeriodMS = 0L;
+            // Preserve velY/hspeed from launch — a jump-off-platform should
+            // still arc upward under swim physics (matches wasm: NORMAL kick
+            // immediately followed by SWIMMING integration).
+        } else if (Math.abs(entry.physX - pos.x) > 2 || Math.abs(entry.physY - pos.y) > 2) {
+            // External teleport (mob-touch knockback, !warp, position correction)
+            // moved the authoritative position out from under the integrator.
+            // Without rebase, the next sweep starts from a stale physX/physY and
+            // can advance through a foothold without registering the floor —
+            // bot tunnels straight through the platform. Resync to the truth.
+            entry.physX = pos.x;
+            entry.physY = pos.y;
+        }
+
+        double vx = entry.hspeed;
+        double vy = entry.velY;
+
+        // --- Vertical control ---
+        if (entry.swimJumpRequested) {
+            // Swim-jump impulse scales with character SPEED stat, not jump stat.
+            // Per JustJump@CVecCtrl @ 0x9b1d3d swim branch:
+            //   swim_jump = stat[+0x6c] × physcfg[+0x48] × speedScale × 5.0
+            // stat[+0x6c] is the speed-related field (cf. walk path stat[+0x84]
+            // for jump). At base 100 stat both are 1.0; jumpMultiplier would be
+            // wrong here for any speed-buffed/jump-buffed character.
+            float burst = cfg.SWIM_JUMP_BURST_PXS;
+            if (entry.movementProfile != null) {
+                burst *= (float) entry.movementProfile.speedMultiplier();
+            }
+            vy = -burst;
+            entry.swimJumpRequested = false;
+        }
+
+        // --- Horizontal control ---
+        if (entry.swimMoveDir != 0) {
+            double accelStep = cfg.SWIM_ACCEL_PXS2 * t * Integer.signum(entry.swimMoveDir);
+            vx += accelStep;
+        }
+
+        // Symmetric water drag.
+        double dragRetention = Math.max(0.0, 1.0 - cfg.SWIM_FRICTION_HZ * t);
+        vx *= dragRetention;
+        vy *= dragRetention;
+
+        // Apply gravity (always full strength).
+        vy += cfg.SWIM_GRAVITY_PXS2 * t;
+
+        // Continuous UP/DOWN thrust matches the v83 vForce model: pressing UP
+        // doesn't just lower the sink cap, it continuously accelerates the
+        // character upward. Without this the bot's burst trajectory falls
+        // far short of a real player's "burst + hold UP" reach.
+        if (entry.swimVerticalHold < 0) {
+            vy -= cfg.SWIM_UP_THRUST_PXS2 * t;
+        } else if (entry.swimVerticalHold > 0) {
+            vy += cfg.SWIM_DOWN_THRUST_PXS2 * t;
+        }
+
+        // Horizontal cap.
+        vx = Math.max(-cfg.SWIM_MAX_SPEED_PXS, Math.min(cfg.SWIM_MAX_SPEED_PXS, vx));
+        if (entry.swimMoveDir != 0) {
+            double cap = cfg.SWIM_VEL_PXS;
+            if (vx >  cap && entry.swimMoveDir > 0) vx =  cap;
+            if (vx < -cap && entry.swimMoveDir < 0) vx = -cap;
+        }
+        // Vertical sink cap — discrete intent picks the terminal velocity.
+        // Upward velocity (vy < 0) is unaffected so jump bursts still arc up.
+        double sinkCap = switch (Integer.signum(entry.swimVerticalHold)) {
+            case -1 -> cfg.SWIM_UP_MAX_SINK_PXS;
+            case  1 -> cfg.SWIM_DOWN_MAX_SPEED_PXS;
+            default -> cfg.SWIM_FREE_MAX_SINK_PXS;
+        };
+        vy = Math.max(-cfg.SWIM_MAX_SPEED_PXS, Math.min(sinkCap, vy));
+
+        double nextX = entry.physX + vx * t;
+        double nextY = entry.physY + vy * t;
+
+        // Use the same sweep-based collision resolution as airborne physics:
+        // resolveAirCollision handles wall segments and scans every pixel along
+        // the horizontal span for floor crossings, preventing tunnelling through
+        // slopes and thin platforms.
+        boolean landed = false;
+        Foothold landingFoothold = null;
+        double landingDeltaX = 0.0;
+        double landingDeltaY = 0.0;
+        Point prevPt = new Point((int) Math.round(entry.physX), (int) Math.round(entry.physY));
+        {
+            Point nextPt = new Point((int) Math.round(nextX), (int) Math.round(nextY));
+            AirCollision collision = resolveAirCollision(map, prevPt, nextPt);
+            if (collision.type() == AirCollisionType.LAND) {
+                nextX = collision.point().x;
+                nextY = collision.point().y;
+                vy = 0.0;
+                landed = true;
+                landingFoothold = collision.foothold();
+                landingDeltaX = nextX - prevPt.x;
+                landingDeltaY = nextY - prevPt.y;
+            } else if (collision.type() == AirCollisionType.WALL) {
+                nextX = collision.point().x;
+                vx = 0.0;
+            }
+        }
+
+        // Facing follows horizontal intent (or current vx if coasting).
+        if (entry.swimMoveDir > 0) entry.facingDir = 1;
+        else if (entry.swimMoveDir < 0) entry.facingDir = -1;
+
+        if (landed) {
+            // Hand off to grounded physics. Must go through landOnGround so
+            // landingGroundHSpeed converts swim-scale vx (px/s, up to
+            // SWIM_MAX_SPEED_PXS=250) into ground hspeed units. Skipping the
+            // conversion caused a 500+ px jerk forward on the first grounded
+            // tick because raw vx was treated as ground hspeed and then
+            // multiplied by stepsPerTick (50/8 = 6.25).
+            entry.swimming = false;
+            landOnGround(entry, bot,
+                    new Point((int) Math.round(nextX), (int) Math.round(nextY)),
+                    landingFoothold, landingDeltaX, landingDeltaY);
+            return;
+        }
+
+        entry.hspeed = vx;
+        entry.velY = (float) vy;
+        entry.physX = nextX;
+        entry.physY = nextY;
+        entry.crouching = false;
+        entry.movementVelX = (int) Math.round(vx);
+        entry.movementVelY = (int) Math.round(vy);
+        entry.swimming = true;
+        entry.inAir = true;
+
+        bot.setPosition(new Point((int) Math.round(nextX), (int) Math.round(nextY)));
+    }
+
+    private static double clampMagnitude(double value, double maxAbs) {
+        if (value > maxAbs) {
+            return maxAbs;
+        }
+        if (value < -maxAbs) {
+            return -maxAbs;
+        }
+        return value;
+    }
+
+    /** Apply air steering acceleration based on discrete steer direction. */
+    private static void applyAirSteering(BotEntry entry, int steerDir) {
+        if (steerDir == 0) return;
+        double accel = steerDir > 0 ? cfg.AIR_STEER_ACCEL : -cfg.AIR_STEER_ACCEL;
         entry.airSteerVelX = Math.clamp(entry.airSteerVelX + accel, -cfg.AIR_STEER_MAX, cfg.AIR_STEER_MAX);
         // Client jump stance follows the held steering direction, not the preserved horizontal
         // launch momentum. Updating facing here makes airborne debug output line up with what the
         // client is visually trying to do, even before the net X velocity changes sign.
-        entry.facingDir = targetDx > 0 ? 1 : -1;
+        entry.facingDir = steerDir > 0 ? 1 : -1;
     }
 
     private static Point advanceAirbornePosition(BotEntry entry, Character bot) {
@@ -923,6 +1193,9 @@ final class BotPhysicsEngine {
         float gravity = gravityPerTick();
         entry.physY += entry.velY + 0.5f * gravity;
         entry.velY = Math.min(entry.velY + gravity, maxFallPerTick());
+        if (entry.physY < entry.fallPeakPhysY) {
+            entry.fallPeakPhysY = entry.physY;
+        }
 
         return roundedAirPosition(entry);
     }
@@ -933,22 +1206,38 @@ final class BotPhysicsEngine {
         entry.climbing = false;
         entry.climbRope = null;
         entry.crouching = false;
+        // Preserve facing set by air steering (moveDir intent) - setMovementVelocity would
+        // overwrite it based on momentum velocity, which is wrong for airborne steering.
+        int facingDir = entry.facingDir;
         setMovementVelocity(entry, velocityFromDeltaX(entry.airVelX), velocityFromAirStep(entry.velY));
+        entry.facingDir = facingDir;
         syncCharacterState(entry);
     }
 
-    /**
-     * One physics step for an airborne bot: advance position, resolve wall/floor collision, apply result.
-     * All collision outcome methods (landOnGround, collideWithAirWall, applyAirbornePosition) are
-     * private — movement must not call them directly.
+  /**
+     * Intent-driven airborne integrator. Reads {@link BotEntry#moveDir} for horizontal
+     * air steering (-1/0/+1). Movement layer gates steering for committed nav trajectories
+     * (fixedAirArc, JUMP/DROP edges) by setting moveDir=0.
+     *
+     * One physics step: apply air steering from intent, advance position, resolve collision, apply result.
+     * All collision outcome methods are private — movement must not call them directly.
      */
     static AirborneStepResult stepAirborne(BotEntry entry, Character bot) {
+        // Apply air steering from intent. Movement sets moveDir=0 for committed trajectories.
+        if (entry.moveDir != 0) {
+            applyAirSteering(entry, entry.moveDir);
+        }
+
         Point previousPos = roundedAirPosition(entry);
         Point nextPos = advanceAirbornePosition(entry, bot);
         AirCollision collision = resolveAirCollision(bot.getMap(), previousPos, nextPos);
         if (collision.type() == AirCollisionType.WALL) {
             collideWithAirWall(entry, bot, collision.point());
             return AirborneStepResult.WALL;
+        }
+        if (collision.type() == AirCollisionType.CEILING) {
+            collideWithAirCeiling(entry, bot, collision.point());
+            return AirborneStepResult.CEILING;
         }
         if (collision.type() == AirCollisionType.LAND && canLand(entry)) {
             landOnGround(entry, bot, collision.point(), collision.foothold(),
@@ -974,12 +1263,43 @@ final class BotPhysicsEngine {
         syncCharacterState(entry);
     }
 
+    private static void collideWithAirCeiling(BotEntry entry, Character bot, Point collisionPoint) {
+        entry.velY = 0f;
+        entry.fixedAirArc = false;
+        entry.physX = collisionPoint.x;
+        entry.physY = collisionPoint.y;
+        bot.setPosition(collisionPoint);
+        entry.inAir = true;
+        entry.climbing = false;
+        entry.climbRope = null;
+        entry.crouching = false;
+        setMovementVelocity(entry, velocityFromDeltaX(entry.airVelX), 0);
+        syncCharacterState(entry);
+    }
+
     static MovementSnapshot movementSnapshot(BotEntry entry) {
         int stance = resolveStance(entry);
         if (entry.bot != null && entry.bot.getStance() != stance) {
             entry.bot.setStance(stance);
         }
-        return new MovementSnapshot(entry.movementVelX, entry.movementVelY, stance);
+        // Broadcast-only alert substitution. The server-side Character.stance above keeps the
+        // logical stance (STAND/WALK/etc.); only the wire byte gets ALERT when the alert timer
+        // is active. Mirrors maplestory-wasm CharLook.cpp substituting Stance::ALERT for STAND1/2
+        // while TimedBool alerted is set_for(5000).
+        return new MovementSnapshot(entry.movementVelX, entry.movementVelY, broadcastStance(entry, stance));
+    }
+
+    private static int broadcastStance(BotEntry entry, int baseStance) {
+        if (System.currentTimeMillis() >= entry.alertedUntilMs) {
+            return baseStance;
+        }
+        if (baseStance == CharacterStance.STAND_RIGHT_STANCE) {
+            return CharacterStance.ALERT_RIGHT_STANCE;
+        }
+        if (baseStance == CharacterStance.STAND_LEFT_STANCE) {
+            return CharacterStance.ALERT_LEFT_STANCE;
+        }
+        return baseStance;
     }
 
     static int resolveStance(BotEntry entry) {
@@ -992,16 +1312,19 @@ final class BotPhysicsEngine {
                     ? CharacterStance.LADDER_STANCE
                     : CharacterStance.ROPE_STANCE;
         }
+        if (entry.swimming) {
+            return entry.facingDir >= 0 ? CharacterStance.SWIM_RIGHT_STANCE : CharacterStance.SWIM_LEFT_STANCE;
+        }
         if (entry.crouching) {
             return entry.facingDir >= 0 ? CharacterStance.PRONE_RIGHT_STANCE : CharacterStance.PRONE_LEFT_STANCE;
         }
         if (entry.inAir) {
             return entry.facingDir >= 0 ? CharacterStance.JUMP_RIGHT_STANCE : CharacterStance.JUMP_LEFT_STANCE;
         }
-        if (entry.lastDesiredDirection > 0) {
+        if (entry.moveDir > 0) {
             return CharacterStance.WALK_RIGHT_STANCE;
         }
-        if (entry.lastDesiredDirection < 0) {
+        if (entry.moveDir < 0) {
             return CharacterStance.WALK_LEFT_STANCE;
         }
         return resolveIdleGroundStance(entry);
@@ -1083,7 +1406,7 @@ final class BotPhysicsEngine {
 
     static boolean canReachRopeFromGround(MapleMap map, Point from, Rope rope, BotMovementProfile profile) {
         int dx = Math.abs(rope.x() - from.x);
-        if (dx <= cfg.ROPE_GRAB_X && from.y >= rope.topY() && from.y <= rope.bottomY()) {
+        if (dx <= cfg.ROPE_GRAB_X && from.y >= firstClimbableY(rope) && from.y <= rope.bottomY()) {
             return true;
         }
         if (rope.topY() >= from.y) {
@@ -1188,14 +1511,19 @@ final class BotPhysicsEngine {
             return AirCollision.none();
         }
         AirCollision wall = findWallCollision(map, previousPos, nextPos);
+        AirCollision ceiling = findCeilingCollision(map, previousPos, nextPos);
         AirCollision landing = findGroundCollision(map, previousPos, nextPos);
-        if (wall.type == AirCollisionType.NONE) {
-            return landing;
+        AirCollision best = AirCollision.none();
+        if (wall.type() != AirCollisionType.NONE) {
+            best = wall;
         }
-        if (landing.type == AirCollisionType.NONE) {
-            return wall;
+        if (ceiling.type() != AirCollisionType.NONE && ceiling.progress() < best.progress()) {
+            best = ceiling;
         }
-        return wall.progress <= landing.progress ? wall : landing;
+        if (landing.type() != AirCollisionType.NONE && landing.progress() < best.progress()) {
+            best = landing;
+        }
+        return best;
     }
 
     private static void launchAirborne(BotEntry entry,
@@ -1217,6 +1545,10 @@ final class BotPhysicsEngine {
         entry.airSteerVelX = 0.0;
         entry.fixedAirArc = false;
         entry.downJumpPending = false;
+        // Clear ground movement intent when going airborne - unified moveDir serves both
+        // ground and air, so ground walk direction must not bleed into air steering.
+        // Movement manager will set moveDir for air steering if shouldApplyAirSteering allows.
+        entry.moveDir = 0;
         setMovementVelocity(entry, velocityFromDeltaX(airVelX), velocityFromAirStep(initialVelY));
         syncCharacterState(entry);
     }
@@ -1231,7 +1563,7 @@ final class BotPhysicsEngine {
                 // If none is found, clamp to topY and hold rather than falling — the bot will
                 // recover on re-path. Falling here would cause the oscillation bug where the bot
                 // climbs to the top, falls, re-grabs the rope, and loops indefinitely.
-                setClimbPosition(entry, bot, rope, rope.topY());
+                setClimbPosition(entry, bot, rope, firstClimbableY(rope));
             }
             return true;
         }
@@ -1255,6 +1587,10 @@ final class BotPhysicsEngine {
         }
 
         return ground.y <= rope.topY() + climbStepPerTick() + 2 ? ground : null;
+    }
+
+    static int firstClimbableY(Rope rope) {
+        return Math.min(rope.bottomY(), rope.topY() + 1);
     }
 
     private static void setClimbPosition(BotEntry entry, Character bot, Rope rope, int y) {
@@ -1291,7 +1627,7 @@ final class BotPhysicsEngine {
         entry.airSteerVelX = 0.0;
         entry.fixedAirArc = false;
         entry.wasMovingX = false;
-        entry.lastDesiredDirection = 0;
+        entry.moveDir = 0;
         entry.climbUpIntent = false;
         entry.blockedRopeGrab = null;
         entry.ropeGrabCooldownMs = 0;
@@ -1413,6 +1749,29 @@ final class BotPhysicsEngine {
         return AirCollision.none();
     }
 
+    private static AirCollision findCeilingCollision(MapleMap map, Point previousPos, Point nextPos) {
+        if (map == null || map.getFootholds() == null || nextPos.y >= previousPos.y) {
+            return AirCollision.none();
+        }
+
+        java.util.Set<Integer> collidableFromBelow = getCollidableFromBelowIds(map);
+        if (collidableFromBelow.isEmpty()) {
+            return AirCollision.none();
+        }
+
+        AirCollision best = AirCollision.none();
+        for (Foothold foothold : map.getFootholds().getAllFootholds()) {
+            if (foothold.isWall() || !collidableFromBelow.contains(foothold.getId())) {
+                continue;
+            }
+            AirCollision collision = ceilingCollision(foothold, previousPos, nextPos);
+            if (collision.type() == AirCollisionType.CEILING && collision.progress() < best.progress()) {
+                best = collision;
+            }
+        }
+        return best;
+    }
+
     private static AirCollision findWallCollision(MapleMap map, Point previousPos, Point nextPos) {
         return findWallCollision(map, previousPos, nextPos, false);
     }
@@ -1453,7 +1812,7 @@ final class BotPhysicsEngine {
         }
 
         int dir = Integer.compare(nextPos.x, previousPos.x);
-        int boundaryX = dir > 0 ? area.x + area.width : area.x;
+        int boundaryX = dir > 0 ? effectiveRightBoundaryX(map, area) : effectiveLeftBoundaryX(map, area);
         if (dir > 0 && (previousPos.x > boundaryX || nextPos.x <= boundaryX)) {
             return AirCollision.none();
         }
@@ -1471,6 +1830,29 @@ final class BotPhysicsEngine {
                 new Point(boundaryX, (int) Math.round(yAtBoundary)),
                 null,
                 progress);
+    }
+
+    private static int effectiveLeftBoundaryX(MapleMap map, Rectangle area) {
+        if (!isSyntheticMapArea(area) || !hasUsableFootholdXBounds(map)) {
+            return area.x;
+        }
+        return map.getFootholds().getMinDropX();
+    }
+
+    private static int effectiveRightBoundaryX(MapleMap map, Rectangle area) {
+        if (!isSyntheticMapArea(area) || !hasUsableFootholdXBounds(map)) {
+            return area.x + area.width;
+        }
+        return map.getFootholds().getMaxDropX();
+    }
+
+    private static boolean isSyntheticMapArea(Rectangle area) {
+        return area.width >= SYNTHETIC_MAP_BOUND_SIZE && area.height >= SYNTHETIC_MAP_BOUND_SIZE;
+    }
+
+    private static boolean hasUsableFootholdXBounds(MapleMap map) {
+        return map.getFootholds() != null
+                && map.getFootholds().getMinDropX() < map.getFootholds().getMaxDropX();
     }
 
     /**
@@ -1495,6 +1877,14 @@ final class BotPhysicsEngine {
             }
         }
         return result;
+    }
+
+    private static java.util.Set<Integer> getCollidableFromBelowIds(MapleMap map) {
+        java.util.Set<Integer> cached = BotNavigationGraphProvider.getCachedCollidableFromBelowIds(map.getId());
+        if (cached != null) {
+            return cached;
+        }
+        return BotNavigationGraphProvider.computeCollidableFromBelowIds(map);
     }
 
     private static AirCollision landingAtX(MapleMap map,
@@ -1584,6 +1974,35 @@ final class BotPhysicsEngine {
                 progress);
     }
 
+    private static AirCollision ceilingCollision(Foothold foothold, Point previousPos, Point nextPos) {
+        if (foothold.getY1() != foothold.getY2()) {
+            return AirCollision.none();
+        }
+
+        int ceilingY = foothold.getY1();
+        if (ceilingY > previousPos.y || ceilingY < nextPos.y) {
+            return AirCollision.none();
+        }
+
+        double progress = (ceilingY - previousPos.y) / (double) (nextPos.y - previousPos.y);
+        if (progress <= 0.0 || progress > 1.0) {
+            return AirCollision.none();
+        }
+
+        double xAtCeiling = previousPos.x + (nextPos.x - previousPos.x) * progress;
+        int minX = Math.min(foothold.getX1(), foothold.getX2());
+        int maxX = Math.max(foothold.getX1(), foothold.getX2());
+        if (xAtCeiling < minX || xAtCeiling > maxX) {
+            return AirCollision.none();
+        }
+
+        return new AirCollision(
+                AirCollisionType.CEILING,
+                new Point((int) Math.round(xAtCeiling), ceilingY + 1),
+                foothold,
+                progress);
+    }
+
     private static boolean isWalkableGroundWallEndpoint(double yAtWall, int minY, int maxY) {
         if (Math.abs(yAtWall - minY) < 0.001) {
             return true;
@@ -1668,6 +2087,13 @@ final class BotPhysicsEngine {
                 previousIntY = collision.point().y;
                 continue;
             }
+            if (collision.type() == AirCollisionType.CEILING) {
+                physX = collision.point().x;
+                physY = collision.point().y;
+                velocityY = 0f;
+                previousIntY = collision.point().y;
+                continue;
+            }
             if (collision.type() == AirCollisionType.LAND && remainingLandingGraceMs == 0L) {
                 return null;
             }
@@ -1700,7 +2126,7 @@ final class BotPhysicsEngine {
 
     private static boolean canGrabRopeAtPoint(Point position, Rope rope) {
         return Math.abs(position.x - rope.x()) <= cfg.ROPE_GRAB_X
-                && position.y >= rope.topY()
+                && position.y >= firstClimbableY(rope)
                 && position.y <= rope.bottomY();
     }
 
@@ -1735,6 +2161,13 @@ final class BotPhysicsEngine {
                 physX = collision.point().x;
                 physY = collision.point().y;
                 stepX = 0;
+                previousIntY = collision.point().y;
+                continue;
+            }
+            if (collision.type() == AirCollisionType.CEILING) {
+                physX = collision.point().x;
+                physY = collision.point().y;
+                velocityY = 0f;
                 previousIntY = collision.point().y;
                 continue;
             }

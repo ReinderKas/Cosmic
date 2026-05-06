@@ -1,10 +1,18 @@
 package server.bots;
 
+import config.YamlConfig;
 import client.BotClient;
 import client.Character;
+import client.Job;
+import client.inventory.Equip;
+import client.inventory.Inventory;
+import client.inventory.InventoryType;
 import client.inventory.Item;
+import client.inventory.WeaponType;
+import constants.inventory.ItemConstants;
 import server.ItemInformationProvider;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -17,6 +25,13 @@ final class BotOfferManager {
             Pattern.CASE_INSENSITIVE);
     private static final List<String> BOT_ACCEPT_MSGS = List.of(
             "sure!", "ok!", "ty!", "yes pls", "thx!", "ooh nice, ty", "yes!");
+
+    private enum GearOfferNeed {
+        CURRENT,
+        FUTURE
+    }
+
+    private record GearOfferChoice(Item item, GearOfferNeed need) {}
 
     private BotOfferManager() {}
 
@@ -60,12 +75,12 @@ final class BotOfferManager {
             return;
         }
         if (entry.pendingAction != null || entry.pendingTradeCategory != null || hasOfferReservation(entry)) {
-            BotManager.getInstance().botSay(bot, "busy rn, ask me again in a bit");
+            BotManager.getInstance().botReply(entry, "busy rn, ask me again in a bit");
             return;
         }
         List<BotEquipManager.EquipRecommendation> recs = BotEquipManager.findRecommendedEquips(bot, owner);
         if (recs.isEmpty()) {
-            BotManager.getInstance().botSay(bot, "nothing i need from you rn, im good!");
+            BotManager.getInstance().botReply(entry, "nothing i need from you rn, im good!");
             return;
         }
         Item candidate = recs.get(0).candidate();
@@ -78,12 +93,17 @@ final class BotOfferManager {
             return false;
         }
 
-        List<BotEquipManager.EquipRecommendation> recs = BotEquipManager.findRecommendedEquips(owner, bot);
-        if (recs.isEmpty()) {
-            return false;
+        // Self-equip first so any item that would upgrade the bot stays on the bot
+        // rather than being offered to the owner.
+        BotEquipManager.autoEquip(bot, owner, entry.pendingLootOfferItem);
+
+        GearOfferChoice choice = findBestGearOffer(entry, owner, bot);
+        if (choice != null) {
+            return offerGearItem(entry, bot, owner, choice.item(), choice.need());
         }
 
-        return offerGearItem(entry, bot, owner, recs.get(0).candidate());
+        Item throwingStar = findBestThrowingStarOffer(owner, bot);
+        return throwingStar != null && offerGearItem(entry, bot, owner, throwingStar, GearOfferNeed.CURRENT);
     }
 
     static boolean offerBestGearToSibling(BotEntry entry, Character bot) {
@@ -92,18 +112,28 @@ final class BotOfferManager {
             return false;
         }
 
+        // Self-equip first: priority is self → owner → sibling, so don't hand gear
+        // to a sibling if this bot could actually wear it.
+        BotEquipManager.autoEquip(bot, owner, entry.pendingLootOfferItem);
+
         List<BotEntry> siblings = BotManager.getInstance().getBotEntries(owner.getId());
         for (BotEntry sibling : siblings) {
             if (sibling == entry || sibling.bot == null || sibling.bot.getMapId() != bot.getMapId()) {
                 continue;
             }
-            List<BotEquipManager.EquipRecommendation> recs = BotEquipManager.findRecommendedEquips(sibling.bot, bot);
-            if (!recs.isEmpty()) {
-                return offerGearItem(entry, bot, sibling.bot, recs.get(0).candidate());
+            GearOfferChoice choice = findBestGearOffer(entry, sibling.bot, bot);
+            if (choice != null) {
+                return offerGearItem(entry, bot, sibling.bot, choice.item(), choice.need());
             }
         }
 
-        return false;
+        Character starRecipient = findWeakestThrowingStarRecipient(owner, bot);
+        if (starRecipient == null) {
+            return false;
+        }
+        Item throwingStar = findBestThrowingStarOffer(starRecipient, bot);
+        return throwingStar != null
+                && offerGearItem(entry, bot, starRecipient, throwingStar, GearOfferNeed.CURRENT);
     }
 
     static void scheduleLootOfferPrompt(BotEntry entry, Character bot, Item item, long delayMs) {
@@ -148,7 +178,7 @@ final class BotOfferManager {
             if (entry.pendingLootOfferBotRequesting) {
                 clearPendingOffer(entry);
                 BotManager.after(BotManager.randMs(400, 600), () ->
-                        BotManager.getInstance().botSay(entry.bot, "ty! inv me?"));
+                        BotManager.getInstance().botReply(entry, "ty! inv me?"));
             } else {
                 Item item = entry.pendingLootOfferItem;
                 entry.pendingDropCategory = null;
@@ -164,8 +194,13 @@ final class BotOfferManager {
         }
         if (NEGATIVE_CONFIRM_PATTERN.matcher(message).find()) {
             clearPendingOffer(entry);
-            BotManager.after(BotManager.randMs(400, 600), () ->
-                    BotManager.getInstance().botSay(entry.bot, "ok, keeping it for now"));
+            BotManager.after(BotManager.randMs(400, 600), () -> {
+                if (entry.owner != null && speaker.getId() == entry.owner.getId()) {
+                    BotManager.getInstance().botReply(entry, "ok, keeping it for now");
+                } else {
+                    BotManager.getInstance().botSay(entry.bot, "ok, keeping it for now");
+                }
+            });
             return true;
         }
 
@@ -179,10 +214,9 @@ final class BotOfferManager {
     }
 
     private static void createOwnerUpgradeRequest(BotEntry entry, Character bot, Character owner, Item ownerItem) {
-        String itemName = ItemInformationProvider.getInstance().getName(ownerItem.getItemId());
-        if (itemName == null || itemName.isBlank()) {
-            itemName = String.valueOf(ownerItem.getItemId());
-        }
+        // Audience for the specifier is the bot itself: it's describing why the item
+        // is good for it, so format stats relative to the bot's job.
+        String itemDesc = formatItemSpecifier(ownerItem, bot);
 
         entry.pendingDropCategory = null;
         entry.pendingLootOfferItem = ownerItem;
@@ -191,15 +225,16 @@ final class BotOfferManager {
         entry.pendingLootOfferBotRequesting = true;
 
         List<String> prompts = List.of(
-                "hey, that " + itemName + " would be an upgrade for me, can i have it pls?",
-                "Can I have your " + itemName + "?",
-                "Your " + itemName + " would be better on me! trade it over?",
-                "I could use that " + itemName + " of yours ;)",
-                "that " + itemName + " is an upgrade for me, want to trade?");
+                "hey, that " + itemDesc + " would be an upgrade for me, can i have it pls?",
+                "Can I have your " + itemDesc + "?",
+                "Your " + itemDesc + " would be better on me! trade it over?",
+                "I could use that " + itemDesc + " of yours ;)",
+                "that " + itemDesc + " is an upgrade for me, want to trade?");
         BotChatManager.queueBotSay(entry, BotManager.randomReply(prompts));
     }
 
-    private static boolean offerGearItem(BotEntry entry, Character bot, Character recipient, Item item) {
+    private static boolean offerGearItem(BotEntry entry, Character bot, Character recipient, Item item,
+                                         GearOfferNeed need) {
         if (entry.pendingAction != null || entry.pendingTradeCategory != null || hasOfferReservation(entry)
                 || !BotInventoryManager.hasItem(bot, item)) {
             return false;
@@ -209,7 +244,8 @@ final class BotOfferManager {
         entry.pendingLootOfferRecipientId = recipient.getId();
         entry.pendingLootOfferExpiresAt = System.currentTimeMillis() + 30_000L;
         entry.pendingLootOfferBotRequesting = false;
-        long promptDelayMs = BotChatManager.queueBotSayWithEstimatedDelay(entry, buildLootOfferPrompt(recipient, entry.owner, item));
+        long promptDelayMs = BotChatManager.queueBotSayWithEstimatedDelay(entry,
+                buildLootOfferPrompt(recipient, entry.owner, item, need == GearOfferNeed.FUTURE));
         scheduleBotLootOfferAutoAccept(entry, recipient, promptDelayMs);
         return true;
     }
@@ -236,12 +272,23 @@ final class BotOfferManager {
             return;
         }
 
+        if (ItemConstants.getInventoryType(item.getItemId()) == InventoryType.EQUIP
+                && BotEquipManager.shouldReserveOwnedItem(bot, item)) {
+            clearPendingOffer(entry);
+            return;
+        }
+        GearOfferNeed need = gearOfferNeed(entry, recipient, bot, item);
+        if (ItemConstants.getInventoryType(item.getItemId()) == InventoryType.EQUIP && need == null) {
+            clearPendingOffer(entry);
+            return;
+        }
         entry.pendingDropCategory = null;
         entry.pendingLootOfferItem = item;
         entry.pendingLootOfferRecipientId = recipient.getId();
         entry.pendingLootOfferExpiresAt = System.currentTimeMillis() + 30_000L;
         entry.pendingLootOfferBotRequesting = false;
-        long promptDelayMs = BotChatManager.queueBotSayWithEstimatedDelay(entry, buildLootOfferPrompt(recipient, owner, item));
+        long promptDelayMs = BotChatManager.queueBotSayWithEstimatedDelay(entry,
+                buildLootOfferPrompt(recipient, owner, item, need == GearOfferNeed.FUTURE));
         scheduleBotLootOfferAutoAccept(entry, recipient, promptDelayMs);
     }
 
@@ -262,26 +309,125 @@ final class BotOfferManager {
     }
 
     static String buildLootOfferPrompt(String recipientName, String itemName, boolean targetIsOwner) {
+        return buildLootOfferPrompt(recipientName, itemName, targetIsOwner, false);
+    }
+
+    static String buildLootOfferPrompt(String recipientName, String itemName, boolean targetIsOwner, boolean forLater) {
         List<String> prompts = targetIsOwner
+                ? (forLater
                 ? List.of(
+                        "I have %s, you might need it later, want?",
+                        "picked up %s, could be useful later, want it?",
+                        "I got %s for later if you want it")
+                : List.of(
                         "I have %s, you want?",
                         "picked up %s, want it?",
-                        "I got %s for you, want?")
+                        "I got %s for you, want?"))
+                : (forLater
+                ? List.of(
+                        "%s, you might need %s later, want it?",
+                        "%s, picked up %s, could help later if you want it",
+                        "%s, I got %s for later if you want it")
                 : List.of(
                         "%s, I have %s, you want?",
                         "%s, picked up %s, want it?",
-                        "%s, I got %s if you want it");
+                        "%s, I got %s if you want it"));
         String format = BotManager.randomReply(prompts);
         return targetIsOwner ? String.format(format, itemName) : String.format(format, recipientName, itemName);
     }
 
-    private static String buildLootOfferPrompt(Character recipient, Character owner, Item item) {
-        String itemName = ItemInformationProvider.getInstance().getName(item.getItemId());
-        if (itemName == null || itemName.isBlank()) {
-            itemName = String.valueOf(item.getItemId());
-        }
+    private static String buildLootOfferPrompt(Character recipient, Character owner, Item item, boolean forLater) {
+        String itemDesc = formatItemSpecifier(item, recipient);
         boolean targetIsOwner = owner != null && recipient.getId() == owner.getId();
-        return buildLootOfferPrompt(recipient.getName(), itemName, targetIsOwner);
+        return buildLootOfferPrompt(recipient.getName(), itemDesc, targetIsOwner, forLater);
+    }
+
+    /**
+     * Returns "<spec> <itemName>" with up to 2 stat tokens in priority order:
+     * 1) att (or matt for mage audience), 2) main stat, 3) secondary stat.
+     * Tokens with value 0 are skipped — att/matt is NOT gated by slot type, since
+     * gloves/capes/earrings can also carry att or matt. Audience's job decides
+     * which stats are "main"/"secondary" and whether matt outranks att.
+     * Weapon att is rendered without a leading "+" ("30 att maple bow"); all
+     * other tokens use "+" since they are bonus values ("+3 str", "+3 att").
+     */
+    static String formatItemSpecifier(Item item, Character audience) {
+        String name = ItemInformationProvider.getInstance().getName(item.getItemId());
+        if (name == null || name.isBlank()) {
+            name = String.valueOf(item.getItemId());
+        }
+        if (!(item instanceof Equip eq) || audience == null) {
+            return name;
+        }
+
+        int jobId = audience.getJob() == null ? 0 : audience.getJob().getId();
+        boolean mageBranch = isMageBranch(jobId);
+        boolean weapon = ItemConstants.isWeapon(item.getItemId());
+        char[] order = mainSecondaryStats(jobId);
+
+        int attVal = mageBranch ? eq.getMatk() : eq.getWatk();
+        String attLabel = mageBranch ? "matt" : "att";
+        int mainVal = statValue(eq, order[0]);
+        int secVal = statValue(eq, order[1]);
+
+        List<String> tokens = new ArrayList<>(2);
+        if (attVal > 0) {
+            tokens.add(weapon ? (attVal + " " + attLabel) : ("+" + attVal + " " + attLabel));
+        }
+        if (tokens.size() < 2 && mainVal > 0) {
+            tokens.add("+" + mainVal + " " + statName(order[0]));
+        }
+        if (tokens.size() < 2 && secVal > 0) {
+            tokens.add("+" + secVal + " " + statName(order[1]));
+        }
+
+        if (tokens.isEmpty()) {
+            return name;
+        }
+        return String.join(" ", tokens) + " " + name;
+    }
+
+    private static boolean isMageBranch(int jobId) {
+        return (jobId >= 200 && jobId < 300)
+                || (jobId >= 1200 && jobId < 1300)
+                || jobId == 2001
+                || (jobId >= 2200 && jobId < 2300);
+    }
+
+    // Returns 2-char [main, secondary] stat codes: s=str, d=dex, i=int, l=luk
+    private static char[] mainSecondaryStats(int jobId) {
+        // Magician branches: INT main, LUK secondary
+        if (isMageBranch(jobId)) return new char[]{'i', 'l'};
+        // Bowman / Wind Archer: DEX main, STR secondary
+        if ((jobId >= 300 && jobId < 400) || (jobId >= 1300 && jobId < 1400)) return new char[]{'d', 's'};
+        // Thief / Night Walker: LUK main, DEX secondary
+        if ((jobId >= 400 && jobId < 500) || (jobId >= 1400 && jobId < 1500)) return new char[]{'l', 'd'};
+        // Pirate gunslinger sub-branch: DEX main, STR secondary
+        if (jobId >= 520 && jobId < 530) return new char[]{'d', 's'};
+        // Pirate brawler sub-branch + Thunderbreaker: STR main, DEX secondary
+        if ((jobId >= 510 && jobId < 520) || (jobId >= 1500 && jobId < 1600)) return new char[]{'s', 'd'};
+        // Warrior / Dawn Warrior / Aran / Pirate-beginner / fallback: STR main, DEX secondary
+        return new char[]{'s', 'd'};
+    }
+
+    private static int statValue(Equip eq, char code) {
+        return switch (code) {
+            case 's' -> eq.getStr();
+            case 'd' -> eq.getDex();
+            case 'i' -> eq.getInt();
+            case 'l' -> eq.getLuk();
+            default -> 0;
+        };
+    }
+
+    private static String statName(char code) {
+        return switch (code) {
+            case 's' -> "str";
+            case 'd' -> "dex";
+            case 'i' -> "int";
+            case 'l' -> "luk";
+            default -> "";
+        };
     }
 
     private static Character findLootOfferRecipient(BotEntry entry, Character bot, Item item) {
@@ -289,24 +435,201 @@ final class BotOfferManager {
         if (owner == null) {
             return null;
         }
-        if (BotEquipManager.findRecommendationForItem(owner, bot, item) != null) {
-            return owner;
+        if (ItemConstants.isThrowingStar(item.getItemId())) {
+            if (isBetterThrowingStarForRecipient(owner, bot, item)) {
+                return owner;
+            }
+            return findWeakestThrowingStarRecipient(owner, bot, item);
         }
 
-        BotOwnershipService ownership = BotOwnershipService.getInstance();
-        for (Character member : owner.getPartyMembersOnSameMap()) {
-            if (member == null
-                    || member.getId() == owner.getId()
-                    || member.getId() == bot.getId()
-                    || !(member.getClient() instanceof BotClient)
-                    || !ownership.isAuthorizedOwner(member.getId(), owner.getId())) {
-                continue;
-            }
-            if (BotEquipManager.findRecommendationForItem(member, bot, item) != null) {
+        if (BotEquipManager.shouldReserveOwnedItem(bot, item)) {
+            return null;
+        }
+
+        if (gearOfferNeed(entry, owner, bot, item) != null) {
+            return owner;
+        }
+        for (Character member : eligibleBotRecipients(owner, bot)) {
+            if (gearOfferNeed(entry, member, bot, item) != null) {
                 return member;
             }
         }
         return null;
+    }
+
+    private static GearOfferChoice findBestGearOffer(BotEntry entry, Character recipient, Character donor) {
+        List<Equip> offerable = collectOfferableEquips(donor);
+        List<BotEquipManager.EquipRecommendation> current =
+                BotEquipManager.findRecommendedEquipsFromItems(recipient, offerable);
+        if (!current.isEmpty()) {
+            return new GearOfferChoice(current.get(0).candidate(), GearOfferNeed.CURRENT);
+        }
+        if (entry != null && entry.proactiveUpgradeOffers) {
+            ItemInformationProvider ii = ItemInformationProvider.getInstance();
+            for (Equip equip : offerable) {
+                if (BotEquipManager.wouldReserveIncomingItem(recipient, ii, equip)) {
+                    return new GearOfferChoice(equip, GearOfferNeed.FUTURE);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static List<Equip> collectOfferableEquips(Character donor) {
+        ItemInformationProvider ii = ItemInformationProvider.getInstance();
+        Inventory equipInv = donor.getInventory(InventoryType.EQUIP);
+        List<Equip> offerable = new ArrayList<>();
+        for (Item item : equipInv.list()) {
+            if (!(item instanceof Equip equip) || ii.isCash(item.getItemId())) {
+                continue;
+            }
+            if (item.isUntradeable() && !YamlConfig.config.server.UNTRADEABLE_ITEMS_TRADEABLE) {
+                continue;
+            }
+            if (BotEquipManager.shouldReserveOwnedItem(donor, item)) {
+                continue;
+            }
+            offerable.add(equip);
+        }
+        return offerable;
+    }
+    private static GearOfferNeed gearOfferNeed(BotEntry entry, Character recipient, Character donor, Item item) {
+        if (BotEquipManager.findRecommendationForItem(recipient, donor, item) != null) {
+            return GearOfferNeed.CURRENT;
+        }
+        if (entry != null && entry.proactiveUpgradeOffers && item instanceof Equip equip) {
+            if (BotEquipManager.wouldReserveIncomingItem(recipient, ItemInformationProvider.getInstance(), equip)) {
+                return GearOfferNeed.FUTURE;
+            }
+        }
+        return null;
+    }
+
+    static boolean isReservedForOtherRecipients(BotEntry entry, Character donor, Item item) {
+        if (entry == null || donor == null || item == null) {
+            return false;
+        }
+
+        Character owner = entry.owner;
+        if (owner == null) {
+            return false;
+        }
+
+        if (ItemConstants.isThrowingStar(item.getItemId())) {
+            if (isBetterThrowingStarForRecipient(owner, donor, item)) {
+                return true;
+            }
+            for (Character member : eligibleBotRecipients(owner, donor)) {
+                if (isBetterThrowingStarForRecipient(member, donor, item)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        if (ItemConstants.getInventoryType(item.getItemId()) != InventoryType.EQUIP) {
+            return false;
+        }
+        if (gearOfferNeed(entry, owner, donor, item) != null) {
+            return true;
+        }
+        for (Character member : eligibleBotRecipients(owner, donor)) {
+            if (gearOfferNeed(entry, member, donor, item) != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Character findWeakestThrowingStarRecipient(Character owner, Character donor) {
+        Character bestRecipient = null;
+        int bestCurrentWatk = Integer.MAX_VALUE;
+        for (Character member : eligibleBotRecipients(owner, donor)) {
+            Item candidate = findBestThrowingStarOffer(member, donor);
+            if (candidate == null) {
+                continue;
+            }
+            int currentWatk = bestThrowingStarAttack(member);
+            if (currentWatk < bestCurrentWatk) {
+                bestRecipient = member;
+                bestCurrentWatk = currentWatk;
+            }
+        }
+        return bestRecipient;
+    }
+
+    private static Character findWeakestThrowingStarRecipient(Character owner, Character donor, Item item) {
+        Character bestRecipient = null;
+        int bestCurrentWatk = Integer.MAX_VALUE;
+        for (Character member : eligibleBotRecipients(owner, donor)) {
+            if (!isBetterThrowingStarForRecipient(member, donor, item)) {
+                continue;
+            }
+            int currentWatk = bestThrowingStarAttack(member);
+            if (currentWatk < bestCurrentWatk) {
+                bestRecipient = member;
+                bestCurrentWatk = currentWatk;
+            }
+        }
+        return bestRecipient;
+    }
+
+    private static List<Character> eligibleBotRecipients(Character owner, Character donor) {
+        BotOwnershipService ownership = BotOwnershipService.getInstance();
+        return owner.getPartyMembersOnSameMap().stream()
+                .filter(member -> member != null)
+                .filter(member -> member.getId() != owner.getId())
+                .filter(member -> member.getId() != donor.getId())
+                .filter(member -> member.getClient() instanceof BotClient)
+                .filter(member -> ownership.isAuthorizedOwner(member.getId(), owner.getId()))
+                .toList();
+    }
+
+    private static Item findBestThrowingStarOffer(Character recipient, Character donor) {
+        Inventory useInv = donor.getInventory(InventoryType.USE);
+        Item best = null;
+        int bestWatk = 0;
+        for (Item item : useInv.list()) {
+            if (!isBetterThrowingStarForRecipient(recipient, donor, item)) {
+                continue;
+            }
+            int watk = throwingStarAttack(item);
+            if (watk > bestWatk) {
+                best = item;
+                bestWatk = watk;
+            }
+        }
+        return best;
+    }
+
+    static boolean isBetterThrowingStarForRecipient(Character recipient, Character donor, Item candidate) {
+        if (candidate == null || !ItemConstants.isThrowingStar(candidate.getItemId())) {
+            return false;
+        }
+        if (BotAttackExecutionProvider.getEquippedWeaponType(recipient) != WeaponType.CLAW) {
+            return false;
+        }
+        int candidateWatk = throwingStarAttack(candidate);
+        if (candidateWatk < bestThrowingStarAttack(recipient)) {
+            return false;
+        }
+        return BotAttackExecutionProvider.getEquippedWeaponType(donor) != WeaponType.CLAW
+                || candidateWatk < bestThrowingStarAttack(donor);
+    }
+
+    private static int bestThrowingStarAttack(Character character) {
+        Inventory useInv = character.getInventory(InventoryType.USE);
+        int best = 0;
+        for (Item item : useInv.list()) {
+            if (ItemConstants.isThrowingStar(item.getItemId())) {
+                best = Math.max(best, throwingStarAttack(item));
+            }
+        }
+        return best;
+    }
+
+    private static int throwingStarAttack(Item item) {
+        return ItemInformationProvider.getInstance().getWatkForProjectile(item.getItemId());
     }
 
     private static Character resolveReservedOfferRecipient(BotEntry entry, Character bot, int recipientId) {

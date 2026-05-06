@@ -318,6 +318,7 @@ public class ServerConfig {
     public int MINIMUM_GM_LEVEL_TO_USE_STORAGE;
     public int MINIMUM_GM_LEVEL_TO_USE_DUEY;
     public int MINIMUM_GM_LEVEL_TO_DROP;
+    public boolean GM_NO_FAME_COOLDOWN;
 
     //Custom NPC overrides. List of NPC IDs.
     public Map<String, String> NPCS_SCRIPTABLE = new HashMap<>();

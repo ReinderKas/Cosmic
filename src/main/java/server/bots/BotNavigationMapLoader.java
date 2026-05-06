@@ -42,6 +42,7 @@ final class BotNavigationMapLoader {
 
         MapleMap map = new MapleMap(mapId, 0, 0, DataTool.getInt("returnMap", infoData, mapId), monsterRate);
         map.setFieldLimit(DataTool.getInt(infoData.getChildByPath("fieldLimit"), 0));
+        map.setSwim(DataTool.getInt(infoData.getChildByPath("swim"), 0) != 0);
         loadBounds(map, mapData, infoData);
         loadPortals(map, mapData);
         loadFootholds(map, mapData);
@@ -112,6 +113,7 @@ final class BotNavigationMapLoader {
                     Foothold foothold = new Foothold(new Point(x1, y1), new Point(x2, y2), Integer.parseInt(footHold.getName()));
                     foothold.setPrev(DataTool.getInt(footHold.getChildByPath("prev")));
                     foothold.setNext(DataTool.getInt(footHold.getChildByPath("next")));
+                    foothold.setForbidFallDown(DataTool.getInt(footHold.getChildByPath("forbidFallDown"), 0) != 0);
                     footholds.add(foothold);
                     lowerBound.x = Math.min(lowerBound.x, Math.min(x1, x2));
                     lowerBound.y = Math.min(lowerBound.y, Math.min(y1, y2));

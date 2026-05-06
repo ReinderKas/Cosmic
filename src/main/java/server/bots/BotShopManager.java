@@ -28,20 +28,24 @@ final class BotShopManager {
     private static final int SHOP_ARRIVE_DIST = 50;
     private static final int SHOP_NPC_SEARCH_DIST = 601;
     private static final int SHOP_APPROACH_DELAY_MAX_MS = 5001;
-    private static final int SHOP_STEP_DELAY_MIN_MS = 3000;
-    private static final int SHOP_STEP_DELAY_MAX_MS = 6001;
+    private static final int SHOP_STEP_DELAY_MIN_MS = 2000;
+    private static final int SHOP_STEP_DELAY_MAX_MS = 4001;
+    private static final long SHOP_VISIT_TIMEOUT_MS = 30_000L;
+    private static final long SHOP_SEQUENCE_TIMEOUT_MS = 45_000L;
     private static final int POT_TRIGGER_THRESHOLD = 4; // 80% of target (5) for early trigger
     private static final int POT_TARGET_THRESHOLD = 5; // full target when buying at shop
-    private static final int AMMO_TRIGGER_THRESHOLD = 4; // 80% of target (5) for early trigger
-    private static final int AMMO_TARGET_THRESHOLD = 5; // full target when buying at shop
+    private static final int AMMO_TRIGGER_THRESHOLD = 8;
+    private static final int AMMO_TARGET_THRESHOLD = 10; // full target when buying at shop
 
     private BotShopManager() {}
 
     private record NpcShopMatch(NPC npc, Shop shop, Point npcPos) {}
 
-    private record BuyReport(int itemId, int quantity, int requestedQuantity, boolean broke) {
+    private enum ShortfallReason { NONE, NO_MESO, NO_SPACE, OTHER }
+
+    private record BuyReport(int itemId, int quantity, int requestedQuantity, ShortfallReason reason) {
         boolean hasShortfall() {
-            return broke && quantity < requestedQuantity;
+            return reason != ShortfallReason.NONE && quantity < requestedQuantity;
         }
     }
 
@@ -71,6 +75,10 @@ final class BotShopManager {
             "brb, refilling", "be right back~"
     );
 
+    private static final List<String> SHOPPING_MSGS = List.of(
+            "shopping...", "restocking now", "buying stuff", "ok let me buy", "getting supplies"
+    );
+
     static void onMapChange(BotEntry entry, Character bot) {
         clearShopState(entry);
 
@@ -98,8 +106,10 @@ final class BotShopManager {
 
         entry.shopVisitPending = true;
         entry.shopNpcPos = match.npcPos;
-        entry.shopTargetPos = pickShopApproachPoint(match.npcPos, bot);
+        entry.shopTargetPos = pickShopApproachPoint(match.npcPos, entry, bot);
         entry.shopApproachDelayMs = (int) BotManager.randMs(0, SHOP_APPROACH_DELAY_MAX_MS);
+        entry.shopVisitStartedAtMs = System.currentTimeMillis();
+        entry.shopSequenceStartedAtMs = 0L;
     }
 
     static boolean tickShopVisit(BotEntry entry, Character bot) {
@@ -107,6 +117,23 @@ final class BotShopManager {
             return false;
         }
         if (entry.shopNpcPos == null) {
+            clearShopState(entry);
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        if (entry.shopVisitStartedAtMs > 0 && now - entry.shopVisitStartedAtMs > SHOP_VISIT_TIMEOUT_MS) {
+            if (!entry.shopSequenceActive && entry.shopNpcPos != null && findNpcNear(bot, entry.shopNpcPos) != null) {
+                entry.shopTargetPos = bot.getPosition();
+                entry.shopApproachDelayMs = 0;
+            } else {
+                BotManager.getInstance().botSay(bot, "couldn't reach shop in time");
+                clearShopState(entry);
+                return false;
+            }
+        }
+        if (entry.shopSequenceActive
+                && entry.shopSequenceStartedAtMs > 0
+                && now - entry.shopSequenceStartedAtMs > SHOP_SEQUENCE_TIMEOUT_MS) {
             clearShopState(entry);
             return false;
         }
@@ -120,8 +147,10 @@ final class BotShopManager {
         if (botPos.distanceSq(target) <= (long) SHOP_ARRIVE_DIST * SHOP_ARRIVE_DIST) {
             if (!entry.shopSequenceActive) {
                 entry.shopSequenceActive = true;
+                entry.shopSequenceStartedAtMs = System.currentTimeMillis();
+                BotManager.getInstance().botSay(bot, BotManager.randomReply(SHOPPING_MSGS));
                 Point npcPos = entry.shopNpcPos;
-                BotManager.after(stepDelayMs(), () -> executePurchases(entry, bot, npcPos));
+                scheduleShopStep(entry, () -> executePurchases(entry, bot, npcPos));
             }
             return true;
         }
@@ -232,7 +261,7 @@ final class BotShopManager {
         }
 
         PurchaseSequence next = sequence.actions().get(index).run(sequence, shop);
-        BotManager.after(stepDelayMs(), () -> runPurchaseStep(next, index + 1));
+        scheduleShopStep(sequence.entry(), () -> runPurchaseStep(next, index + 1));
     }
 
     private static void finishPurchaseSequence(PurchaseSequence sequence) {
@@ -256,7 +285,7 @@ final class BotShopManager {
             BotManager.getInstance().botSay(sequence.bot(), "bought " + String.join(", ", sequence.bought()));
             BotPotionManager.setupAutopotForBot(sequence.bot());
             BotCombatManager.tickAmmoCheck(sequence.entry(), sequence.bot());
-            BotManager.after(stepDelayMs(), finish);
+            scheduleShopStep(sequence.entry(), finish);
             return;
         }
 
@@ -305,7 +334,7 @@ final class BotShopManager {
     private static BuyReport buyAmmo(Character bot, Shop shop, WeaponType wt) {
         ShopSlotItem ammo = findAmmoItem(shop, wt);
         if (ammo == null) {
-            return new BuyReport(0, 0, 0, false);
+            return new BuyReport(0, 0, 0, ShortfallReason.NONE);
         }
 
         int target = BotCombatManager.cfg.AMMO_LOW_WARN * AMMO_TARGET_THRESHOLD;
@@ -329,7 +358,7 @@ final class BotShopManager {
         int recharged = 0;
         int attempted = 0;
         int shortfallItemId = 0;
-        boolean broke = false;
+        ShortfallReason reason = ShortfallReason.NONE;
         for (Item item : bot.getInventory(InventoryType.USE).list()) {
             if (!ItemConstants.isRechargeable(item.getItemId())) {
                 continue;
@@ -343,15 +372,18 @@ final class BotShopManager {
             if (result == Shop.TransactionResult.SUCCESS) {
                 recharged++;
                 attempted++;
+                continue;
             }
-            if (result == Shop.TransactionResult.NOT_ENOUGH_MESO) {
-                attempted++;
-                shortfallItemId = item.getItemId();
-                broke = true;
-                break;
-            }
+            attempted++;
+            shortfallItemId = item.getItemId();
+            reason = switch (result) {
+                case NOT_ENOUGH_MESO -> ShortfallReason.NO_MESO;
+                case NO_SPACE -> ShortfallReason.NO_SPACE;
+                default -> ShortfallReason.OTHER;
+            };
+            break;
         }
-        return new BuyReport(shortfallItemId, recharged, attempted, broke);
+        return new BuyReport(shortfallItemId, recharged, attempted, reason);
     }
 
     private static ShopSlotItem findPotionItem(Shop shop, Character bot, boolean forHp) {
@@ -397,7 +429,7 @@ final class BotShopManager {
     private static BuyReport buyPotions(Character bot, Shop shop, boolean forHp) {
         ShopSlotItem pot = findPotionItem(shop, bot, forHp);
         if (pot == null) {
-            return new BuyReport(0, 0, 0, false);
+            return new BuyReport(0, 0, 0, ShortfallReason.NONE);
         }
 
         int target = BotManager.cfg.POT_LOW_WARN * POT_TARGET_THRESHOLD;
@@ -408,11 +440,11 @@ final class BotShopManager {
 
     private static BuyReport buyFixedCostItem(Character bot, Shop shop, ShopSlotItem item, int desiredQuantity, int batchSize) {
         if (item == null || desiredQuantity <= 0) {
-            return new BuyReport(0, 0, 0, false);
+            return new BuyReport(0, 0, 0, ShortfallReason.NONE);
         }
 
         int totalBought = 0;
-        boolean broke = false;
+        ShortfallReason reason = ShortfallReason.NONE;
         int price = item.shopItem.getPrice();
 
         while (totalBought < desiredQuantity) {
@@ -424,28 +456,40 @@ final class BotShopManager {
                 continue;
             }
             if (result == Shop.TransactionResult.NOT_ENOUGH_MESO) {
+                reason = ShortfallReason.NO_MESO;
                 int affordable = price > 0 ? Math.min(remaining, bot.getMeso() / price) : 0;
                 if (affordable > 0) {
                     Shop.TransactionResult partial = shop.buyDirect(bot, item.slot, item.shopItem.getItemId(), (short) affordable);
                     if (partial == Shop.TransactionResult.SUCCESS) {
                         totalBought += affordable;
+                    } else if (partial == Shop.TransactionResult.NO_SPACE) {
+                        reason = ShortfallReason.NO_SPACE;
                     }
                 }
-                broke = true;
+            } else if (result == Shop.TransactionResult.NO_SPACE) {
+                reason = ShortfallReason.NO_SPACE;
+            } else {
+                reason = ShortfallReason.OTHER;
             }
             break;
         }
 
-        return new BuyReport(item.shopItem.getItemId(), totalBought, desiredQuantity, broke);
+        return new BuyReport(item.shopItem.getItemId(), totalBought, desiredQuantity, reason);
     }
 
     private static String buildShortfallMessage(BuyReport report) {
         String itemName = resolveItemName(report.itemId(), "item");
-        if (report.quantity() <= 0) {
-            return "couldn't afford any " + itemName + " this trip";
-        }
-        return "could only afford " + GameConstants.numberWithCommas(report.quantity())
-                + " " + itemName + " out of " + GameConstants.numberWithCommas(report.requestedQuantity());
+        String got = GameConstants.numberWithCommas(report.quantity());
+        String want = GameConstants.numberWithCommas(report.requestedQuantity());
+        return switch (report.reason()) {
+            case NO_SPACE -> report.quantity() <= 0
+                    ? "no room in my bag for " + itemName
+                    : "only fit " + got + " " + itemName + " out of " + want + " — bag's full";
+            case OTHER -> "shop wouldn't sell me " + itemName;
+            case NO_MESO, NONE -> report.quantity() <= 0
+                    ? "couldn't afford any " + itemName + " this trip"
+                    : "could only afford " + got + " " + itemName + " out of " + want;
+        };
     }
 
     private static String resolveItemName(int itemId, String fallbackName) {
@@ -462,19 +506,39 @@ final class BotShopManager {
                 && findNpcNear(bot, npcPos) != null;
     }
 
+    static void cancelShopVisit(BotEntry entry) {
+        clearShopState(entry);
+    }
+
     private static void clearShopState(BotEntry entry) {
         entry.shopVisitPending = false;
         entry.shopNpcPos = null;
         entry.shopTargetPos = null;
         entry.shopApproachDelayMs = 0;
         entry.shopSequenceActive = false;
+        entry.shopVisitStartedAtMs = 0L;
+        entry.shopSequenceStartedAtMs = 0L;
     }
 
     private static long stepDelayMs() {
         return BotManager.randMs(SHOP_STEP_DELAY_MIN_MS, SHOP_STEP_DELAY_MAX_MS);
     }
 
-    private static Point pickShopApproachPoint(Point npcPos, Character bot) {
+    private static void scheduleShopStep(BotEntry entry, Runnable step) {
+        BotManager.after(stepDelayMs(), () -> {
+            if (!entry.shopVisitPending) {
+                return;
+            }
+            try {
+                step.run();
+            } catch (RuntimeException exception) {
+                clearShopState(entry);
+                throw exception;
+            }
+        });
+    }
+
+    private static Point pickShopApproachPoint(Point npcPos, BotEntry entry, Character bot) {
         var footholds = bot.getMap().getFootholds();
         if (footholds == null) {
             return npcPos;
@@ -499,6 +563,32 @@ final class BotShopManager {
         }
         if (candidates.isEmpty()) {
             return npcPos;
+        }
+        BotMovementProfile profile = entry.movementProfile != null
+                ? entry.movementProfile : BotMovementProfile.fromCharacter(bot);
+        BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(bot.getMap(), profile);
+        if (graph == null) {
+            graph = BotNavigationGraphProvider.peekClosestGraph(bot.getMap(), profile);
+        }
+        if (graph != null) {
+            Point botPos = bot.getPosition();
+            int startRegionId = BotNavigationManager.resolveCurrentRegionId(graph, entry, bot.getMap(), botPos);
+            if (startRegionId >= 0) {
+                List<Point> reachable = new ArrayList<>();
+                for (Point candidate : candidates) {
+                    int targetRegionId = BotNavigationManager.resolveTargetRegionId(
+                            graph, entry, bot.getMap(), candidate);
+                    if (targetRegionId < 0) continue;
+                    if (startRegionId == targetRegionId
+                            || !BotNavigationManager.findPath(graph, bot.getMap(), botPos,
+                                    startRegionId, targetRegionId, candidate).isEmpty()) {
+                        reachable.add(candidate);
+                    }
+                }
+                if (!reachable.isEmpty()) {
+                    candidates = reachable;
+                }
+            }
         }
         return candidates.get(ThreadLocalRandom.current().nextInt(candidates.size()));
     }

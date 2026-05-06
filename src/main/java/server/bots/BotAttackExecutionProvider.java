@@ -89,11 +89,13 @@ final class BotAttackExecutionProvider {
 
         int cooldownMs = toCooldownMs(adjustAttackDelayMillis(rawAnimationDelayMs, effectiveAttackSpeed));
         int hitDelayMs = adjustAttackDelayMillis(rawHitDelayMs, effectiveAttackSpeed);
-        int stance = closeRangeRoute ? closeRangePacketFields.facingMask() : clientAttackStanceId(action, fallbackAction);
+        int stance = attackPacketStance(facingLeft);
+        // Ranged route must use clientProjectileHitBox so the bot's reach scales with
+        // CLIENT_PROJECTILE_BASE_RANGE + Keen-Eyes bonus. The weapon's afterimage WZ data
+        // (e.g. claws share swordOL with melee, which has lt/rb vectors) reports a near-body
+        // swing rect that would cap basic claw/bow/etc. reach at ~80 px.
         Rectangle hitBox = closeRangeRoute
                 ? closeRangeBasicHitBox(bot.getPosition(), facingLeft)
-                : profile.hasBoundingBox()
-                ? profile.calculateBoundingBox(bot.getPosition(), facingLeft)
                 : rangedBasicHitBox(route, bot, facingLeft);
 
         return new BasicAttackData(hitBox, display, direction, direction, stance, effectiveAttackSpeed,
@@ -130,7 +132,7 @@ final class BotAttackExecutionProvider {
                 : bot != null ? rangedBasicHitBox(route, bot, facingLeft) : null;
 
         return new BasicAttackData(hitBox, display, direction, direction,
-                closeRangeRoute ? closeRangePacketFields.facingMask() : clientAttackStanceId(action, attackSpec.primaryAction()),
+                attackPacketStance(facingLeft),
                 effectiveAttackSpeed, defaultHitDelayMs(adjustedAnimationDelayMs), toCooldownMs(adjustedAnimationDelayMs),
                 route);
     }
@@ -164,21 +166,13 @@ final class BotAttackExecutionProvider {
                 facingLeft ? 0x80 : 0x00);
     }
 
-    // These ids match the WASM client's Stance::Id enum for attack stances and are used
-    // by packet byte 3 on ranged/magic routes.
-    static int clientAttackStanceId(String actionName, String fallbackAction) {
-        BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
-        int stanceId = provider.getAttackStanceId(actionName);
-        if (stanceId > 0) {
-            return stanceId;
-        }
-        if (fallbackAction != null && !fallbackAction.equals(actionName)) {
-            int fallbackStanceId = provider.getAttackStanceId(fallbackAction);
-            if (fallbackStanceId > 0) {
-                return fallbackStanceId;
-            }
-        }
-        return 0;
+    // Packet byte 3 on every attack route (close-range, ranged, magic) is purely the
+    // facing-direction bit. Per logs/monitored-packets-assasin-* the v83 client renders
+    // nothing when this byte carries a non-zero action id on a ranged star throw, even
+    // though the server still applies damage. Single source of truth for all attack-plan
+    // builders so basic and skill packets stay in lockstep.
+    static int attackPacketStance(boolean facingLeft) {
+        return facingLeft ? 0x80 : 0x00;
     }
 
     static List<String> resolveAttackActions(BotAttackDataProvider.AttackAnimationSpec attackSpec, List<String> sourceActions) {
@@ -283,32 +277,116 @@ final class BotAttackExecutionProvider {
     }
 
     static boolean isAnyMobNearerThanTarget(Character bot, Point botPos, Point targetPos) {
+        return findCloserThreatMob(bot, botPos, targetPos) != null;
+    }
+
+    /**
+     * Returns the closest live mob breaching the retreat band that is nearer to the bot
+     * than the active target, or null if none. Same gates as {@link #isAnyMobNearerThanTarget}
+     * (bow/crossbow/claw/gun only). Used by grind mode to swap onto a crowding threat
+     * instead of fleeing the original target while shooting in the wrong direction.
+     */
+    static server.life.Monster findCloserThreatMob(Character bot, Point botPos, Point targetPos) {
         if (bot == null || botPos == null || targetPos == null) {
-            return false;
+            return null;
         }
         WeaponType wt = getEquippedWeaponType(bot);
         if (!isDegenerateCapableRangedWeapon(wt)) {
-            return false;
+            return null;
         }
         int threshX = BotCombatManager.cfg.RANGED_RETREAT_THRESHOLD_X;
         int threshY = BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_Y;
         double targetDistSq = targetPos.distanceSq(botPos);
+        server.life.Monster closest = null;
+        double closestDistSq = targetDistSq;
         for (server.life.Monster m : bot.getMap().getAllMonsters()) {
             if (!m.isAlive()) continue;
             Point mp = m.getPosition();
-            if (mp.distanceSq(botPos) >= targetDistSq) continue;
+            double mDistSq = mp.distanceSq(botPos);
+            if (mDistSq >= closestDistSq) continue;
             int dx = Math.abs(mp.x - botPos.x);
             int dy = Math.abs(mp.y - botPos.y);
             if (dx <= threshX && dy <= threshY) {
-                return true;
+                closest = m;
+                closestDistSq = mDistSq;
             }
         }
-        return false;
+        return closest;
     }
 
     static Point retreatTargetPosition(Point botPos, Point targetPos) {
-        int retreatDirection = targetPos.x >= botPos.x ? -1 : 1;
-        return new Point(botPos.x + retreatDirection * BotCombatManager.cfg.RANGED_RETREAT_DISTANCE_X, botPos.y);
+        return retreatTargetPosition(null, botPos, targetPos);
+    }
+
+    /**
+     * Cluster-aware retreat: picks a direction toward the more open side, then sweeps
+     * candidate distances within that side and lands at the X with the largest gap to
+     * any nearby mob. Falls back to the fixed-distance step when {@code bot} is null
+     * or no candidate sweep is possible.
+     */
+    static Point retreatTargetPosition(Character bot, Point botPos, Point targetPos) {
+        int direction = pickRetreatDirection(bot, botPos, targetPos);
+        int defaultStep = BotCombatManager.cfg.RANGED_RETREAT_DISTANCE_X;
+        if (bot == null || bot.getMap() == null) {
+            return new Point(botPos.x + direction * defaultStep, botPos.y);
+        }
+
+        int minStep = BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_X + 20;
+        int maxStep = defaultStep * 2;
+        int yBand = BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_Y * 2;
+        int bestX = botPos.x + direction * defaultStep;
+        long bestScore = Long.MIN_VALUE;
+        for (int step = minStep; step <= maxStep; step += 30) {
+            int candX = botPos.x + direction * step;
+            long minMobDistSq = Long.MAX_VALUE;
+            for (server.life.Monster m : bot.getMap().getAllMonsters()) {
+                if (!m.isAlive()) continue;
+                Point mp = m.getPosition();
+                int dy = Math.abs(mp.y - botPos.y);
+                if (dy > yBand) continue;
+                long dx = mp.x - candX;
+                long sq = dx * dx + (long) dy * dy;
+                if (sq < minMobDistSq) minMobDistSq = sq;
+            }
+            // Maximize gap to nearest mob; tie-break toward closer to active target so DPS lands.
+            int dxToTarget = Math.abs(targetPos.x - candX);
+            long score = minMobDistSq - dxToTarget * 10L;
+            if (score > bestScore) {
+                bestScore = score;
+                bestX = candX;
+            }
+        }
+        return new Point(bestX, botPos.y);
+    }
+
+    private static int pickRetreatDirection(Character bot, Point botPos, Point targetPos) {
+        int defaultDir = targetPos.x >= botPos.x ? -1 : 1;
+        if (bot == null || bot.getMap() == null) {
+            return defaultDir;
+        }
+        int scanWidth = BotCombatManager.cfg.ATTACK_RANGE_X * 4;
+        int scanHeight = BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_Y * 2;
+        long leftNearestSq = Long.MAX_VALUE;
+        long rightNearestSq = Long.MAX_VALUE;
+        for (server.life.Monster m : bot.getMap().getAllMonsters()) {
+            if (!m.isAlive()) continue;
+            Point mp = m.getPosition();
+            int dy = Math.abs(mp.y - botPos.y);
+            if (dy > scanHeight) continue;
+            int dx = mp.x - botPos.x;
+            int dxAbs = Math.abs(dx);
+            if (dxAbs > scanWidth) continue;
+            long distSq = (long) dx * dx + (long) dy * dy;
+            if (dx < 0) {
+                if (distSq < leftNearestSq) leftNearestSq = distSq;
+            } else if (dx > 0) {
+                if (distSq < rightNearestSq) rightNearestSq = distSq;
+            }
+        }
+        if (leftNearestSq == rightNearestSq) {
+            return defaultDir;
+        }
+        return leftNearestSq > rightNearestSq ? -1 : 1;
     }
 
     static SkillAttackTiming resolveSkillAttackTiming(Skill skill, String action, Character bot,
@@ -485,7 +563,11 @@ final class BotAttackExecutionProvider {
     }
 
     private static int toCooldownMs(int attackDelayMillis) {
-        return BotMovementManager.delayAfterCurrentTick(Math.max(0, attackDelayMillis));
+        // Attack cooldown is assigned after BotCombatManager.tickActionLock() has already
+        // consumed this server tick. Do not subtract TICK_MS here, or the next AI pass can
+        // start a new attack on the same tick the previous animation expires, skipping the
+        // short stand/recovery frame a real client shows between attacks.
+        return Math.max(0, attackDelayMillis);
     }
 
     private static int defaultHitDelayMs(int animationDelayMs) {

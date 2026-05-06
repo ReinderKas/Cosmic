@@ -23,6 +23,9 @@ public class BotEntry {
     final Character bot;
     volatile Character owner;
     volatile boolean following = false;
+    volatile int followTargetId = 0; // 0 = owner
+    volatile boolean airshowActive = false;
+    volatile long airshowLastTrailAtMs = 0L;
     final ScheduledFuture<?> task;
     BotMovementProfile movementProfile = BotMovementProfile.base();
 
@@ -32,17 +35,42 @@ public class BotEntry {
     double physX = 0.0;
     double physY = 0.0;
     double groundPhysicsCarryMs = 0.0;
+    // Peak (min-y = highest point) reached during current airborne period. Used by landOnGround
+    // to compute fall distance for fall-damage. Positive infinity when grounded / uninitialised;
+    // first airborne-tick lowers it to physY and subsequent ticks keep tracking the peak.
+    double fallPeakPhysY = Double.POSITIVE_INFINITY;
     boolean inAir = false;
     int jumpCooldownMs = 0;
     int movementVelX = 0;
     int movementVelY = 0;
     int facingDir = 1;
     boolean crouching = false;
+    boolean swimming = false;
+
+    // Swim intent — set by movement layer, consumed by physics engine. Movement
+    // expresses "what the bot is trying to do"; physics integrates accordingly.
+    // Mirrors how the real client only exposes discrete inputs (steer L/R,
+    // jump-burst, hold UP/DOWN) — no continuous velocity overrides.
+    int swimMoveDir = 0;                 // -1 left, 0 none, +1 right
+    int swimVerticalHold = 0;            // -1 = UP held (slow sink), 0 = none, +1 = DOWN held (fast sink)
+    boolean swimJumpRequested = false;   // one-shot upward burst
+    long swimNextJumpAtMs = 0L;          // cooldown gate
+
+    // Movement intent — set by movement/fidget layer, consumed by physics engine.
+    // Maps to the same left/right key hold used by the real client for both
+    // ground walking and air steering. Physics reads this in the active mode:
+    //   - Ground: applyGroundMotion() integrates through force/friction model
+    //   - Airborne: stepAirborne() applies air steering accel (gated by fixedAirArc)
+    // Mutually exclusive by state (inAir vs grounded), so one field suffices.
+    int moveDir = 0;                     // -1 left, 0 none, +1 right
 
     // Rope climbing
     boolean climbing = false;
     Rope climbRope = null;
     Rope blockedRopeGrab = null;
+
+    // Climb intent — set by movement layer, consumed by physics engine.
+    int climbVerticalDir = 0;            // -1 up, 0 idle, +1 down
 
     // Horizontal movement hysteresis
     boolean wasMovingX = false;
@@ -85,6 +113,9 @@ public class BotEntry {
     boolean noAmmo = false;
     boolean ammoWarnSent = false;
     boolean degenAttackDone = false; // force retreat after an accidental close-range hit
+    long retreatHoldUntilMs = 0L; // hysteresis: lock the local retreat goal for a short window
+    Point retreatHoldPos = null;  // the locked retreat target — reused while hold is active
+    int wanderDirection = 0;      // -1 left, +1 right, 0 = unset (picked when grind has no target)
 
     // Shop auto-buy (triggered once per map change)
     volatile boolean shopVisitPending = false;
@@ -92,10 +123,17 @@ public class BotEntry {
     volatile Point shopTargetPos = null;
     int shopApproachDelayMs = 0;
     boolean shopSequenceActive = false;
+    long shopVisitStartedAtMs = 0L;
+    long shopSequenceStartedAtMs = 0L;
 
     // Damage taken
     long deadUntil = 0;
     int mobHitCooldownMs = 0;
+    // Client-side alert-stance emulation: when currentTimeMillis < alertedUntilMs the bot's
+    // broadcast stance gets STAND→ALERT substituted so observers see the alert pose.
+    // Mirrors CharLook::alerted (TimedBool, 5000ms) in maplestory-wasm. Absolute reset on each
+    // trigger (attack/hit/heal/buff), never additive.
+    long alertedUntilMs = 0L;
     Point lastMobTouchCheckPos = null;
     int lastMobTouchMapId = -1;
 
@@ -105,6 +143,7 @@ public class BotEntry {
     int invFullWarnCooldownMs = 0;
     boolean potShareRequestedHp = false; // true once an HP pot-share request has been broadcast this episode
     boolean potShareRequestedMp = false; // reset when pot count recovers above POT_LOW_WARN
+    boolean ammoShareRequested = false; // reset when arrow/bolt count recovers above AMMO_LOW_WARN
 
     // Job advancement prompts
     int jobPromptSent = 0;
@@ -116,6 +155,10 @@ public class BotEntry {
     String spVariant = null;
     boolean spVariantPromptSent = false;
 
+    // Reply channel — tracks the chat channel the last owner command arrived on.
+    // Bot replies are routed to this channel until the next command changes it.
+    volatile ReplyChannel replyChannel = ReplyChannel.MAP;
+
     // Pending two-step action
     String pendingAction = null;
     String pendingDropCategory = null;
@@ -123,6 +166,12 @@ public class BotEntry {
     int pendingLootOfferRecipientId = 0;
     long pendingLootOfferExpiresAt = 0L;
     int lootInhibitMs = 0;
+
+    // Bot-initiated trade retry: when a pot-share / ammo-share / loot-offer is blocked
+    // because the sender or recipient is already in a trade, the attempt is stored here
+    // and re-fired once the sender's trade clears and the delay expires.
+    Runnable pendingBotTradeRetry = null;
+    int pendingBotTradeRetryMs = 0;
 
     // Trade queue
     String pendingTradeCategory = null;
@@ -135,16 +184,30 @@ public class BotEntry {
     boolean pendingTradeAllAdded = false;
     boolean pendingTradeBotDone = false;
     boolean pendingTradeSingleBatch = false;
+    String  pendingTradeCategoryMsg = null;
     int     pendingPotShareBudget = 0; // max total qty to donate; 0 = no cap (normal trades)
+    Map<Item, Short> pendingTradeRestoreSlots = new IdentityHashMap<>();
 
     // Message queue
-    final ArrayDeque<String> msgQueue = new ArrayDeque<>();
+    final ArrayDeque<BotChatManager.QueuedMessage> msgQueue = new ArrayDeque<>();
     boolean msgSending = false;
+
+    // Generic scripted task queue. Per-map scripts enqueue small primitives
+    // (move, follow, grind, drop) and the shared manager executes them.
+    final ArrayDeque<BotTask> scriptTasks = new ArrayDeque<>();
+    BotTask activeScriptTask = null;
 
     // AFK detection
     Point ownerAfkPos = null;
     long ownerAfkSinceMs = 0;
     boolean ownerWasAfk = false;
+
+    // Owner-offline-or-dead detection: after a sustained period (5 min) the bot
+    // scrolls/warps to the nearest town and idles, instead of grinding pots dry
+    // or death-looping with no anchor.
+    long ownerOfflineOrDeadSinceMs = 0;
+    boolean ownerReturnedToTown = false;
+    boolean ownerAwaySafeMode = false;
 
     // Foothold index, rebuilt on map change
     int lastMapId = -1;
@@ -158,10 +221,14 @@ public class BotEntry {
     // "Move here" target — bot navigates to this fixed point, then idles until cleared
     Point moveTarget = null;
     boolean moveTargetPrecise = false; // true when triggered by "move here" — uses tight stop dist
+    // "Farm here" anchor — bot returns to this fixed point and only takes local attacks.
+    Point farmAnchor = null;
+    int farmAnchorMapId = -1;
 
     // Buff consumables (toggleable; cheap = weakest buff of each type, max = strongest)
     boolean buffConsumablesEnabled = false;
     boolean buffCheapMode          = true;
+    boolean proactiveUpgradeOffers = true;
     long    lastBuffScanMs         = 0;
     long    lastBuffActionAtMs     = 0L;
     String  lastBuffActionSummary  = "no buff scans yet";
@@ -172,16 +239,16 @@ public class BotEntry {
 
     // Party-quest state (one slot per PQ type; null = not in that PQ)
     public server.bots.pq.BotKpqState kpq = new server.bots.pq.BotKpqState();
+    public BotScriptRuntime script = new BotScriptRuntime();
 
-    // Equips received from the owner in a trade — excluded from automatic re-offer batches.
-    // Cleared when owner explicitly requests all equips back.
+    // Equips received from the owner during the current trade session.
+    // Cleared when that trade session finishes or is cancelled.
     Set<Item> ownerGivenItems = Collections.newSetFromMap(new IdentityHashMap<>());
 
     // Last reason an edge execution was blocked (for debug logs)
     String lastEdgeBlockReason = null;
 
     // Cached movement state shared across ticks
-    int lastDesiredDirection = 0;
     Point navTargetPos = null;
     BotNavigationGraph.Edge navEdge = null;
     BotNavigationGraph.Edge navJumpLaunchEdge = null;
@@ -237,6 +304,8 @@ public class BotEntry {
     int lastBroadcastVelX = 0;
     int lastBroadcastVelY = 0;
     int lastBroadcastStance = 0;
+    int lastBroadcastFh = 0;
+    int lastGroundFhId = 0;
 
     BotEntry(Character bot, Character owner, ScheduledFuture<?> task) {
         this.bot = bot;

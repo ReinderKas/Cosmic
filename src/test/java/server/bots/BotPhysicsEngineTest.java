@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -27,22 +28,40 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class BotPhysicsEngineTest {
-    private static MapleMap henesys;
-    private static MapleMap ellinia;
-    private static MapleMap elliniaWeaponStore;
-    private static MapleMap kerning;
-    private static MapleMap kpqS1;
-    private static MapleMap sleepyForest;
+    private static final Supplier<MapleMap> henesysS = lazyMap(100000000);
+    private static final Supplier<MapleMap> elliniaWeaponStoreS = lazyMap(101000001);
+    private static final Supplier<MapleMap> kerningS = lazyMap(103000000);
+    private static final Supplier<MapleMap> kerningPharmacyS = lazyMap(103000002);
+    private static final Supplier<MapleMap> kpqS1S = lazyMap(103000800);
+    private static final Supplier<MapleMap> mushroomShrineS = lazyMap(800000000);
+    private static final Supplier<MapleMap> sleepyForestS = lazyMap(105040400);
+
+    private static MapleMap henesys() { return henesysS.get(); }
+    private static MapleMap elliniaWeaponStore() { return elliniaWeaponStoreS.get(); }
+    private static MapleMap kerning() { return kerningS.get(); }
+    private static MapleMap kerningPharmacy() { return kerningPharmacyS.get(); }
+    private static MapleMap kpqS1() { return kpqS1S.get(); }
+    private static MapleMap mushroomShrine() { return mushroomShrineS.get(); }
+    private static MapleMap sleepyForest() { return sleepyForestS.get(); }
+
+    private static Supplier<MapleMap> lazyMap(int mapId) {
+        Supplier<MapleMap> delegate = () -> BotNavigationMapLoader.loadMapGeometry(mapId);
+        return new Supplier<>() {
+            private volatile MapleMap value;
+            @Override public MapleMap get() {
+                MapleMap v = value;
+                if (v != null) return v;
+                synchronized (this) {
+                    if (value == null) value = delegate.get();
+                    return value;
+                }
+            }
+        };
+    }
 
     @BeforeAll
-    static void loadMaps() {
+    static void initWzPath() {
         System.setProperty("wz-path", Path.of("wz").toAbsolutePath().toString());
-        henesys = BotNavigationMapLoader.loadMapGeometry(100000000);
-        ellinia = BotNavigationMapLoader.loadMapGeometry(101000000);
-        elliniaWeaponStore = BotNavigationMapLoader.loadMapGeometry(101000001);
-        kerning = BotNavigationMapLoader.loadMapGeometry(103000000);
-        kpqS1 = BotNavigationMapLoader.loadMapGeometry(103000800);
-        sleepyForest = BotNavigationMapLoader.loadMapGeometry(105040400);
     }
 
     @Test
@@ -52,24 +71,23 @@ class BotPhysicsEngineTest {
 
     @Test
     void shouldSimulateKnownHenesysVerticalJumpLanding() {
-        BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateJumpLanding(henesys, new Point(1080, 334), 0);
+        BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateJumpLanding(henesys(), new Point(1080, 334), 0);
 
         assertNotNull(landing);
         assertEquals(new Point(1080, 275), landing.point());
     }
 
     @Test
-    void shouldTreatNearbyElliniaRopeAsReachableAndFarOffsetAsUnreachable() {
-        Rope rope = ellinia.getRopes().stream()
-                .filter(candidate -> candidate.topY() < candidate.bottomY())
-                .findFirst()
-                .orElseThrow();
+    void shouldTreatNearbySyntheticRopeAsReachableAndFarOffsetAsUnreachable() {
+        MapleMap map = createEmptyTestMap(910000101);
+        Rope rope = new Rope(100, 40, 160, false);
+        map.addRope(rope);
 
-        Point nearPoint = new Point(rope.x() - BotPhysicsEngine.walkStep(ellinia), rope.bottomY());
-        Point farPoint = new Point(rope.x() - BotPhysicsEngine.maxJumpHorizontalTravel(ellinia) - 50, rope.bottomY());
+        Point nearPoint = new Point(rope.x() - BotPhysicsEngine.walkStep(map), rope.bottomY());
+        Point farPoint = new Point(rope.x() - BotPhysicsEngine.maxJumpHorizontalTravel(map) - 50, rope.bottomY());
 
-        assertTrue(BotPhysicsEngine.canReachRopeFromGround(ellinia, nearPoint, rope));
-        assertFalse(BotPhysicsEngine.canReachRopeFromGround(ellinia, farPoint, rope));
+        assertTrue(BotPhysicsEngine.canReachRopeFromGround(map, nearPoint, rope));
+        assertFalse(BotPhysicsEngine.canReachRopeFromGround(map, farPoint, rope));
     }
 
     @Test
@@ -113,7 +131,7 @@ class BotPhysicsEngineTest {
         entry.physY = 88;
         entry.movementVelX = 123;
         entry.movementVelY = -456;
-        entry.lastDesiredDirection = -1;
+        entry.moveDir = -1;
         entry.downJumpPending = true;
         entry.downJumpGracePeriodMS = 350;
 
@@ -129,7 +147,7 @@ class BotPhysicsEngineTest {
         assertEquals(20.0, entry.physY);
         assertEquals(0, entry.movementVelX);
         assertEquals(0, entry.movementVelY);
-        assertEquals(0, entry.lastDesiredDirection);
+        assertEquals(0, entry.moveDir);
         assertEquals(CharacterStance.STAND_RIGHT_STANCE, BotPhysicsEngine.resolveStance(entry));
     }
 
@@ -137,13 +155,13 @@ class BotPhysicsEngineTest {
     void shouldClearWalkIntentWhenIdlingOnGround() {
         Character bot = mockBot(new Point(10, 20), null);
         BotEntry entry = new BotEntry(bot, null, null);
-        entry.lastDesiredDirection = -1;
+        entry.moveDir = -1;
         entry.facingDir = -1;
         entry.movementVelX = -125;
 
         BotPhysicsEngine.idleOnGround(entry, bot);
 
-        assertEquals(0, entry.lastDesiredDirection);
+        assertEquals(0, entry.moveDir);
         assertEquals(0, entry.movementVelX);
         assertEquals(CharacterStance.STAND_LEFT_STANCE, BotPhysicsEngine.resolveStance(entry));
         assertEquals(CharacterStance.STAND_LEFT_STANCE, bot.getStance());
@@ -201,18 +219,25 @@ class BotPhysicsEngineTest {
 
     @Test
     void shouldFaceAirSteeringDirectionEvenWhenMomentumIsOpposite() {
-        BotEntry entry = new BotEntry(null, null, null);
+        MapleMap map = mock(MapleMap.class);
+        when(map.getFootholds()).thenReturn(null);
+        when(map.getRopes()).thenReturn(List.of());
+
+        Character bot = mockBot(new Point(100, 200), map);
+        BotEntry entry = new BotEntry(bot, null, null);
         entry.inAir = true;
         entry.airVelX = 8;
         entry.movementVelX = BotPhysicsEngine.velocityFromDeltaX(entry.airVelX);
         entry.facingDir = 1;
+        entry.physX = 100;
+        entry.physY = 200;
+        entry.moveDir = -1;  // set intent for air steering left
 
-        BotPhysicsEngine.applyAirSteering(entry, -40);
+        BotPhysicsEngine.stepAirborne(entry, bot);
 
-        assertTrue(entry.airSteerVelX < 0.0);
-        assertEquals(-1, entry.facingDir);
+        assertTrue(entry.airSteerVelX < 0.0, "left steer intent should produce negative airSteerVelX");
+        assertEquals(-1, entry.facingDir, "facing should follow steer direction, not momentum");
         assertEquals(CharacterStance.JUMP_LEFT_STANCE, BotPhysicsEngine.resolveStance(entry));
-        assertTrue(entry.movementVelX > 0, "launch momentum should remain unchanged by steering intent");
     }
 
     @Test
@@ -257,7 +282,8 @@ class BotPhysicsEngineTest {
         Rope rope = new Rope(100, 0, 40, false);
         BotPhysicsEngine.attachToRope(entry, bot, rope, rope.bottomY());
 
-        BotPhysicsEngine.advanceClimb(entry, bot, 1);
+        entry.climbVerticalDir = 1;  // intent: climb down
+        BotPhysicsEngine.advanceClimb(entry, bot);
 
         assertTrue(entry.inAir);
         assertFalse(entry.climbing);
@@ -265,7 +291,7 @@ class BotPhysicsEngineTest {
     }
 
     @Test
-    void shouldLandOnTopPlatformWhenHoldingAtRopeTop() {
+    void shouldTreatRopeTopAsDismountBoundaryNotAttachPosition() {
         MapleMap map = mock(MapleMap.class);
         when(map.getPointBelow(any(Point.class))).thenAnswer(invocation -> new Point(100, 0));
         Character bot = mockBot(new Point(100, 0), map);
@@ -273,7 +299,16 @@ class BotPhysicsEngineTest {
         Rope rope = new Rope(100, 0, 40, false);
         BotPhysicsEngine.attachToRope(entry, bot, rope, rope.topY());
 
+        assertTrue(entry.climbing);
+        assertEquals(new Point(100, 1), bot.getPosition());
+
         BotPhysicsEngine.holdClimb(entry, bot);
+
+        assertTrue(entry.climbing);
+        assertEquals(new Point(100, 1), bot.getPosition());
+
+        entry.climbVerticalDir = -1;
+        BotPhysicsEngine.advanceClimb(entry, bot);
 
         assertFalse(entry.inAir);
         assertFalse(entry.climbing);
@@ -294,7 +329,8 @@ class BotPhysicsEngineTest {
         when(foothold.slope()).thenReturn(0.0);
 
         BotPhysicsEngine.resetMotion(entry, bot.getPosition());
-        BotPhysicsEngine.GroundMotion motion = BotPhysicsEngine.applyGroundMotion(entry, bot, foothold, 0);
+        entry.moveDir = 0;  // intent: idle
+        BotPhysicsEngine.GroundMotion motion = BotPhysicsEngine.applyGroundMotion(entry, bot, foothold);
 
         assertFalse(motion.lostGround());
         assertEquals(0, motion.stepX());
@@ -338,26 +374,27 @@ class BotPhysicsEngineTest {
 
     @Test
     void shouldKeepWalkingAcrossKpqPlatformEvenWithNearbyPlatformAbove() {
-        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(kpqS1);
+        BotNavigationGraph graph = BotNavigationGraphProvider.rebuildGraph(kpqS1());
         Point start = new Point(-335, 116);
         Point target = new Point(-170, 103);
-        int startRegionId = graph.findRegionId(kpqS1, start);
+        int startRegionId = graph.findRegionId(kpqS1(), start);
 
-        assertEquals(startRegionId, graph.findRegionId(kpqS1, target));
+        assertEquals(startRegionId, graph.findRegionId(kpqS1(), target));
 
-        Character bot = mockBot(start, kpqS1);
+        Character bot = mockBot(start, kpqS1());
         BotEntry entry = new BotEntry(bot, null, null);
         BotPhysicsEngine.resetMotion(entry, bot.getPosition());
+        entry.moveDir = 1;  // intent: walk right
 
-        Foothold currentFoothold = BotPhysicsEngine.findGroundFoothold(kpqS1, bot.getPosition());
+        Foothold currentFoothold = BotPhysicsEngine.findGroundFoothold(kpqS1(), bot.getPosition());
         assertNotNull(currentFoothold);
 
         for (int i = 0; i < 40 && bot.getPosition().x < target.x; i++) {
-            BotPhysicsEngine.GroundMotion motion = BotPhysicsEngine.applyGroundMotion(entry, bot, currentFoothold, 1);
+            BotPhysicsEngine.GroundMotion motion = BotPhysicsEngine.applyGroundMotion(entry, bot, currentFoothold);
             assertFalse(motion.lostGround(), "Walking across the same KPQ region should not lose ground because of the nearby upper platform");
-            currentFoothold = BotPhysicsEngine.findGroundFoothold(kpqS1, bot.getPosition());
+            currentFoothold = BotPhysicsEngine.findGroundFoothold(kpqS1(), bot.getPosition());
             assertNotNull(currentFoothold);
-            assertEquals(startRegionId, graph.findRegionId(kpqS1, bot.getPosition()));
+            assertEquals(startRegionId, graph.findRegionId(kpqS1(), bot.getPosition()));
         }
 
         assertTrue(bot.getPosition().x > start.x);
@@ -380,7 +417,7 @@ class BotPhysicsEngineTest {
     @Test
     void shouldLandApexJumpOnSleepyForestUpperPlatform() {
         BotPhysicsEngine.JumpLanding landing =
-                BotPhysicsEngine.simulateJumpLanding(sleepyForest, new Point(197, -14), 8);
+                BotPhysicsEngine.simulateJumpLanding(sleepyForest(), new Point(197, -14), 8);
 
         assertNotNull(landing);
         assertTrue(landing.point().y < 0,
@@ -390,10 +427,10 @@ class BotPhysicsEngineTest {
     @Test
     void shouldKeepAirborneBotInsideMapSideBoundary() {
         Point start = new Point(376, 182);
-        int stepX = BotPhysicsEngine.walkStep(elliniaWeaponStore);
+        int stepX = BotPhysicsEngine.walkStep(elliniaWeaponStore());
 
         BotPhysicsEngine.JumpLanding landing =
-                BotPhysicsEngine.simulateJumpLanding(elliniaWeaponStore, start, stepX);
+                BotPhysicsEngine.simulateJumpLanding(elliniaWeaponStore(), start, stepX);
 
         assertNotNull(landing, "rightward shop jump should hit the map boundary and fall back to the platform");
         assertEquals(new Point(400, 182), landing.point());
@@ -401,17 +438,22 @@ class BotPhysicsEngineTest {
 
     @Test
     void shouldPreferExactGroundFootholdWhenOffsetLookupWouldChooseDifferentPlatform() {
-        StandingLookupCase lookupCase = findStandingLookupCaseWhereOffsetDiffers(ellinia);
+        MapleMap map = createEmptyTestMap(910000102);
+        Foothold exactGround = new Foothold(new Point(0, 100), new Point(120, 100), 1);
+        Foothold nearbyUpper = new Foothold(new Point(0, 92), new Point(120, 92), 2);
+        map.getFootholds().insert(exactGround);
+        map.getFootholds().insert(nearbyUpper);
+        StandingLookupCase lookupCase = findStandingLookupCaseWhereOffsetDiffers(map);
 
         assertNotNull(lookupCase, "Expected at least one standing point where offset-only lookup picks a different foothold");
         assertNotEquals(lookupCase.exactFoothold().getId(), lookupCase.offsetFoothold().getId());
-        Point chosenGround = BotPhysicsEngine.findGroundPoint(ellinia, lookupCase.point());
-        Foothold chosenFoothold = BotPhysicsEngine.findGroundFoothold(ellinia, lookupCase.point());
+        Point chosenGround = BotPhysicsEngine.findGroundPoint(map, lookupCase.point());
+        Foothold chosenFoothold = BotPhysicsEngine.findGroundFoothold(map, lookupCase.point());
 
         assertNotNull(chosenGround);
         assertNotNull(chosenFoothold);
         assertEquals(chosenFoothold.getId(),
-                ellinia.getFootholds().findBelow(new Point(chosenGround.x, chosenGround.y)).getId());
+                map.getFootholds().findBelow(new Point(chosenGround.x, chosenGround.y)).getId());
     }
 
     private static StandingLookupCase findStandingLookupCaseWhereOffsetDiffers(MapleMap map) {
@@ -538,8 +580,9 @@ class BotPhysicsEngineTest {
         BotPhysicsEngine.resetMotion(entry, bot.getPosition());
         entry.physX = 14;
         entry.hspeed = 0;
+        entry.moveDir = 1;  // intent: walk right
 
-        BotPhysicsEngine.GroundMotion motion = BotPhysicsEngine.applyGroundMotion(entry, bot, platform, 1);
+        BotPhysicsEngine.GroundMotion motion = BotPhysicsEngine.applyGroundMotion(entry, bot, platform);
 
         assertTrue(motion.lostGround());
         assertTrue(entry.inAir, "walk-off should transition directly into airborne state");
@@ -600,6 +643,92 @@ class BotPhysicsEngineTest {
     }
 
     @Test
+    void shouldBlockGroundStepThroughBottomConnectedOpenTopWall() {
+        MapleMap map = createEmptyTestMap(910000057);
+        server.maps.FootholdTree footholds = map.getFootholds();
+        Foothold lower = new Foothold(new Point(0, 100), new Point(50, 100), 1);
+        Foothold wall = new Foothold(new Point(50, 100), new Point(50, 60), 2);
+        wall.setPrev(lower.getId());
+        footholds.insert(lower);
+        footholds.insert(wall);
+
+        assertFalse(BotPhysicsEngine.canWalkGroundStep(map, new Point(44, 100), 12),
+                "bottom-connected walls with an open top should still be collidable");
+    }
+
+    @Test
+    void shouldTreatMap193000000BottomAnchoredWallsAsCollidable() {
+        MapleMap map = BotNavigationMapLoader.loadMapGeometry(193000000);
+        BotNavigationGraphProvider.rebuildGraph(map);
+
+        java.util.Set<Integer> collidableWallIds = BotNavigationGraphProvider.getCachedCollidableWallIds(map.getId());
+
+        assertNotNull(collidableWallIds);
+        assertTrue(collidableWallIds.contains(2), "top-right shaft wall should be collidable");
+        assertTrue(collidableWallIds.contains(10), "left lower wall should be collidable");
+        assertTrue(collidableWallIds.contains(13), "bottom platform right wall should be collidable");
+    }
+
+    @Test
+    void shouldCacheKerningPharmacyBlockedUndersidesAtGraphBuild() {
+        BotNavigationGraphProvider.rebuildGraph(kerningPharmacy());
+
+        java.util.Set<Integer> collidableFromBelowIds = BotNavigationGraphProvider.getCachedCollidableFromBelowIds(kerningPharmacy().getId());
+
+        assertNotNull(collidableFromBelowIds);
+        assertTrue(collidableFromBelowIds.contains(1), "left pharmacy box lower edge should block jumps from below");
+        assertTrue(collidableFromBelowIds.contains(27), "right pharmacy box lower edge should block jumps from below");
+        assertFalse(collidableFromBelowIds.contains(17), "standalone pharmacy platform should stay jump-through from below");
+    }
+
+    @Test
+    void shouldCacheMushroomShrineDoughnutUndersidesAtGraphBuild() {
+        BotNavigationGraphProvider.rebuildGraph(mushroomShrine());
+
+        java.util.Set<Integer> collidableFromBelowIds = BotNavigationGraphProvider.getCachedCollidableFromBelowIds(mushroomShrine().getId());
+
+        assertNotNull(collidableFromBelowIds);
+        assertTrue(collidableFromBelowIds.contains(248), "outer doughnut lower edge should block jumps from below");
+        assertFalse(collidableFromBelowIds.contains(250), "outer doughnut upper edge should stay a normal floor");
+        assertFalse(collidableFromBelowIds.contains(264), "inner doughnut lower edge should stay a normal floor");
+    }
+
+    @Test
+    void shouldBumpHeadAgainstClosedBoxUnderside() {
+        MapleMap map = createEmptyTestMap(910000058);
+        server.maps.FootholdTree footholds = map.getFootholds();
+        Foothold lower = new Foothold(new Point(0, 100), new Point(40, 100), 1);
+        Foothold right = new Foothold(new Point(40, 100), new Point(40, 60), 2);
+        Foothold upper = new Foothold(new Point(40, 60), new Point(0, 60), 3);
+        Foothold left = new Foothold(new Point(0, 60), new Point(0, 100), 4);
+        lower.setPrev(left.getId());
+        lower.setNext(right.getId());
+        right.setPrev(lower.getId());
+        right.setNext(upper.getId());
+        upper.setPrev(right.getId());
+        upper.setNext(left.getId());
+        left.setPrev(upper.getId());
+        left.setNext(lower.getId());
+        footholds.insert(lower);
+        footholds.insert(right);
+        footholds.insert(upper);
+        footholds.insert(left);
+        BotNavigationGraphProvider.rebuildGraph(map);
+
+        Character bot = mockBot(new Point(20, 120), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.inAir = true;
+        entry.physX = 20;
+        entry.physY = 120;
+        entry.velY = -30f;
+        entry.airVelX = 0;
+
+        assertEquals(BotPhysicsEngine.AirborneStepResult.CEILING, BotPhysicsEngine.stepAirborne(entry, bot));
+        assertEquals(new Point(20, 101), bot.getPosition());
+        assertEquals(0f, entry.velY);
+    }
+
+    @Test
     void shouldKeepAirborneBotOnNearSideOfCollidableWall() {
         MapleMap map = createEmptyTestMap(910000052);
         server.maps.FootholdTree footholds = map.getFootholds();
@@ -627,6 +756,30 @@ class BotPhysicsEngineTest {
         BotPhysicsEngine.stepAirborne(entry, bot);
 
         assertTrue(bot.getPosition().x > 50, "continued air steering into the wall must not cross to the far side");
+    }
+
+    @Test
+    void shouldUseFootholdXBoundsWhenMapHasSyntheticBounds() {
+        MapleMap map = createEmptyTestMap(910000056);
+        map.setMapPointBoundings(-(1 << 17), -(1 << 17), 1 << 18, 1 << 18);
+
+        server.maps.FootholdTree footholds = map.getFootholds();
+        footholds.insert(new Foothold(new Point(-399, 95), new Point(399, 95), 1));
+
+        assertEquals(-399, footholds.getMinDropX());
+        assertEquals(399, footholds.getMaxDropX());
+
+        Character bot = mockBot(new Point(-389, 61), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.inAir = true;
+        entry.physX = -389;
+        entry.physY = 61;
+        entry.velY = -11.9f;
+        entry.airVelX = -11;
+
+        assertEquals(BotPhysicsEngine.AirborneStepResult.WALL, BotPhysicsEngine.stepAirborne(entry, bot));
+        assertEquals(-399, bot.getPosition().x);
+        assertEquals(0, entry.airVelX);
     }
 
     private record StandingLookupCase(Point point, Foothold exactFoothold, Foothold offsetFoothold) {

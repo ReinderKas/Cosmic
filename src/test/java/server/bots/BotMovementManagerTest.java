@@ -285,6 +285,11 @@ class BotMovementManagerTest {
                 new Point(100, 0), new Point(200, -50),
                 8, 0, 0, 0, 0, 300
         );
+        BotNavigationGraph.Edge downJumpEdge = new BotNavigationGraph.Edge(
+                1, 2, BotNavigationGraph.EdgeType.DROP,
+                new Point(100, 0), new Point(100, 120),
+                96, 104, 0, 0, 0, 0, 0, 250
+        );
         BotNavigationGraph.Edge walkEdge = new BotNavigationGraph.Edge(
                 358, 355, BotNavigationGraph.EdgeType.WALK,
                 new Point(46, -61), new Point(54, -58),
@@ -295,6 +300,8 @@ class BotMovementManagerTest {
                 "CLIMB entry must use stopDist=1 to reach exact anchor");
         assertEquals(0, BotMovementManager.preciseNavStopDist(jumpEdge),
                 "JUMP entry must use stopDist=0 so the bot walks into the launch window");
+        assertEquals(0, BotMovementManager.preciseNavStopDist(downJumpEdge),
+                "straight down-jump DROP entry must use stopDist=0 so the bot walks into the launch window");
         assertEquals(4, BotMovementManager.preciseNavStopDist(walkEdge),
                 "WALK traversal keeps stopDist=4 to absorb terrain micro-bumps");
         assertEquals(4, BotMovementManager.preciseNavStopDist(null),
@@ -581,7 +588,7 @@ class BotMovementManagerTest {
         BotEntry entry = new BotEntry(bot, null, null);
         entry.inAir = false;
         entry.movementVelX = 80;
-        entry.lastDesiredDirection = 0;
+        entry.moveDir = 0;
         entry.facingDir = 1;
 
         assertTrue(BotPhysicsEngine.isStandingStance(BotPhysicsEngine.resolveStance(entry)),
@@ -813,7 +820,8 @@ class BotMovementManagerTest {
         long before = System.currentTimeMillis();
         assertTrue(BotFidgetManager.tryHandleTick(entry, new Point(110, 100), true));
         assertEquals(BotFidgetMode.SPAM_SIDEWAYS, entry.fidgetMode);
-        assertTrue(entry.lastDesiredDirection != 0, "sideway spam should hold a left/right movement input");
+        assertTrue(entry.fidgetMoveDir != 0, "sideway spam should keep an active sideways fidget direction");
+        assertTrue(bot.getPosition().x != 100, "sideway spam should cause sideways motion during the tick");
         long after = System.currentTimeMillis();
         assertTrue(entry.nextFidgetActionAtMs >= before + entry.fidgetActionBaseDelayMs
                         && entry.nextFidgetActionAtMs <= after + entry.fidgetActionBaseDelayMs + 50,

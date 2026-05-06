@@ -981,6 +981,9 @@ public class Character extends AbstractCharacterObject {
 
     public void newClient(Client c) {
         this.loggedIn = true;
+        if (this.client instanceof BotClient && !(c instanceof BotClient)) {
+            BotManager.getInstance().cleanupBotRuntimeState(this);
+        }
         c.setAccountName(this.client.getAccountName());//No null's for accountName
         this.setClient(c);
         this.map = c.getChannelServer().getMapFactory().getMap(getMapId());
@@ -1105,7 +1108,7 @@ public class Character extends AbstractCharacterObject {
     }
 
     public FameStatus canGiveFame(Character from) {
-        if (this.isGM()) {
+        if (this.isGM() && YamlConfig.config.server.GM_NO_FAME_COOLDOWN) {
             return FameStatus.OK;
         } else if (lastfametime >= System.currentTimeMillis() - 3600000 * 24) {
             return FameStatus.NOT_TODAY;
@@ -3234,6 +3237,9 @@ public class Character extends AbstractCharacterObject {
         long total = Math.max(gain + equip + party, -exp.get());
 
         if (level < getMaxLevel() && (allowExpGain || this.getEventInstance() != null)) {
+            // EXP debug tracking
+            ExpDebugTracker.recordExpGain(this, (int) gain, party, equip);
+
             long leftover = 0;
             long nextExp = exp.get() + total;
 
@@ -9183,7 +9189,7 @@ public class Character extends AbstractCharacterObject {
                 if (((float) this.getHp()) / this.getCurrentMaxHp() <= autohpAlert) {
                     Item autohpItem = this.getInventory(InventoryType.USE).findById(autohpItemid);
                     if (autohpItem != null) {
-                        PetAutopotProcessor.runAutopotAction(client, autohpItem.getPosition(), autohpItemid);
+                        runAutopotAction(autohpItem.getPosition(), autohpItemid);
                     }
                 }
             }
@@ -9198,11 +9204,15 @@ public class Character extends AbstractCharacterObject {
                     Item autompItem = this.getInventory(InventoryType.USE).findById(autompItemid);
                     if (autompItem != null) {
                         this.setAutopotMpAlert(0.9f * autompAlert); // autoMP would stick to using pots at every depletion in some cases... thanks Rohenn
-                        PetAutopotProcessor.runAutopotAction(client, autompItem.getPosition(), autompItemid);
+                        runAutopotAction(autompItem.getPosition(), autompItemid);
                     }
                 }
             }
         }
+    }
+
+    private void runAutopotAction(short slot, int itemId) {
+        PetAutopotProcessor.runAutopotAction(client, slot, itemId);
     }
 
     public void setInventory(InventoryType type, Inventory inv) {

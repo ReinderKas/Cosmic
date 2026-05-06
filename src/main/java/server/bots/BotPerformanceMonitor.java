@@ -3,14 +3,18 @@ package server.bots;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 final class BotPerformanceMonitor {
     static final class Config {
         public boolean ENABLED = true;
         public int LOG_INTERVAL_MS = 15000;
-        public double SLOW_SAMPLE_MS = 5.0;
+        public double SLOW_SAMPLE_MS = 50.0;
     }
 
     private static final class Stat {
@@ -23,15 +27,18 @@ final class BotPerformanceMonitor {
 
     private static final Logger log = LoggerFactory.getLogger(BotPerformanceMonitor.class);
     private static final Object LOCK = new Object();
+    private static final int MAX_LOGGED_SECTIONS = 12;
     static Config cfg = new Config();
 
     private static long lastLogAtMs = System.currentTimeMillis();
     private static long nextLogAtMs = lastLogAtMs + cfg.LOG_INTERVAL_MS;
     private static final Map<String, Stat> statsBySection = new LinkedHashMap<>();
     private static final Map<String, String> SECTION_NOTES = Map.of(
+            "tick-total", "complete bot tick, including common systems, AI, combat, navigation, and movement",
             "move-ground", "ground physics, foothold collision, fallback steering, and movement packet sync",
             "move-air", "air physics, foothold landing checks, and air steering",
             "move-climb", "rope/ladder attachment, climb movement, and dismount checks",
+            "move-swim", "swim physics, vertical hold selection, and movement packet sync",
             "nav-resolve", "region lookup, graph/path selection, edge reuse, and waypoint selection",
             "pathfind", "A* search over the current bot navigation graph",
             "pathfind-target-score", "A* called while ranking grind target regions",
@@ -40,6 +47,10 @@ final class BotPerformanceMonitor {
     );
 
     private BotPerformanceMonitor() {
+    }
+
+    static boolean enabled() {
+        return cfg.ENABLED;
     }
 
     static void record(String section, long elapsedNs) {
@@ -79,37 +90,55 @@ final class BotPerformanceMonitor {
         }
 
         double intervalSeconds = Math.max(0.001, (now - lastLogAtMs) / 1000.0);
+        double totalAllMs = statsBySection.values().stream()
+                .mapToDouble(stat -> stat.totalNs / 1_000_000.0)
+                .sum();
+        List<Map.Entry<String, Stat>> slowSections = new ArrayList<>();
+        for (Map.Entry<String, Stat> entry : statsBySection.entrySet()) {
+            if (entry.getValue().maxNs >= slowThresholdNs()) {
+                slowSections.add(entry);
+            }
+        }
+        slowSections.sort(Comparator.comparingLong((Map.Entry<String, Stat> entry) -> entry.getValue().maxNs).reversed());
+
         StringBuilder line = new StringBuilder("bot-perf slow>=")
-                .append(String.format("%.3f", cfg.SLOW_SAMPLE_MS))
+                .append(formatMs(cfg.SLOW_SAMPLE_MS))
                 .append("ms ");
         boolean first = true;
-        for (Map.Entry<String, Stat> entry : statsBySection.entrySet()) {
+        int loggedSections = 0;
+        for (Map.Entry<String, Stat> entry : slowSections) {
             Stat stat = entry.getValue();
-            if (stat.maxNs < slowThresholdNs()) {
-                continue;
+            if (loggedSections >= MAX_LOGGED_SECTIONS) {
+                break;
             }
             if (!first) {
                 line.append(" | ");
             }
             first = false;
+            loggedSections++;
 
             double averageMs = stat.totalNs / (double) Math.max(1L, stat.count) / 1_000_000.0;
             double totalMs = stat.totalNs / 1_000_000.0;
             double maxMs = stat.maxNs / 1_000_000.0;
             double slowAverageMs = stat.slowTotalNs / (double) Math.max(1L, stat.slowCount) / 1_000_000.0;
+            double slowPct = stat.slowCount * 100.0 / Math.max(1L, stat.count);
+            double totalPct = totalAllMs > 0.0 ? totalMs * 100.0 / totalAllMs : 0.0;
             line.append(entry.getKey())
                     .append(" avg=")
-                    .append(String.format("%.3f", averageMs))
+                    .append(formatMs(averageMs))
                     .append("ms")
                     .append(" total=")
-                    .append(String.format("%.3f", totalMs))
+                    .append(formatMs(totalMs))
                     .append("ms")
+                    .append(" totalPct=")
+                    .append(formatPct(totalPct))
+                    .append("%")
                     .append(" cps=")
-                    .append(String.format("%.1f", stat.count / intervalSeconds))
+                    .append(String.format(Locale.ROOT, "%.1f", stat.count / intervalSeconds))
                     .append(" cpuMsPerSec=")
-                    .append(String.format("%.3f", totalMs / intervalSeconds))
+                    .append(formatMs(totalMs / intervalSeconds))
                     .append(" max=")
-                    .append(String.format("%.3f", maxMs))
+                    .append(formatMs(maxMs))
                     .append("ms")
                     .append(" n=")
                     .append(stat.count)
@@ -117,11 +146,19 @@ final class BotPerformanceMonitor {
                     .append(stat.slowCount)
                     .append("/")
                     .append(stat.count)
+                    .append(" slowPct=")
+                    .append(formatPct(slowPct))
+                    .append("%")
                     .append(" slowAvg=")
-                    .append(String.format("%.3f", slowAverageMs))
+                    .append(formatMs(slowAverageMs))
                     .append("ms")
                     .append(" note=")
                     .append(noteFor(entry.getKey()));
+        }
+        if (slowSections.size() > loggedSections) {
+            line.append(" | omitted=")
+                    .append(slowSections.size() - loggedSections)
+                    .append(" lower-max slow sections");
         }
 
         if (!first) {
@@ -145,5 +182,13 @@ final class BotPerformanceMonitor {
 
     private static long slowThresholdNs() {
         return (long) (Math.max(0.0, cfg.SLOW_SAMPLE_MS) * 1_000_000.0);
+    }
+
+    private static String formatMs(double value) {
+        return String.format(Locale.ROOT, "%.3f", value);
+    }
+
+    private static String formatPct(double value) {
+        return String.format(Locale.ROOT, "%.1f", value);
     }
 }

@@ -775,52 +775,13 @@ public abstract class AbstractDealDamageHandler extends AbstractPacketHandler {
             short delay = p.readShort();
             List<Integer> damageLines = new ArrayList<>();
             final Monster monster = chr.getMap().getMonsterByOid(oid);
-            if (chr.getBuffEffect(BuffStat.WK_CHARGE) != null) {
-                // Charge, so now we need to check elemental effectiveness
-                int sourceID = chr.getBuffSource(BuffStat.WK_CHARGE);
-                int level = chr.getBuffedValue(BuffStat.WK_CHARGE);
-                if (monster != null) {
-                    if (sourceID == WhiteKnight.BW_FIRE_CHARGE || sourceID == WhiteKnight.SWORD_FIRE_CHARGE) {
-                        if (monster.getStats().getEffectiveness(Element.FIRE) == ElementalEffectiveness.WEAK) {
-                            calcDmgMax *= 1.05 + level * 0.015;
-                        }
-                    } else if (sourceID == WhiteKnight.BW_ICE_CHARGE || sourceID == WhiteKnight.SWORD_ICE_CHARGE) {
-                        if (monster.getStats().getEffectiveness(Element.ICE) == ElementalEffectiveness.WEAK) {
-                            calcDmgMax *= 1.05 + level * 0.015;
-                        }
-                    } else if (sourceID == WhiteKnight.BW_LIT_CHARGE || sourceID == WhiteKnight.SWORD_LIT_CHARGE) {
-                        if (monster.getStats().getEffectiveness(Element.LIGHTING) == ElementalEffectiveness.WEAK) {
-                            calcDmgMax *= 1.05 + level * 0.015;
-                        }
-                    } else if (sourceID == Paladin.BW_HOLY_CHARGE || sourceID == Paladin.SWORD_HOLY_CHARGE) {
-                        if (monster.getStats().getEffectiveness(Element.HOLY) == ElementalEffectiveness.WEAK) {
-                            calcDmgMax *= 1.2 + level * 0.015;
-                        }
-                    }
-                } else {
-                    // Since we already know the skill has an elemental attribute, but we dont know if the monster is weak or not, lets
-                    // take the safe approach and just assume they are weak.
-                    calcDmgMax *= 1.5;
-                }
-            }
+            calcDmgMax = server.combat.CombatFormulaProvider.getInstance().applyWkChargeElementalBonus(calcDmgMax, chr, monster);
 
             if (ret.skill != 0) {
                 Skill skill = SkillFactory.getSkill(ret.skill);
-                if (skill.getElement() != Element.NEUTRAL && chr.getBuffedValue(BuffStat.ELEMENTAL_RESET) == null) {
-                    // The skill has an element effect, so we need to factor that in.
-                    if (monster != null) {
-                        ElementalEffectiveness eff = monster.getElementalEffectiveness(skill.getElement());
-                        if (eff == ElementalEffectiveness.WEAK) {
-                            calcDmgMax *= 1.5;
-                        } else if (eff == ElementalEffectiveness.STRONG) {
-                            //calcDmgMax *= 0.5;
-                        }
-                    } else {
-                        // Since we already know the skill has an elemental attribute, but we dont know if the monster is weak or not, lets
-                        // take the safe approach and just assume they are weak.
-                        calcDmgMax *= 1.5;
-                    }
-                }
+                boolean elementalResetActive = chr.getBuffedValue(BuffStat.ELEMENTAL_RESET) != null;
+                calcDmgMax = server.combat.CombatFormulaProvider.getInstance().applySkillElementalMultiplier(
+                        calcDmgMax, ret.skill, monster, elementalResetActive);
                 if (ret.skill == FPWizard.POISON_BREATH || ret.skill == FPMage.POISON_MIST || ret.skill == FPArchMage.FIRE_DEMON || ret.skill == ILArchMage.ICE_DEMON) {
                     if (monster != null) {
                         // Turns out poison is completely server side, so I don't know why I added this. >.<

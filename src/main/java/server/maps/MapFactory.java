@@ -157,6 +157,7 @@ public class MapFactory {
         map.setOnUserEnter(onEnter.equals("") ? String.valueOf(mapid) : onEnter);
 
         map.setFieldLimit(DataTool.getInt(infoData.getChildByPath("fieldLimit"), 0));
+        map.setSwim(DataTool.getInt(infoData.getChildByPath("swim"), 0) != 0);
         map.setMobInterval((short) DataTool.getInt(infoData.getChildByPath("createMobInterval"), 5000));
         PortalFactory portalFactory = new PortalFactory();
         for (Data portal : mapData.getChildByPath("portal")) {
