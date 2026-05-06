@@ -151,6 +151,39 @@ class BotInventoryManager {
         }
     }
 
+    /**
+     * Returns the nearest lootable drop within GRIND_SEEK_RANGE, with no region
+     * restriction. Returns null when any inventory is full or no eligible drop exists.
+     */
+    static MapItem findNearestGrindLootTarget(BotEntry entry, Character bot) {
+        if (bot == null || hasAnyInventoryFull(bot)) return null;
+        MapleMap map = bot.getMap();
+        if (map == null) return null;
+
+        long now = System.currentTimeMillis();
+        Point botPos = bot.getPosition();
+        double seekRangeSq = (double) BotCombatManager.cfg.GRIND_SEEK_RANGE * BotCombatManager.cfg.GRIND_SEEK_RANGE;
+        MapItem nearest = null;
+        double nearestDistSq = Double.MAX_VALUE;
+
+        for (MapItem drop : map.getDroppedItems()) {
+            if (drop.isPickedUp() || map.getMapObject(drop.getObjectId()) != drop) continue;
+            if (!drop.canBePickedBy(bot)) continue;
+            if (now - drop.getDropTime() < 3000) continue;
+            if (drop.getMeso() <= 0 && drop.getItemId() > 0) {
+                InventoryType type = ItemConstants.getInventoryType(drop.getItemId());
+                Inventory inv = bot.getInventory(type);
+                if (inv != null && inv.isFull()) continue;
+            }
+            Point dropPos = drop.getPosition();
+            double distSq = dropPos.distanceSq(botPos);
+            if (distSq > seekRangeSq || distSq >= nearestDistSq) continue;
+            nearestDistSq = distSq;
+            nearest = drop;
+        }
+        return nearest;
+    }
+
     static boolean hasAnyInventoryFull(Character bot) {
         if (bot == null) return false;
         for (InventoryType type : new InventoryType[]{

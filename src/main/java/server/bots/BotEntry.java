@@ -4,6 +4,7 @@ import client.Character;
 import client.inventory.Item;
 import server.life.Monster;
 import server.maps.Foothold;
+import server.maps.MapItem;
 import server.maps.Rope;
 
 import java.awt.*;
@@ -224,6 +225,8 @@ public class BotEntry {
     // "Farm here" anchor — bot returns to this fixed point and only takes local attacks.
     Point farmAnchor = null;
     int farmAnchorMapId = -1;
+    // Grind loot — nearest convenient drop, searched each AI tick, cleared when picked up.
+    MapItem grindLootTarget = null;
     // "Patrol" region — bot wanders within this nav region and attacks opportunistically.
     int patrolRegionId = -1;    // BotNavigationGraph.Region id; -1 = inactive
     int patrolMapId = -1;

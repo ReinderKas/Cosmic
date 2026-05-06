@@ -25,6 +25,7 @@ import server.bots.pq.BotPqHooks;
 import server.life.Monster;
 import server.life.MobSkill;
 import server.maps.Foothold;
+import server.maps.MapItem;
 import server.maps.MapleMap;
 import server.quest.Quest;
 import tools.PacketCreator;
@@ -76,6 +77,10 @@ public class BotManager {
         // Grind recovery is looser than follow recovery so bots can work nearby platforms,
         // but still get pulled back to a same-map party anchor if they fall far out of bounds.
         public int GRIND_PARTY_TELEPORT_DIST_MULTIPLIER = 2;
+
+        // Grind loot convenience: loot competes with mob navigation only when
+        // lootDistSq < mobDistSq * ratio. 0.09 ≈ loot within 30% of mob distance.
+        public float GRIND_LOOT_CONVENIENCE_RATIO = 0.09f;
 
         // Debug aid: keep stuck detection/logging active, but disable automatic recovery jumps
         // so pathing failures remain visible in logs and at runtime.
@@ -1666,10 +1671,25 @@ public class BotManager {
         if (BotPqHooks.isCouponSeeking(entry)) {
             return entry.kpq.navTarget;
         }
+        if (entry.grindLootTarget != null) {
+            return entry.grindLootTarget.getPosition();
+        }
         if (entry.wanderDirection == 0) {
             entry.wanderDirection = ThreadLocalRandom.current().nextBoolean() ? 1 : -1;
         }
         return new Point(botPos.x + entry.wanderDirection * 200, botPos.y);
+    }
+
+    private static Point convenientLootTarget(BotEntry entry, Point botPos, Point mobPos) {
+        MapItem loot = entry.grindLootTarget;
+        if (loot == null || loot.isPickedUp()) {
+            entry.grindLootTarget = null;
+            return null;
+        }
+        Point lootPos = loot.getPosition();
+        double lootDistSq = lootPos.distanceSq(botPos);
+        double mobDistSq = mobPos.distanceSq(botPos);
+        return lootDistSq < mobDistSq * cfg.GRIND_LOOT_CONVENIENCE_RATIO ? lootPos : null;
     }
 
     private static Point resolvePatrolWanderTarget(BotEntry entry, Point botPos, MapleMap map) {
@@ -1913,6 +1933,13 @@ public class BotManager {
             BotCombatManager.AttackPlan attackPlan = target == null
                     ? null
                     : BotCombatManager.planAttack(entry, bot, target);
+            // Validate cached loot target
+            if (entry.grindLootTarget != null) {
+                MapItem loot = entry.grindLootTarget;
+                if (loot.isPickedUp() || bot.getMap().getMapObject(loot.getObjectId()) != loot) {
+                    entry.grindLootTarget = null;
+                }
+            }
             if (runAiTick && shouldSearchForGrindTarget(entry, bot, target, attackPlan, now)) {
                 Monster searchedTarget = entry.patrolRegionId >= 0
                         ? BotCombatManager.findPatrolTarget(entry, bot)
@@ -1922,6 +1949,10 @@ public class BotManager {
                     attackPlan = null;
                 }
                 entry.nextGrindTargetSearchAtMs = now + BotCombatManager.cfg.GRIND_RETARGET_INTERVAL_MS;
+            }
+            // Search for a convenient loot drop every AI tick (grind mode only)
+            if (runAiTick && entry.patrolRegionId < 0) {
+                entry.grindLootTarget = BotInventoryManager.findNearestGrindLootTarget(entry, bot);
             }
             if (target == null) {
                 entry.grindTarget = null;
@@ -2058,6 +2089,11 @@ public class BotManager {
             if (entry.degenAttackDone
                     && !BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(grindWeaponType, botPos, tp)) {
                 entry.degenAttackDone = false;
+            }
+            // Small detour: take a very close loot drop on the way when not retreating.
+            if (crossRegionRetreatPos == null && !shouldRetreatForRangedSpacing && entry.patrolRegionId < 0) {
+                Point lootPos = convenientLootTarget(entry, botPos, tp);
+                if (lootPos != null) targetPos = lootPos;
             }
         }
 
@@ -2386,7 +2422,6 @@ public class BotManager {
         entry.degenAttackDone = false;
         entry.buffConsumablesEnabled = false;
         entry.ownerAwaySafeMode = true;
-        townClusterAnchors.remove(ownerCharId);
     }
 
     private boolean scrollBotToTown(BotEntry entry, Character bot, int ownerCharId) {
@@ -2410,22 +2445,43 @@ public class BotManager {
         }
         groundAfterMapChange(entry, bot);
 
-        // Capture the cluster anchor at the first bot's post-warp position.
-        // Subsequent bots get a random ±150px X offset around the anchor as their
-        // physical move target via the same machinery as the player "here" command.
+        // Capture the cluster anchor at the first bot's post-warp position, then let
+        // every bot walk to the deterministic formation slot around that anchor. This
+        // mirrors the owner's current follow formation instead of stacking everyone on
+        // the same portal landing point.
         Point post = new Point(bot.getPosition());
-        Point prior = townClusterAnchors.putIfAbsent(ownerCharId, post);
-        if (prior != null) {
-            int offsetX = ThreadLocalRandom.current().nextInt(-150, 151);
-            Point candidate = new Point(prior.x + offsetX, prior.y - 1);
-            Point ground = BotPhysicsEngine.findGroundPoint(returnMap, candidate);
-            issueMoveTo(entry, ground != null ? ground : new Point(prior), true);
+        Point anchor = townClusterAnchors.putIfAbsent(ownerCharId, post);
+        if (anchor == null) {
+            anchor = post;
         }
+        Point target = resolveTownClusterTarget(entry, ownerCharId, returnMap, anchor);
 
         BotMovementManager.resetEntryState(entry);
-        issueStop(entry);
+        startMoveTo(entry, target, true);
         entry.ownerReturnedToTown = true;
         return true;
+    }
+
+    private Point resolveTownClusterTarget(BotEntry entry, int ownerCharId, MapleMap map, Point anchor) {
+        Point base = anchor != null ? new Point(anchor) : new Point(entry.bot.getPosition());
+        if (entry == null || entry.bot == null || map == null) {
+            return base;
+        }
+
+        List<BotEntry> entries = getBotEntries(ownerCharId);
+        int idx = 0;
+        for (int i = 0; i < entries.size(); i++) {
+            if (entries.get(i) == entry) {
+                idx = i;
+                break;
+            }
+        }
+
+        FormationState formation = ownerFormations.getOrDefault(ownerCharId, FormationState.defaultStagger());
+        int offsetX = formation.offsetFor(idx, Math.max(1, entries.size()));
+        Point candidate = new Point(base.x + offsetX, base.y - 1);
+        Point ground = BotPhysicsEngine.findGroundPoint(map, candidate);
+        return ground != null ? ground : base;
     }
 
     /**
@@ -2559,6 +2615,7 @@ public class BotManager {
         entry.farmAnchor = null;
         entry.farmAnchorMapId = -1;
         entry.grindTarget = null;
+        entry.grindLootTarget = null;
         entry.nextGrindTargetSearchAtMs = 0L;
         entry.moveWindowMs = 0;
         entry.degenAttackDone = false;
@@ -2709,6 +2766,7 @@ public class BotManager {
         entry.patrolRegionId = -1;
         entry.patrolMapId = -1;
         entry.patrolWanderTarget = null;
+        entry.grindLootTarget = null;
     }
 
     private static boolean isNear(Point source, Point target, int dist) {
