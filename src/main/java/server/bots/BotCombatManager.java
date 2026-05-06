@@ -488,12 +488,12 @@ class BotCombatManager {
             noteSkillBuffDecision(entry, "no buff skills in cache");
             return;
         }
+        if (bot.getMap().getAllMonsters().stream().noneMatch(Monster::isAlive)) return;
 
         long now = System.currentTimeMillis();
         if (trySupportBuff(entry, bot, now)) {
             return;
         }
-        if (bot.getMap().getAllMonsters().stream().noneMatch(Monster::isAlive)) return;
 
         for (int skillId : entry.buffSkillIds) {
             if (now < entry.nextBuffAt.getOrDefault(skillId, 0L)) continue;
