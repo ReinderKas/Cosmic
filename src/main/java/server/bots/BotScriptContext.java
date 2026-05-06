@@ -38,6 +38,10 @@ public final class BotScriptContext {
         manager.queueTask(entry, BotTask.moveTo(point, precise));
     }
 
+    public void queueMoveToWithLocalCombat(Point point, boolean precise) {
+        manager.queueTask(entry, BotTask.moveTo(point, precise, BotTask.MoveCombatMode.LOCAL_OPPORTUNITY));
+    }
+
     public void queueFollowUntilNearOwner(int nearPx) {
         manager.queueTask(entry, BotTask.followUntilNear(owner, nearPx));
     }
@@ -56,5 +60,9 @@ public final class BotScriptContext {
 
     public boolean tasksDone() {
         return !manager.hasQueuedTasks(entry);
+    }
+
+    public boolean isCheapMoveTarget(Point point, int maxPathCost, int fallbackRangeX, int fallbackRangeY) {
+        return manager.isCheapScriptMoveTarget(entry, point, maxPathCost, fallbackRangeX, fallbackRangeY);
     }
 }

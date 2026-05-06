@@ -6,6 +6,7 @@ import client.inventory.manipulator.InventoryManipulator;
 import scripting.event.EventInstanceManager;
 import server.bots.BotChatManager;
 import server.bots.BotEntry;
+import server.bots.BotManager;
 import server.bots.BotScript;
 import server.bots.BotScriptContext;
 import server.bots.BotScriptStep;
@@ -43,6 +44,9 @@ final class BotKpqStage1 {
     private static final int NEAR_OWNER_PX = 80;
     private static final long WAIT_MS = 1800;
     private static final int COUPON_SEEK_RANGE = 600;
+    private static final int COUPON_SEEK_MAX_PATH_COST = 250;
+    private static final int COUPON_SEEK_FALLBACK_RANGE_X = 240;
+    private static final int COUPON_SEEK_FALLBACK_RANGE_Y = 120;
 
     private static final BotScript SCRIPT = new BotScript() {
         private final List<BotScriptStep> steps = List.of(
@@ -102,7 +106,9 @@ final class BotKpqStage1 {
     }
 
     static boolean isCouponSeeking(BotEntry entry) {
-        return entry.kpq.state == GRINDING && entry.kpq.navTarget != null;
+        // Coupon pursuit now runs through scripted move tasks with local-opportunity combat
+        // rather than through the general grind-mode seek hooks in BotManager.
+        return false;
     }
 
     static boolean isNpcLocked(BotEntry entry) {
@@ -112,14 +118,24 @@ final class BotKpqStage1 {
     private static BotScriptStep moveToCloto(int state) {
         return BotScriptStep.of(ctx -> {
             ctx.entry.kpq.state = state;
-            Point npcPos = getNpcPos(ctx.bot);
-            if (npcPos != null) {
-                ctx.queueMoveTo(npcPos, false);
-            }
-        }, null, ctx -> {
+            queueMoveToCloto(ctx);
+        }, BotKpqStage1::tickMoveToCloto, ctx -> {
             Point npcPos = getNpcPos(ctx.bot);
             return npcPos != null && near(ctx.bot, npcPos, NEAR_NPC_PX) && ctx.tasksDone();
         });
+    }
+
+    private static void tickMoveToCloto(BotScriptContext ctx) {
+        if (ctx.tasksDone()) {
+            queueMoveToCloto(ctx);
+        }
+    }
+
+    private static void queueMoveToCloto(BotScriptContext ctx) {
+        Point npcPos = getNpcPos(ctx.bot);
+        if (npcPos != null && !near(ctx.bot, npcPos, NEAR_NPC_PX)) {
+            ctx.queueMoveTo(npcPos, false);
+        }
     }
 
     private static void assignCouponTarget(BotScriptContext ctx) {
@@ -148,7 +164,15 @@ final class BotKpqStage1 {
         }
 
         MapItem groundCoupon = findNearestDrop(ctx.bot, ITEM_COUPON, COUPON_SEEK_RANGE);
-        ctx.entry.kpq.navTarget = (groundCoupon != null) ? groundCoupon.getPosition() : null;
+        Point desiredSeekTarget = groundCoupon == null ? null : groundCoupon.getPosition();
+        if (desiredSeekTarget != null && !ctx.isCheapMoveTarget(
+                desiredSeekTarget,
+                COUPON_SEEK_MAX_PATH_COST,
+                COUPON_SEEK_FALLBACK_RANGE_X,
+                COUPON_SEEK_FALLBACK_RANGE_Y)) {
+            desiredSeekTarget = null;
+        }
+        refreshCouponSeekTask(ctx, desiredSeekTarget);
 
         int milestone = (have / 5) * 5;
         if (milestone > ctx.entry.kpq.lastReportedCoupons) {
@@ -157,10 +181,34 @@ final class BotKpqStage1 {
         }
     }
 
+    private static void refreshCouponSeekTask(BotScriptContext ctx, Point desiredSeekTarget) {
+        Point currentSeekTarget = ctx.entry.kpq.navTarget;
+        if (desiredSeekTarget == null) {
+            if (currentSeekTarget != null) {
+                ctx.manager.issueGrind(ctx.entry);
+            }
+            ctx.entry.kpq.navTarget = null;
+            return;
+        }
+
+        boolean changed = currentSeekTarget == null || !currentSeekTarget.equals(desiredSeekTarget);
+        if (changed) {
+            ctx.manager.issueGrind(ctx.entry);
+            ctx.entry.kpq.navTarget = new Point(desiredSeekTarget);
+        }
+
+        if (ctx.tasksDone() && !near(ctx.bot, desiredSeekTarget, BotManager.cfg.LOOT_RADIUS)) {
+            ctx.queueMoveToWithLocalCombat(desiredSeekTarget, false);
+        }
+    }
+
     private static boolean hasRequiredCoupons(BotScriptContext ctx) {
         int need = ctx.entry.kpq.couponTarget;
         if (need <= 0 || ctx.bot.getItemQuantity(ITEM_COUPON, false) < need) {
             return false;
+        }
+        if (ctx.entry.kpq.navTarget != null) {
+            ctx.manager.issueGrind(ctx.entry);
         }
         ctx.entry.kpq.navTarget = null;
         BotChatManager.queueBotSay(ctx.entry, "Got " + need + "!");

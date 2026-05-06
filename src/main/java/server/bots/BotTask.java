@@ -11,6 +11,11 @@ import java.awt.*;
  * directly.
  */
 public final class BotTask {
+    public enum MoveCombatMode {
+        NONE,
+        LOCAL_OPPORTUNITY
+    }
+
     enum Type {
         MOVE_TO,
         FOLLOW_OWNER,
@@ -29,6 +34,7 @@ public final class BotTask {
     final InventoryType inventoryType;
     final int itemId;
     final short quantity;
+    final MoveCombatMode moveCombatMode;
 
     private BotTask(Type type,
                     Point point,
@@ -37,7 +43,8 @@ public final class BotTask {
                     int nearPx,
                     InventoryType inventoryType,
                     int itemId,
-                    short quantity) {
+                    short quantity,
+                    MoveCombatMode moveCombatMode) {
         this.type = type;
         this.point = point == null ? null : new Point(point);
         this.precise = precise;
@@ -46,33 +53,38 @@ public final class BotTask {
         this.inventoryType = inventoryType;
         this.itemId = itemId;
         this.quantity = quantity;
+        this.moveCombatMode = moveCombatMode == null ? MoveCombatMode.NONE : moveCombatMode;
     }
 
     public static BotTask moveTo(Point point, boolean precise) {
-        return new BotTask(Type.MOVE_TO, point, precise, 0, 0, null, 0, (short) 0);
+        return moveTo(point, precise, MoveCombatMode.NONE);
+    }
+
+    public static BotTask moveTo(Point point, boolean precise, MoveCombatMode moveCombatMode) {
+        return new BotTask(Type.MOVE_TO, point, precise, 0, 0, null, 0, (short) 0, moveCombatMode);
     }
 
     public static BotTask followOwner() {
-        return new BotTask(Type.FOLLOW_OWNER, null, false, 0, 0, null, 0, (short) 0);
+        return new BotTask(Type.FOLLOW_OWNER, null, false, 0, 0, null, 0, (short) 0, MoveCombatMode.NONE);
     }
 
     public static BotTask follow(Character target) {
-        return new BotTask(Type.FOLLOW_TARGET, null, false, target != null ? target.getId() : 0, 0, null, 0, (short) 0);
+        return new BotTask(Type.FOLLOW_TARGET, null, false, target != null ? target.getId() : 0, 0, null, 0, (short) 0, MoveCombatMode.NONE);
     }
 
     public static BotTask followUntilNear(Character target, int nearPx) {
-        return new BotTask(Type.FOLLOW_UNTIL_NEAR, null, false, target != null ? target.getId() : 0, nearPx, null, 0, (short) 0);
+        return new BotTask(Type.FOLLOW_UNTIL_NEAR, null, false, target != null ? target.getId() : 0, nearPx, null, 0, (short) 0, MoveCombatMode.NONE);
     }
 
     public static BotTask grind() {
-        return new BotTask(Type.GRIND, null, false, 0, 0, null, 0, (short) 0);
+        return new BotTask(Type.GRIND, null, false, 0, 0, null, 0, (short) 0, MoveCombatMode.NONE);
     }
 
     public static BotTask stop() {
-        return new BotTask(Type.STOP, null, false, 0, 0, null, 0, (short) 0);
+        return new BotTask(Type.STOP, null, false, 0, 0, null, 0, (short) 0, MoveCombatMode.NONE);
     }
 
     public static BotTask dropItem(InventoryType type, int itemId, short quantity) {
-        return new BotTask(Type.DROP_ITEM, null, false, 0, 0, type, itemId, quantity);
+        return new BotTask(Type.DROP_ITEM, null, false, 0, 0, type, itemId, quantity, MoveCombatMode.NONE);
     }
 }

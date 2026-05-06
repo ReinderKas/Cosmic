@@ -1841,6 +1841,18 @@ public class BotManager {
             return;
         }
 
+        if (runAiTick && shouldUseScriptedMoveLocalCombat(entry, targetPos)) {
+            clearActionMoveWindowIfSettled(entry, botPos, targetPos);
+            LocalOpportunityAttackResult result = tryLocalOpportunityAttack(
+                    entry, bot, botPos, targetPos, targetPos, true, true);
+            if (result.consumedTick()) {
+                return;
+            }
+            targetPos = result.targetPos();
+            stepMovementCore(entry, targetPos, runAiTick);
+            return;
+        }
+
         if (entry.farmAnchor != null) {
             tickAnchoredFarm(entry, bot, botPos, runAiTick);
             return;
@@ -2104,6 +2116,20 @@ public class BotManager {
         entry.moveTarget = anchor;
         entry.moveTargetPrecise = true;
         stepMovementCore(entry, anchor, runAiTick);
+    }
+
+    private static boolean shouldUseScriptedMoveLocalCombat(BotEntry entry, Point targetPos) {
+        if (entry == null || targetPos == null || entry.activeScriptTask == null) {
+            return false;
+        }
+        if (entry.activeScriptTask.type != BotTask.Type.MOVE_TO
+                || entry.activeScriptTask.moveCombatMode != BotTask.MoveCombatMode.LOCAL_OPPORTUNITY) {
+            return false;
+        }
+        if (entry.moveTarget == null || !entry.moveTarget.equals(entry.activeScriptTask.point)) {
+            return false;
+        }
+        return !entry.following;
     }
 
     private LocalOpportunityAttackResult tryLocalOpportunityAttack(BotEntry entry,
@@ -2548,6 +2574,10 @@ public class BotManager {
         queueTask(entry, BotTask.moveTo(point, precise));
     }
 
+    public void queueMoveTo(BotEntry entry, Point point, boolean precise, BotTask.MoveCombatMode moveCombatMode) {
+        queueTask(entry, BotTask.moveTo(point, precise, moveCombatMode));
+    }
+
     public void queueMoveThenDropItem(BotEntry entry, Point point, boolean precise, InventoryType type, int itemId, short quantity) {
         queueTask(entry, BotTask.moveTo(point, precise));
         queueTask(entry, BotTask.dropItem(type, itemId, quantity));
@@ -2560,6 +2590,63 @@ public class BotManager {
 
     public boolean hasQueuedTasks(BotEntry entry) {
         return entry != null && (entry.activeScriptTask != null || !entry.scriptTasks.isEmpty());
+    }
+
+    public boolean isCheapScriptMoveTarget(BotEntry entry,
+                                           Point targetPos,
+                                           int maxPathCost,
+                                           int fallbackRangeX,
+                                           int fallbackRangeY) {
+        if (entry == null || entry.bot == null || targetPos == null) {
+            return false;
+        }
+
+        Character bot = entry.bot;
+        Point botPos = bot.getPosition();
+        if (botPos == null) {
+            return false;
+        }
+        if (Math.abs(targetPos.x - botPos.x) <= cfg.LOOT_RADIUS
+                && Math.abs(targetPos.y - botPos.y) <= cfg.LOOT_RADIUS) {
+            return false;
+        }
+
+        MapleMap map = bot.getMap();
+        if (map == null || map.getFootholds() == null) {
+            return false;
+        }
+
+        BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(map, entry.movementProfile);
+        if (graph == null) {
+            graph = BotNavigationGraphProvider.peekClosestGraph(map, entry.movementProfile);
+        }
+        if (graph == null) {
+            return Math.abs(targetPos.x - botPos.x) <= fallbackRangeX
+                    && Math.abs(targetPos.y - botPos.y) <= fallbackRangeY;
+        }
+
+        int startRegionId = BotNavigationManager.resolveCurrentRegionId(graph, entry, map, botPos);
+        int targetRegionId = BotNavigationManager.resolvePointTargetRegionId(graph, map, targetPos);
+        if (startRegionId < 0 || targetRegionId < 0) {
+            return false;
+        }
+        if (startRegionId == targetRegionId) {
+            return true;
+        }
+
+        List<BotNavigationGraph.Edge> path = BotNavigationManager.findPath(graph, bot, startRegionId, targetRegionId, targetPos);
+        if (path.isEmpty()) {
+            return false;
+        }
+
+        int totalCost = 0;
+        for (BotNavigationGraph.Edge edge : path) {
+            totalCost += edge.cost;
+            if (totalCost > maxPathCost) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static void clearMode(BotEntry entry) {

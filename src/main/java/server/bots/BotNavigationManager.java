@@ -1280,7 +1280,13 @@ final class BotNavigationManager {
 
         Character owner = entry.owner;
         Character followAnchor = BotManager.getInstance().resolveFollowAnchor(entry, owner);
-        if (!entry.grinding && followAnchor != null && followAnchor.getMap() == map) {
+        if (entry.following
+                && entry.moveTarget == null
+                && entry.farmAnchor == null
+                && !entry.shopVisitPending
+                && !entry.grinding
+                && followAnchor != null
+                && followAnchor.getMap() == map) {
             // Follow mode + owner climbing: prioritise a rope target. The follow
             // resolver may have already snapped targetPos to a rope's X, so the
             // exact equality check below would miss — explicitly look for a rope
@@ -1324,9 +1330,9 @@ final class BotNavigationManager {
         return resolvePointTargetRegionId(graph, map, position);
     }
 
-    private static int resolvePointTargetRegionId(BotNavigationGraph graph,
-                                                  MapleMap map,
-                                                  Point position) {
+    static int resolvePointTargetRegionId(BotNavigationGraph graph,
+                                          MapleMap map,
+                                          Point position) {
         int ropeRegionId = graph.findRopeRegionId(position);
         if (ropeRegionId >= 0 && shouldPreferRopeRegion(map, position)) {
             return ropeRegionId;

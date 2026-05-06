@@ -30,7 +30,8 @@ public final class BotPqHooks {
 
     /** Returns true if the bot is in a PQ map that requires grind mode (KPQ stage 1). */
     public static boolean requiresGrind(BotEntry entry, Character bot) {
-        return bot.getMapId() == BotKpqStage1.KPQ_STAGE1_MAP;
+        return bot.getMapId() == BotKpqStage1.KPQ_STAGE1_MAP
+                && entry.kpq.state == BotKpqStage1.GRINDING;
     }
 
     /** True once the bot no longer needs coupons — suppress coupon loot. */
