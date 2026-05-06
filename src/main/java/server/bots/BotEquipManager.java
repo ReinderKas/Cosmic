@@ -1263,7 +1263,13 @@ class BotEquipManager {
     static Set<Item> collectPotentialSelfUpgradeItems(Character bot) {
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
         Set<Item> keep = Collections.newSetFromMap(new IdentityHashMap<>());
-        keep.addAll(selectOwnedItemsForSelfReserve(bot, SelfReserveHooks.from(ii), collectOwnedBagEquips(bot, ii)));
+        List<Equip> bagEquips = collectOwnedBagEquips(bot, ii);
+        Set<Equip> selected = selectOwnedItemsForSelfReserve(bot, SelfReserveHooks.from(ii), collectOwnedEquips(bot, ii));
+        for (Equip equip : bagEquips) {
+            if (selected.contains(equip)) {
+                keep.add(equip);
+            }
+        }
         return keep;
     }
 

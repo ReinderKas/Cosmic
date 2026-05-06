@@ -444,6 +444,26 @@ class BotEquipManagerTest {
     }
 
     @Test
+    void bagGloveNotReservedWhenEquippedGloveAlreadyDominatesJohnCase() {
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.HUNTER);
+
+        Equip equippedBlueWork = equipWithIdStats(1082001, 0, 7, 0);
+        Equip bagMithrilScaler = equipWithIdStats(1082047, 0, 2, 0);
+
+        BotEquipManager.SelfReserveHooks hooks = mock(BotEquipManager.SelfReserveHooks.class);
+        stubReserveItem(hooks, Job.HUNTER, equippedBlueWork, "Gv", 10, 0, 0, 0, 0, 0, 0);
+        stubReserveItem(hooks, Job.HUNTER, bagMithrilScaler, "Gv", 35, 4, 0, 115, 0, 0, 0);
+
+        Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks,
+                List.of(equippedBlueWork, bagMithrilScaler));
+
+        assertTrue(keep.contains(equippedBlueWork), "equipped baseline glove should stay in the reserve set");
+        assertFalse(keep.contains(bagMithrilScaler),
+                "bag glove should not be reserved when equipped glove already dominates it");
+    }
+
+    @Test
     void shouldReserveSwordUpgradeEvenWhenEquippedAxeIsStronger() {
         Character bot = mock(Character.class);
         when(bot.getJob()).thenReturn(Job.FIGHTER);
