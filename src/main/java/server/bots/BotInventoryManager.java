@@ -351,6 +351,7 @@ class BotInventoryManager {
             case "pots"    -> dropPotions(entry, bot);
             case "buff"    -> dropBuffPots(entry, bot);
             case "equips"  -> dropEquips(entry, bot);
+            case "trash"   -> dropTrashEquips(entry, bot);
             case "etc"     -> dropEtc(entry, bot);
             default -> { if (category.startsWith("name:")) dropByName(entry, bot, category.substring(5)); }
         }
@@ -1079,6 +1080,14 @@ class BotInventoryManager {
                           : "equip bag is already empty");
     }
 
+    static void dropTrashEquips(BotEntry entry, Character bot) {
+        Set<Item> trash = new java.util.HashSet<>(collectTrashEquips(entry, bot));
+        int count = dropFromBag(bot, InventoryType.EQUIP, trash::contains);
+        BotManager.getInstance().botReply(entry,
+                count > 0 ? "dropped " + count + " trash equip" + (count != 1 ? "s" : "") + "!"
+                          : "no trash equips to drop");
+    }
+
     static void dropBuffPots(BotEntry entry, Character bot) {
         int count = dropFromBag(bot, InventoryType.USE,
                 item -> isBuffConsumable(item.getItemId()));
@@ -1265,7 +1274,7 @@ class BotInventoryManager {
         return BotEquipManager.isOwnClassEquip(bot, ii, equip);
     }
 
-    /** Score used to order own-class equips worst-to-best: 4*watk + matk + main + sec/2. */
+    /** Score used to order own-class equips worst-to-best: 4*watk + matk + main + sec. */
     private static int equipTradeScore(Equip e, Job job) {
         int main, sec;
         if (BotEquipManager.isMageJob(job)) {
@@ -1278,7 +1287,7 @@ class BotInventoryManager {
         } else {
             main = e.getStr(); sec = e.getDex();
         }
-        return 4 * e.getWatk() + e.getMatk() + main + sec / 2;
+        return 4 * e.getWatk() + e.getMatk() + main + sec;
     }
 
     private static int dropFromBag(Character bot, InventoryType type, Predicate<Item> filter) {
