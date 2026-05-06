@@ -19,11 +19,13 @@ import server.StatEffect;
 import server.Trade;
 import server.bots.pq.BotPqHooks;
 import server.maps.MapItem;
+import server.maps.MapleMap;
 import tools.PacketCreator;
 
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -147,6 +149,51 @@ class BotInventoryManager {
                 }
             }
         }
+    }
+
+    /**
+     * Returns the position of the nearest lootable drop within the patrol region
+     * and its immediate neighbours (1 graph hop). Returns null when no eligible
+     * drop exists or the graph is unavailable.
+     */
+    static Point findNearestPatrolLootTarget(BotEntry entry, int patrolRegionId) {
+        Character bot = entry.bot;
+        if (bot == null) return null;
+        MapleMap map = bot.getMap();
+        if (map == null) return null;
+
+        BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(map);
+        if (graph == null) return null;
+
+        Set<Integer> allowed = new HashSet<>();
+        allowed.add(patrolRegionId);
+        for (BotNavigationGraph.Edge edge : graph.getOutgoing(patrolRegionId)) {
+            allowed.add(edge.toRegionId);
+        }
+
+        long now = System.currentTimeMillis();
+        Point botPos = bot.getPosition();
+        Point nearest = null;
+        double nearestDistSq = Double.MAX_VALUE;
+
+        for (MapItem drop : map.getDroppedItems()) {
+            if (drop.isPickedUp() || map.getMapObject(drop.getObjectId()) != drop) continue;
+            if (!drop.canBePickedBy(bot)) continue;
+            if (now - drop.getDropTime() < 3000) continue;
+            if (drop.getMeso() <= 0 && drop.getItemId() > 0) {
+                InventoryType type = ItemConstants.getInventoryType(drop.getItemId());
+                Inventory inv = bot.getInventory(type);
+                if (inv != null && inv.isFull()) continue;
+            }
+            Point dropPos = drop.getPosition();
+            if (!allowed.contains(graph.findRegionId(map, dropPos))) continue;
+            double distSq = dropPos.distanceSq(botPos);
+            if (distSq < nearestDistSq) {
+                nearestDistSq = distSq;
+                nearest = dropPos;
+            }
+        }
+        return nearest;
     }
 
     static void tickManualTrade(BotEntry entry, Character bot) {

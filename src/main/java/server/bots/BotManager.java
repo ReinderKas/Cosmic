@@ -1678,6 +1678,13 @@ public class BotManager {
         if (region == null || region.isRopeRegion || region.width() == 0) {
             return resolveNoGrindTargetPosition(entry, botPos);
         }
+        // Seek loot before roaming
+        Point lootTarget = BotInventoryManager.findNearestPatrolLootTarget(entry, entry.patrolRegionId);
+        if (lootTarget != null) {
+            entry.patrolWanderTarget = lootTarget;
+            return lootTarget;
+        }
+        // Roam within region
         Point wander = entry.patrolWanderTarget;
         if (wander == null || isNear(botPos, wander, BotMovementManager.cfg.STOP_DIST)) {
             int x = ThreadLocalRandom.current().nextInt(region.minX, region.maxX + 1);
