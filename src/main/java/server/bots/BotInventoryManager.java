@@ -151,14 +151,25 @@ class BotInventoryManager {
         }
     }
 
+    static boolean hasAnyInventoryFull(Character bot) {
+        if (bot == null) return false;
+        for (InventoryType type : new InventoryType[]{
+                InventoryType.EQUIP, InventoryType.USE, InventoryType.SETUP, InventoryType.ETC}) {
+            Inventory inv = bot.getInventory(type);
+            if (inv != null && inv.isFull()) return true;
+        }
+        return false;
+    }
+
     /**
      * Returns the position of the nearest lootable drop within the patrol region
      * and its immediate neighbours (1 graph hop). Returns null when no eligible
-     * drop exists or the graph is unavailable.
+     * drop exists, the graph is unavailable, or any inventory is full.
      */
     static Point findNearestPatrolLootTarget(BotEntry entry, int patrolRegionId) {
         Character bot = entry.bot;
         if (bot == null) return null;
+        if (hasAnyInventoryFull(bot)) return null;
         MapleMap map = bot.getMap();
         if (map == null) return null;
 
