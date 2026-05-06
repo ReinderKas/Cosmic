@@ -1239,14 +1239,23 @@ class BotEquipManager {
         if (!isOwnClassEquip(recipient, hooks, item)) return false;
         String slot = textSlotKey(hooks, item);
         if (slot == null) return false;
-        if (isWeaponSlot(slot) && !isWeaponCompatible(recipient, hooks.getWeaponType(item.getItemId()))) return false;
+        String weaponTrack = null;
+        if (isWeaponSlot(slot)) {
+            weaponTrack = weaponUsefulnessTrackKey(recipient, hooks.getWeaponType(item.getItemId()));
+            if (weaponTrack == null) return false;
+        }
         EnumSet<RelevantStat> relevant = relevantStatsFor(recipient.getJob());
         if (!hasPositiveRelevant(relevant, item)) return false;
         Inventory equippedInv = recipient.getInventory(InventoryType.EQUIPPED);
         List<Equip> baseline = new ArrayList<>();
         for (Item it : equippedInv.list()) {
             if (!(it instanceof Equip e) || hooks.isCash(e.getItemId())) continue;
-            if (slot.equals(textSlotKey(hooks, e))) baseline.add(e);
+            if (!slot.equals(textSlotKey(hooks, e))) continue;
+            if (weaponTrack != null) {
+                String equippedTrack = weaponUsefulnessTrackKey(recipient, hooks.getWeaponType(e.getItemId()));
+                if (!weaponTrack.equals(equippedTrack)) continue;
+            }
+            baseline.add(e);
         }
         return !anyDominates(relevant, baseline, item);
     }
@@ -1316,9 +1325,28 @@ class BotEquipManager {
         String slot = textSlotKey(hooks, equip);
         if (slot == null) return null;
         if (!isWeaponSlot(slot)) return slot;
-        WeaponType wt = hooks.getWeaponType(equip.getItemId());
-        if (!isWeaponCompatible(bot, wt)) return null;
-        return slot + ":" + wt;
+        String weaponTrack = weaponUsefulnessTrackKey(bot, hooks.getWeaponType(equip.getItemId()));
+        return weaponTrack != null ? slot + ":" + weaponTrack : null;
+    }
+
+    private static String weaponUsefulnessTrackKey(Character bot, WeaponType weaponType) {
+        if (!isWeaponCompatible(bot, weaponType)) return null;
+        if (weaponType == null || weaponType == WeaponType.NOT_A_WEAPON) return "non-weapon";
+        if (isSword(weaponType)) return "sword";
+        if (isGeneralWeapon(weaponType)) return "general";
+        if (isSpearWeapon(weaponType)) return "spear";
+        if (isPolearmWeapon(weaponType)) return "polearm";
+        if (isThiefDagger(weaponType)) return "thief-dagger";
+        return switch (weaponType) {
+            case BOW -> "bow";
+            case CROSSBOW -> "crossbow";
+            case CLAW -> "claw";
+            case GUN -> "gun";
+            case KNUCKLE -> "knuckle";
+            case WAND -> "wand";
+            case STAFF -> "staff";
+            default -> weaponType.name();
+        };
     }
 
     private static boolean dominatesForSelfReserve(SelfReserveHooks hooks, EnumSet<RelevantStat> relevant,
