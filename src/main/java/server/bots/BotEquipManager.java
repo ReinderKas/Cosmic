@@ -1297,7 +1297,7 @@ class BotEquipManager {
                 boolean dominated = false;
                 for (Equip other : trackItems) {
                     if (other == candidate) continue;
-                    if (dominatesForSelfReserve(hooks, relevant, other, candidate)) {
+                    if (dominatesForSelfReserve(hooks, relevant, bot, other, candidate)) {
                         dominated = true;
                         break;
                     }
@@ -1356,9 +1356,11 @@ class BotEquipManager {
     }
 
     private static boolean dominatesForSelfReserve(SelfReserveHooks hooks, EnumSet<RelevantStat> relevant,
-                                                   Equip better, Equip worse) {
+                                                   Character bot, Equip better, Equip worse) {
         if (!paretoDominates(relevant, better, worse)) return false;
-        if (!reqsAtLeastAsEasy(hooks, better, worse)) return false;
+        if (!reqsAtLeastAsEasy(hooks, better, worse)
+                && !hooks.meetsReqs(better, bot.getJob(), bot.getLevel(),
+                                    bot.getStr(), bot.getDex(), bot.getInt(), bot.getLuk(), bot.getFame())) return false;
         if (sameRequirementSignature(hooks, better, worse) && better.getItemId() != worse.getItemId()) return false;
         return true;
     }
