@@ -227,6 +227,8 @@ public class BotEntry {
     int farmAnchorMapId = -1;
     // Grind loot — nearest convenient drop, searched each AI tick, cleared when picked up.
     MapItem grindLootTarget = null;
+    int ignoredGrindLootObjectId = 0;
+    long ignoredGrindLootUntilMs = 0L;
     // "Patrol" region — bot wanders within this nav region and attacks opportunistically.
     int patrolRegionId = -1;    // BotNavigationGraph.Region id; -1 = inactive
     int patrolMapId = -1;

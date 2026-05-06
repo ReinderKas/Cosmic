@@ -17,7 +17,6 @@ import net.packet.Packet;
 import server.ItemInformationProvider;
 import server.StatEffect;
 import server.Trade;
-import server.bots.pq.BotPqHooks;
 import server.maps.MapItem;
 import server.maps.MapleMap;
 import tools.PacketCreator;
@@ -93,18 +92,8 @@ class BotInventoryManager {
         entry.invFullWarnCooldownMs = BotMovementManager.tickDown(entry.invFullWarnCooldownMs);
         Point botPos = bot.getPosition();
         for (MapItem drop : bot.getMap().getDroppedItems()) {
-            if (drop.isPickedUp() || bot.getMap().getMapObject(drop.getObjectId()) != drop) {
+            if (!BotLootEligibility.isPresent(bot.getMap(), drop)) {
                 cleanupBotLootGhostDrop(bot, drop);
-                continue;
-            }
-            if (!drop.canBePickedBy(bot)) {
-                continue;
-            }
-            if (drop.getItemId() == 4001008) {
-                continue;
-            }
-            if (drop.getItemId() == 4001007 && (BotPqHooks.shouldSkipCouponLoot(entry)
-                    || (entry.kpq.couponTarget > 0 && bot.getItemQuantity(4001007, false) >= entry.kpq.couponTarget))) {
                 continue;
             }
             if (System.currentTimeMillis() - drop.getDropTime() < 3000) {
@@ -114,6 +103,18 @@ class BotInventoryManager {
             Point dropPos = drop.getPosition();
             if (Math.abs(dropPos.x - botPos.x) > BotManager.cfg.LOOT_RADIUS
                     || Math.abs(dropPos.y - botPos.y) > BotManager.cfg.LOOT_RADIUS) {
+                continue;
+            }
+
+            if (!BotLootEligibility.canBotLoot(entry, bot, drop)) {
+                if (drop.getMeso() <= 0 && drop.getItemId() > 0) {
+                    InventoryType type = ItemConstants.getInventoryType(drop.getItemId());
+                    Inventory inventory = bot.getInventory(type);
+                    if (inventory != null && inventory.isFull() && entry.invFullWarnCooldownMs <= 0) {
+                        BotManager.getInstance().botReply(entry, type.name().toLowerCase() + " inventory is full!");
+                        entry.invFullWarnCooldownMs = BotMovementManager.delayAfterCurrentTick(BotManager.cfg.INV_FULL_WARN_CD_MS);
+                    }
+                }
                 continue;
             }
 
@@ -167,15 +168,13 @@ class BotInventoryManager {
         double nearestDistSq = Double.MAX_VALUE;
 
         for (MapItem drop : map.getDroppedItems()) {
-            if (drop.isPickedUp() || map.getMapObject(drop.getObjectId()) != drop) continue;
-            if (!drop.canBePickedBy(bot)) continue;
-            if (now - drop.getDropTime() < 3000) continue;
-            if (drop.getMeso() <= 0 && drop.getItemId() > 0) {
-                InventoryType type = ItemConstants.getInventoryType(drop.getItemId());
-                Inventory inv = bot.getInventory(type);
-                if (inv != null && inv.isFull()) continue;
-            }
+            if (!BotLootEligibility.canBotTargetLoot(entry, bot, map, drop, now)) continue;
+            if (BotManager.isGrindLootRetrySuppressed(entry, drop, now)) continue;
             Point dropPos = drop.getPosition();
+            if (Math.abs(dropPos.x - botPos.x) <= BotManager.cfg.LOOT_RADIUS
+                    && Math.abs(dropPos.y - botPos.y) <= BotManager.cfg.LOOT_RADIUS) {
+                continue;
+            }
             double distSq = dropPos.distanceSq(botPos);
             if (distSq > seekRangeSq || distSq >= nearestDistSq) continue;
             nearestDistSq = distSq;
@@ -221,14 +220,7 @@ class BotInventoryManager {
         double nearestDistSq = Double.MAX_VALUE;
 
         for (MapItem drop : map.getDroppedItems()) {
-            if (drop.isPickedUp() || map.getMapObject(drop.getObjectId()) != drop) continue;
-            if (!drop.canBePickedBy(bot)) continue;
-            if (now - drop.getDropTime() < 3000) continue;
-            if (drop.getMeso() <= 0 && drop.getItemId() > 0) {
-                InventoryType type = ItemConstants.getInventoryType(drop.getItemId());
-                Inventory inv = bot.getInventory(type);
-                if (inv != null && inv.isFull()) continue;
-            }
+            if (!BotLootEligibility.canBotTargetLoot(entry, bot, map, drop, now)) continue;
             Point dropPos = drop.getPosition();
             if (!allowed.contains(graph.findRegionId(map, dropPos))) continue;
             double distSq = dropPos.distanceSq(botPos);

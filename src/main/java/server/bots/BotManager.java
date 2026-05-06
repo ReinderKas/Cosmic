@@ -81,6 +81,7 @@ public class BotManager {
         // Grind loot convenience: loot competes with mob navigation only when
         // lootDistSq < mobDistSq * ratio. 0.09 ≈ loot within 30% of mob distance.
         public float GRIND_LOOT_CONVENIENCE_RATIO = 0.09f;
+        public int   GRIND_LOOT_RETRY_SUPPRESS_MS = 5_000;
 
         // Debug aid: keep stuck detection/logging active, but disable automatic recovery jumps
         // so pathing failures remain visible in logs and at runtime.
@@ -1668,11 +1669,11 @@ public class BotManager {
         if (entry == null || botPos == null) {
             return botPos;
         }
-        if (BotPqHooks.isCouponSeeking(entry)) {
-            return entry.kpq.navTarget;
-        }
         if (entry.grindLootTarget != null) {
-            return entry.grindLootTarget.getPosition();
+            Point lootPos = activeGrindLootPosition(entry, botPos);
+            if (lootPos != null) {
+                return lootPos;
+            }
         }
         if (entry.wanderDirection == 0) {
             entry.wanderDirection = ThreadLocalRandom.current().nextBoolean() ? 1 : -1;
@@ -1680,14 +1681,67 @@ public class BotManager {
         return new Point(botPos.x + entry.wanderDirection * 200, botPos.y);
     }
 
-    private static Point convenientLootTarget(BotEntry entry, Point botPos, Point mobPos) {
+    private static Point activeGrindLootPosition(BotEntry entry, Point botPos) {
         MapItem loot = entry.grindLootTarget;
-        if (loot == null || loot.isPickedUp()) {
+        if (loot == null || botPos == null) {
+            entry.grindLootTarget = null;
+            return null;
+        }
+        Character bot = entry.bot;
+        if (loot.isPickedUp() || bot == null || bot.getMap() == null
+                || bot.getMap().getMapObject(loot.getObjectId()) != loot) {
+            entry.grindLootTarget = null;
+            return null;
+        }
+        if (!BotLootEligibility.canBotLoot(entry, bot, loot)) {
             entry.grindLootTarget = null;
             return null;
         }
         Point lootPos = loot.getPosition();
-        double lootDistSq = lootPos.distanceSq(botPos);
+        if (Math.abs(lootPos.x - botPos.x) <= cfg.LOOT_RADIUS
+                && Math.abs(lootPos.y - botPos.y) <= cfg.LOOT_RADIUS) {
+            suppressGrindLootRetry(entry, loot);
+            entry.grindLootTarget = null;
+            return null;
+        }
+        return lootPos;
+    }
+
+    static void suppressGrindLootRetry(BotEntry entry, MapItem loot) {
+        if (entry == null || loot == null) {
+            return;
+        }
+        entry.ignoredGrindLootObjectId = loot.getObjectId();
+        entry.ignoredGrindLootUntilMs = System.currentTimeMillis() + cfg.GRIND_LOOT_RETRY_SUPPRESS_MS;
+    }
+
+    static boolean isGrindLootRetrySuppressed(BotEntry entry, MapItem loot, long now) {
+        if (entry == null || loot == null || entry.ignoredGrindLootObjectId <= 0) {
+            return false;
+        }
+        if (now >= entry.ignoredGrindLootUntilMs) {
+            entry.ignoredGrindLootObjectId = 0;
+            entry.ignoredGrindLootUntilMs = 0L;
+            return false;
+        }
+        return entry.ignoredGrindLootObjectId == loot.getObjectId();
+    }
+
+    static double activeLootTravelDistSq(Point botPos, Point lootPos) {
+        if (botPos == null || lootPos == null) {
+            return Double.MAX_VALUE;
+        }
+        int dx = Math.max(0, Math.abs(lootPos.x - botPos.x) - cfg.LOOT_RADIUS);
+        int dy = Math.max(0, Math.abs(lootPos.y - botPos.y) - cfg.LOOT_RADIUS);
+        return (double) dx * dx + (double) dy * dy;
+    }
+
+    static Point convenientLootTarget(BotEntry entry, Point botPos, Point mobPos) {
+        Point lootPos = activeGrindLootPosition(entry, botPos);
+        if (lootPos == null) {
+            return null;
+        }
+        double lootDistSq = activeLootTravelDistSq(botPos, lootPos);
         double mobDistSq = mobPos.distanceSq(botPos);
         return lootDistSq < mobDistSq * cfg.GRIND_LOOT_CONVENIENCE_RATIO ? lootPos : null;
     }
@@ -1903,25 +1957,6 @@ public class BotManager {
 
         // Grind mode: navigate toward nearest monster, attack when in range
         if (entry.grinding) {
-            // PQ nav override: walking to NPC or owner — skip monster seeking entirely.
-            // Coupon-seeking (soft hint) is excluded: the bot should still fight mobs
-            // opportunistically and only drift toward the coupon when idle.
-            if (entry.kpq.navTarget != null && !BotPqHooks.isCouponSeeking(entry)) {
-                targetPos = entry.kpq.navTarget;
-                BotNavigationManager.NavigationDirective pqNav = BotNavigationManager.resolveTarget(entry, targetPos, runAiTick);
-                if (!pqNav.consumedTick) {
-                    if (entry.climbing) {
-                        BotMovementManager.tickClimbing(entry, pqNav.targetPos, runAiTick);
-                    } else if (isSwimMap(entry) && entry.inAir) {
-                        BotMovementManager.tickSwimming(entry, pqNav.targetPos);
-                    } else if (entry.inAir) {
-                        BotMovementManager.tickAirborne(entry, pqNav.targetPos);
-                    } else {
-                        BotMovementManager.tickGrounded(entry, pqNav.targetPos);
-                    }
-                }
-                return;
-            }
             double seekRangeSq = (double) BotCombatManager.cfg.GRIND_SEEK_RANGE * BotCombatManager.cfg.GRIND_SEEK_RANGE;
             Monster target = entry.grindTarget;
             if (target == null || !target.isAlive()
@@ -1956,11 +1991,7 @@ public class BotManager {
             }
             if (target == null) {
                 entry.grindTarget = null;
-                if (BotPqHooks.isCouponSeeking(entry)) {
-                    // No mob in seek range — drift toward the nearby coupon drop instead of idling.
-                    targetPos = entry.kpq.navTarget;
-                    // falls through to stepMovementCore below
-                } else if (isSwimMap(entry) && entry.inAir) {
+                if (isSwimMap(entry) && entry.inAir) {
                     BotMovementManager.tickSwimming(entry, targetPos);
                     return;
                 } else if (entry.inAir) {
@@ -2030,23 +2061,13 @@ public class BotManager {
 
             boolean attackAttemptedInRange = false;
             if (!entry.climbing) {
-                boolean couponSeeking = BotPqHooks.isCouponSeeking(entry);
                 if (attackGateOpen && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)
-                        && BotCombatManager.canUseAttackPlanNow(entry, grindWeaponType, attackPlan)
-                        && (!couponSeeking || entry.moveWindowMs <= 0)) {
+                        && BotCombatManager.canUseAttackPlanNow(entry, grindWeaponType, attackPlan)) {
                     attackAttemptedInRange = true;
                     // In range — attack if grounded, or during ascent of a jump
                     int prevCooldown = entry.attackCooldownMs;
                     BotCombatManager.attackMonster(entry, bot, attackPlan);
                     boolean attacked = entry.attackCooldownMs != prevCooldown;
-                    // After attacking in coupon-seek mode, add a movement window based on
-                    // distance to the coupon so the bot walks toward it between attacks.
-                    if (attacked && couponSeeking && entry.kpq.navTarget != null) {
-                        int couponDx = Math.abs(botPos.x - entry.kpq.navTarget.x);
-                        entry.moveWindowMs = couponDx > BotMovementManager.cfg.FOLLOW_DIST * 3 ? 1000
-                                           : couponDx > BotMovementManager.cfg.FOLLOW_DIST     ? 200
-                                           : 0;
-                    }
                     // If a ranged bot just did a degenerate close-range hit, force retreat next tick
                     if (attacked && attackPlan.isCloseRangeRoute()
                             && BotCombatManager.isRangedAmmoWeapon(grindWeaponType)) {
@@ -3240,7 +3261,7 @@ public class BotManager {
         if (entry.navEdge != null || entry.navPreciseTarget || entry.fidgetMode != BotFidgetMode.NONE) {
             return false;
         }
-        if (entry.shopVisitPending || entry.shopSequenceActive || entry.kpq.navTarget != null) {
+        if (entry.shopVisitPending || entry.shopSequenceActive) {
             return false;
         }
         if (entry.wasMovingX || entry.moveDir != 0 || entry.movementVelX != 0 || entry.movementVelY != 0) {
