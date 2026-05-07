@@ -2,6 +2,8 @@ package server.bots;
 
 import client.Character;
 import constants.game.CharacterStance;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import server.maps.MapleMap;
 import server.maps.Foothold;
 import server.maps.Portal;
@@ -18,9 +20,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 final class BotNavigationManager {
+    private static final Logger log = LoggerFactory.getLogger(BotNavigationManager.class);
     private static final int JUMP_READY_X_TOLERANCE = 10;
     private static final int EDGE_READY_X_TOLERANCE = 14;
     private static final int NO_MOVEMENT_WALK_TOLERANCE = 4;
+    private static final long SLOW_PATHFIND_WARN_NS = 50_000_000L;
 
     /** Throttle warmup notifications per (ownerId -> mapId -> lastNotifyMs). */
     private static final Map<Integer, Map<Integer, Long>> WARMUP_NOTIFIED = new ConcurrentHashMap<>();
@@ -48,6 +52,17 @@ final class BotNavigationManager {
     }
 
     private record SearchState(int regionId, Point point) {
+    }
+
+    private record PathfindProfile(long elapsedNs,
+                                   int expandedNodes,
+                                   int staleNodes,
+                                   int edgeChecks,
+                                   int usableEdges,
+                                   int relaxations,
+                                   int openPeak,
+                                   int bestGoalCost,
+                                   int resultEdges) {
     }
 
     static NavigationDirective resolveTarget(BotEntry entry, Point rawTargetPos, boolean runAiTick) {
@@ -794,6 +809,7 @@ final class BotNavigationManager {
                                                           Point targetPos,
                                                           String pathfindCaller) {
         long startedAt = System.nanoTime();
+        PathfindProfile profile = null;
         try {
             PriorityQueue<SearchNode> open = new PriorityQueue<>(Comparator.comparingInt(node -> node.score));
             Map<SearchState, Integer> gScore = new HashMap<>();
@@ -802,6 +818,12 @@ final class BotNavigationManager {
             SearchState startState = new SearchState(startRegionId, new Point(startPos));
             SearchState bestGoalState = null;
             int bestGoalCost = Integer.MAX_VALUE;
+            int expandedNodes = 0;
+            int staleNodes = 0;
+            int edgeChecks = 0;
+            int usableEdges = 0;
+            int relaxations = 0;
+            int openPeak = 1;
 
             gScore.put(startState, 0);
             open.add(new SearchNode(startState, 0, heuristic(graph, startPos, targetPos)));
@@ -809,8 +831,13 @@ final class BotNavigationManager {
             while (!open.isEmpty()) {
                 SearchNode current = open.poll();
                 if (current.cost != gScore.getOrDefault(current.state, Integer.MAX_VALUE)) {
+                    staleNodes++;
                     continue;
                 }
+                if (bestGoalState != null && current.score >= bestGoalCost) {
+                    break;
+                }
+                expandedNodes++;
 
                 if (current.state.regionId == targetRegionId) {
                     int goalCost = current.cost + intraRegionTravelCost(graph, current.state.regionId, current.state.point, targetPos);
@@ -821,9 +848,11 @@ final class BotNavigationManager {
                 }
 
                 for (BotNavigationGraph.Edge edge : graph.getOutgoing(current.state.regionId)) {
+                    edgeChecks++;
                     if (!isEdgeUsable(graph, map, edge)) {
                         continue;
                     }
+                    usableEdges++;
 
                     int tentativeCost = current.cost + intraRegionTravelCost(graph, current.state.regionId, current.state.point, edge.startPoint) + edge.cost;
                     SearchState nextState = new SearchState(edge.toRegionId, edge.endPoint);
@@ -831,18 +860,82 @@ final class BotNavigationManager {
                         continue;
                     }
 
+                    relaxations++;
                     gScore.put(nextState, tentativeCost);
                     cameFrom.put(nextState, current.state);
                     cameByEdge.put(nextState, edge);
                     int fScore = tentativeCost + heuristic(graph, edge.endPoint, targetPos);
                     open.add(new SearchNode(nextState, tentativeCost, fScore));
+                    openPeak = Math.max(openPeak, open.size());
                 }
             }
 
-            return reconstructPath(startState, bestGoalState, cameFrom, cameByEdge);
+            List<BotNavigationGraph.Edge> path = reconstructPath(startState, bestGoalState, cameFrom, cameByEdge);
+            profile = new PathfindProfile(
+                    System.nanoTime() - startedAt,
+                    expandedNodes,
+                    staleNodes,
+                    edgeChecks,
+                    usableEdges,
+                    relaxations,
+                    openPeak,
+                    bestGoalCost,
+                    path.size());
+            return path;
         } finally {
+            if (profile == null) {
+                profile = new PathfindProfile(
+                        System.nanoTime() - startedAt,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        Integer.MAX_VALUE,
+                        0);
+            }
+            logSlowPathfind(graph, map, startPos, startRegionId, targetRegionId, targetPos, pathfindCaller, profile);
             BotPerformanceMonitor.recordPathfind(pathfindCaller, System.nanoTime() - startedAt);
         }
+    }
+
+    private static void logSlowPathfind(BotNavigationGraph graph,
+                                        MapleMap map,
+                                        Point startPos,
+                                        int startRegionId,
+                                        int targetRegionId,
+                                        Point targetPos,
+                                        String pathfindCaller,
+                                        PathfindProfile profile) {
+        if (profile.elapsedNs() < SLOW_PATHFIND_WARN_NS) {
+            return;
+        }
+        int regionCount = graph != null && graph.regions != null ? graph.regions.size() : -1;
+        int outgoingFromStart = graph != null ? graph.getOutgoing(startRegionId).size() : -1;
+        String caller = pathfindCaller == null || pathfindCaller.isBlank() ? "default" : pathfindCaller;
+        int bestGoalCost = profile.bestGoalCost() == Integer.MAX_VALUE ? -1 : profile.bestGoalCost();
+        log.warn(
+                "Slow bot pathfind: caller={} took {} ms map={} startRegion={} targetRegion={} regions={} startOut={} startPos=({}, {}) targetPos=({}, {}) expanded={} stale={} edgeChecks={} usableEdges={} relaxations={} openPeak={} bestGoalCost={} resultEdges={}",
+                caller,
+                String.format("%.1f", profile.elapsedNs() / 1_000_000.0),
+                map != null ? map.getId() : -1,
+                startRegionId,
+                targetRegionId,
+                regionCount,
+                outgoingFromStart,
+                startPos != null ? startPos.x : -1,
+                startPos != null ? startPos.y : -1,
+                targetPos != null ? targetPos.x : -1,
+                targetPos != null ? targetPos.y : -1,
+                profile.expandedNodes(),
+                profile.staleNodes(),
+                profile.edgeChecks(),
+                profile.usableEdges(),
+                profile.relaxations(),
+                profile.openPeak(),
+                bestGoalCost,
+                profile.resultEdges());
     }
 
     private static List<BotNavigationGraph.Edge> reconstructPath(SearchState startState,

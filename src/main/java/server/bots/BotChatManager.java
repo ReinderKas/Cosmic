@@ -22,14 +22,26 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class BotChatManager {
     private static final String SKILL_TREE_CHOICE_ACTION = "skill_tree_choice";
+    private static final ExecutorService TRADE_COMMAND_EXECUTOR = Executors.newFixedThreadPool(2, r -> {
+        Thread thread = new Thread(r, "bot-trade-command");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private static final Map<Integer, AtomicInteger> PENDING_TRANSFER_REQUESTS = new ConcurrentHashMap<>();
 
     private record LearnedSkill(int id, String name, int level) {}
+    private record TransferCommandResult(boolean hasItems, int count) {}
     static final class QueuedMessage {
         final String text;
         final boolean ownerDirected;
@@ -2024,28 +2036,76 @@ public class BotChatManager {
             return;
         }
 
+        scheduleTransferCommandEvaluation(entry, transferCommand, category);
+    }
+
+    private static void scheduleTransferCommandEvaluation(BotEntry entry, TransferCommand transferCommand, String category) {
+        Character bot = entry.bot;
+        if (bot == null) {
+            return;
+        }
+
+        int requestId = nextTransferRequestId(bot);
+        long replyDelay = BotManager.randMs(500, 700);
+        long requestedAt = System.nanoTime();
+        CompletableFuture
+                .supplyAsync(() -> evaluateTransferCommand(entry, transferCommand, category, bot), TRADE_COMMAND_EXECUTOR)
+                .thenAccept(result -> {
+                    long elapsedMs = (System.nanoTime() - requestedAt) / 1_000_000L;
+                    long remainingDelay = Math.max(0L, replyDelay - elapsedMs);
+                    BotManager.after(remainingDelay, () ->
+                            applyTransferCommandResult(entry, transferCommand, category, bot, requestId, result));
+                });
+    }
+
+    private static TransferCommandResult evaluateTransferCommand(BotEntry entry,
+                                                                 TransferCommand transferCommand,
+                                                                 String category,
+                                                                 Character bot) {
         long hasItemsStartedAt = transferCommand.mode == TransferMode.TRADE
                 && BotInventoryManager.profileTradeCategory(category)
                 ? System.nanoTime() : 0L;
-        boolean hasItems = BotInventoryManager.hasTransferableItems(category, entry, entry.bot);
-        BotInventoryManager.logSlowTradeCommand(category, "hasTransferableItems", entry, entry.bot, hasItemsStartedAt);
-        if (!hasItems) {
-            BotManager.after(BotManager.randMs(500, 700), () ->
-                    BotManager.getInstance().botReply(entry, BotInventoryManager.noItemsReply(category)));
+        boolean hasItems = BotInventoryManager.hasTransferableItems(category, entry, bot);
+        BotInventoryManager.logSlowTradeCommand(category, "hasTransferableItems", entry, bot, hasItemsStartedAt);
+        int count = hasItems && transferCommand.mode == TransferMode.CHOICE
+                ? BotInventoryManager.countTransferableItems(category, entry, bot)
+                : 0;
+        return new TransferCommandResult(hasItems, count);
+    }
+
+    private static void applyTransferCommandResult(BotEntry entry,
+                                                   TransferCommand transferCommand,
+                                                   String category,
+                                                   Character bot,
+                                                   int requestId,
+                                                   TransferCommandResult result) {
+        if (!isLatestTransferRequest(bot, requestId)) {
+            return;
+        }
+        if (!result.hasItems()) {
+            BotManager.getInstance().botReply(entry, BotInventoryManager.noItemsReply(category));
             return;
         }
 
         switch (transferCommand.mode) {
-            case TRADE -> BotManager.after(BotManager.randMs(500, 700), () ->
-                    BotInventoryManager.startTradeTransfer(category, entry, entry.bot));
+            case TRADE -> BotInventoryManager.startTradeTransfer(category, entry, bot);
             case CHOICE -> {
                 entry.pendingAction = "item_choice";
                 entry.pendingDropCategory = category;
-                BotManager.after(BotManager.randMs(500, 700), () ->
-                        BotManager.getInstance().botReply(entry, dropOrTradePrompt(
-                                category, BotInventoryManager.countTransferableItems(category, entry, entry.bot))));
+                BotManager.getInstance().botReply(entry, dropOrTradePrompt(category, result.count()));
             }
         }
+    }
+
+    private static int nextTransferRequestId(Character bot) {
+        return PENDING_TRANSFER_REQUESTS
+                .computeIfAbsent(bot.getId(), ignored -> new AtomicInteger())
+                .incrementAndGet();
+    }
+
+    private static boolean isLatestTransferRequest(Character bot, int requestId) {
+        AtomicInteger current = PENDING_TRANSFER_REQUESTS.get(bot.getId());
+        return current != null && current.get() == requestId;
     }
 
     private static void handleItemQuery(BotEntry entry, String itemName) {
