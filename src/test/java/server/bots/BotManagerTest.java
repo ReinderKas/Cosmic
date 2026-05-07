@@ -150,6 +150,17 @@ class BotManagerTest {
     }
 
     @Test
+    void shouldRouteArbitraryBotSayThroughPartyChannel() {
+        BotManager manager = spy(BotManager.getInstance());
+        Character bot = mock(Character.class);
+        doAnswer(invocation -> null).when(manager).botSayParty(bot, "sure!");
+
+        manager.botSay(bot, ReplyChannel.PARTY, "sure!");
+
+        verify(manager).botSayParty(bot, "sure!");
+    }
+
+    @Test
     void shouldReturnFeedbackForAmbiguousTargetedBotPrefix() {
         BotEntry jane = botEntryNamed("Jane");
         BotEntry jason = botEntryNamed("Jason");

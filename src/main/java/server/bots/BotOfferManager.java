@@ -302,7 +302,7 @@ final class BotOfferManager {
         if (!hasPendingOffer(entry) || entry.pendingLootOfferRecipientId != recipientBot.getId()) {
             return;
         }
-        BotManager.getInstance().botSay(recipientBot, BotManager.randomReply(BOT_ACCEPT_MSGS));
+        BotManager.getInstance().botSay(recipientBot, entry.replyChannel, BotManager.randomReply(BOT_ACCEPT_MSGS));
         handlePendingOfferResponse(entry, recipientBot, "yes");
     }
 
