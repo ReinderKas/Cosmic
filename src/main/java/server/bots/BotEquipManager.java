@@ -56,7 +56,7 @@ class BotEquipManager {
             java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final short[] RING_SLOTS = {-12, -13, -15, -16};
     /** Hard cap on Pareto-frontier size per DP step to bound worst-case runtime. */
-    private static final int MAX_PARETO_STATES = 1000;
+    private static final int MAX_PARETO_STATES = 2000;
 
     static final class EquipRecommendation {
         private final short targetSlot;
@@ -954,7 +954,12 @@ class BotEquipManager {
      */
     static boolean statOnlyBlocked(Character bot, ItemInformationProvider ii, Equip equip) {
         // Pass huge stat values: if it still fails, level/job/fame is blocking, skip.
-        return ii.meetsEquipRequirements(equip, bot.getJob(), bot.getLevel(),
+        return statOnlyBlocked(bot, EquipUsefulnessHooks.from(ii), equip);
+    }
+
+    static boolean statOnlyBlocked(Character bot, EquipUsefulnessHooks hooks, Equip equip) {
+        // Pass huge stat values: if it still fails, level/job/fame is blocking, skip.
+        return hooks.meetsReqs(equip, bot.getJob(), bot.getLevel(),
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, bot.getFame());
     }
@@ -1357,11 +1362,23 @@ class BotEquipManager {
 
     private static boolean dominatesForSelfReserve(SelfReserveHooks hooks, EnumSet<RelevantStat> relevant,
                                                    Character bot, Equip better, Equip worse) {
-        if (!paretoDominates(relevant, better, worse)) return false;
+        boolean relevantDominates = paretoDominates(relevant, better, worse);
+        boolean duplicateTieBreakDominates = sameRequirementSignature(hooks, better, worse)
+                && better.getItemId() == worse.getItemId()
+                && relevantStatsEqual(relevant, better, worse)
+                && usefulStatSum(better, bot.getJob()) > usefulStatSum(worse, bot.getJob());
+        if (!relevantDominates && !duplicateTieBreakDominates) return false;
         if (!reqsAtLeastAsEasy(hooks, better, worse)
                 && !hooks.meetsReqs(better, bot.getJob(), bot.getLevel(),
                                     bot.getStr(), bot.getDex(), bot.getInt(), bot.getLuk(), bot.getFame())) return false;
         if (sameRequirementSignature(hooks, better, worse) && better.getItemId() != worse.getItemId()) return false;
+        return true;
+    }
+
+    private static boolean relevantStatsEqual(EnumSet<RelevantStat> relevant, Equip a, Equip b) {
+        for (RelevantStat stat : relevant) {
+            if (stat.of(a) != stat.of(b)) return false;
+        }
         return true;
     }
 
