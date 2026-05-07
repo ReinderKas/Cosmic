@@ -605,6 +605,53 @@ class BotNavigationManagerTest {
         assertEquals(new Point(100, 100), topExit.endPoint);
     }
 
+    @Test
+    void shouldNotDismountFromRopeTopOnNonAiTickWhenFollowTargetIsAbove() {
+        // Regression: pathlog-Preston-2026-05-07T034012 — bot at firstClimbableY of a rope
+        // whose top sits 1px below an above-foothold. Owner above the rope makes the raw follow
+        // target's dy negative, so on every non-AI physics tick tickClimbing computed
+        // climbVerticalDir=-1 and advanceClimb landed the bot onto the foothold above (climbing
+        // cleared). The following AI tick saw the bot in the foothold region and re-grabbed the
+        // rope. Region oscillated r=foothold ↔ r=rope at 50ms cadence for 10+ seconds.
+        //
+        // Climb direction is an AI-decided intent. Non-AI ticks must integrate the previously
+        // chosen climbVerticalDir, not derive a fresh direction from the raw follow target.
+        MapleMap map = new MapleMap(910000200, 0, 0, 910000200, 1.0f);
+        FootholdTree footholds = new FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        // Foothold above the rope top (y=0), 2px gap to rope.topY=2 — same geometry as Preston r114/r173.
+        footholds.insert(new Foothold(new Point(80, 0), new Point(120, 0), 1));
+        map.setFootholds(footholds);
+        Rope rope = new Rope(100, 2, 154, false);
+        map.addRope(rope);
+
+        Character bot = mockBot(new Point(100, 0), map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.movementProfile = BotMovementProfile.base();
+
+        // Simulate the state right after AI tick attached the bot to the rope at firstClimbableY.
+        BotPhysicsEngine.attachToRope(entry, bot, rope, BotPhysicsEngine.firstClimbableY(rope));
+        assertTrue(entry.climbing);
+        assertEquals(BotPhysicsEngine.firstClimbableY(rope), bot.getPosition().y);
+        assertEquals(0, entry.climbVerticalDir, "fresh attach must not carry stale climb intent");
+
+        // Follow target far above the bot — without the fix, dy<0 forces climb-up which dismounts.
+        Point followTargetAbove = new Point(50, -54);
+
+        // No nav edge committed (rope-entry was just executed; reuseCommittedEdge would drop it
+        // because the bot is now in the rope region == edge.toRegionId). This is the no-edge
+        // window between AI ticks where the bug manifests.
+        entry.navEdge = null;
+
+        // Run one non-AI physics tick.
+        BotMovementManager.tickClimbing(entry, followTargetAbove, false);
+
+        assertTrue(entry.climbing,
+                "Non-AI tick must not dismount: AI is the only place climb direction is decided.");
+        assertEquals(rope, entry.climbRope);
+        assertEquals(new Point(100, BotPhysicsEngine.firstClimbableY(rope)), bot.getPosition(),
+                "Bot must hold position on the rope without AI-decided intent.");
+    }
+
     private static Character mockBot(Point startPosition, MapleMap map) {
         Character bot = mock(Character.class);
         AtomicReference<Point> position = new AtomicReference<>(new Point(startPosition));
