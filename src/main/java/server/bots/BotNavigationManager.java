@@ -307,6 +307,7 @@ final class BotNavigationManager {
         if (targetRegionId < 0) {
             return null;
         }
+        int previousTargetRegionId = entry.navTargetRegionId;
         // Update stored target in-place rather than discarding. The Y-snap offset causes
         // followBase.x to differ between AI and non-AI ticks, making targetRegionId fluctuate
         // even when the owner hasn't meaningfully moved. Relying on structural checks below
@@ -331,6 +332,12 @@ final class BotNavigationManager {
             return null;
         }
         if (startRegionId == edge.fromRegionId) {
+            if (!entry.inAir && !entry.climbing
+                    && previousTargetRegionId >= 0
+                    && previousTargetRegionId != targetRegionId
+                    && edge.toRegionId != targetRegionId) {
+                return null;
+            }
             return edge;
         }
         // While climbing, always keep the edge — findGroundFoothold gives false positives

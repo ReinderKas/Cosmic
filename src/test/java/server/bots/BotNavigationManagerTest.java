@@ -356,6 +356,52 @@ class BotNavigationManagerTest {
     }
 
     @Test
+    void shouldDropStaleCommittedGroundEdgeWhenLiveTargetRegionDiffersFromEdgeDestination() {
+        MapleMap map = mock(MapleMap.class);
+        BotNavigationGraph.Region source = new BotNavigationGraph.Region(
+                1, List.of(new BotNavigationGraph.Segment(new Foothold(new Point(0, 100), new Point(200, 100), 1))));
+        BotNavigationGraph.Region staleLower = new BotNavigationGraph.Region(
+                2, List.of(new BotNavigationGraph.Segment(new Foothold(new Point(0, 220), new Point(100, 220), 2))));
+        BotNavigationGraph.Region ownerUpper = new BotNavigationGraph.Region(
+                3, List.of(new BotNavigationGraph.Segment(new Foothold(new Point(90, 40), new Point(210, 40), 3))));
+        Map<Integer, BotNavigationGraph.Region> regionsById = new HashMap<>();
+        regionsById.put(1, source);
+        regionsById.put(2, staleLower);
+        regionsById.put(3, ownerUpper);
+
+        BotNavigationGraph.Edge staleDrop = new BotNavigationGraph.Edge(
+                1, 2, BotNavigationGraph.EdgeType.DROP,
+                new Point(20, 100), new Point(40, 220),
+                20, 20, 0, 0, 0, 0, 0, 300);
+        BotNavigationGraph.Edge directJump = new BotNavigationGraph.Edge(
+                1, 3, BotNavigationGraph.EdgeType.JUMP,
+                new Point(100, 100), new Point(140, 40),
+                90, 110, 6, 0, 0, 0, 0, 250);
+        BotNavigationGraph graph = new BotNavigationGraph(
+                910000213, 1, BotMovementProfile.base(),
+                List.of(source, staleLower, ownerUpper),
+                regionsById,
+                Map.of(1, 1, 2, 2, 3, 3),
+                Map.of(1, List.of(staleDrop, directJump)),
+                Set.of());
+
+        Point botPos = new Point(100, 100);
+        Point ownerPos = new Point(140, 40);
+        List<BotNavigationGraph.Edge> path = BotNavigationManager.findPath(
+                graph, map, botPos, 1, 3, ownerPos);
+        assertEquals(List.of(directJump), path,
+                "synthetic fixture should prefer the direct jump to the live owner region");
+
+        Character bot = mockBot(botPos, map);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.navEdge = staleDrop;
+        entry.navTargetRegionId = staleDrop.toRegionId;
+
+        assertNull(BotNavigationManager.reuseCommittedEdge(graph, entry, 1, 3),
+                "non-AI reuse must drop stale grounded edges whose destination no longer matches the live target");
+    }
+
+    @Test
     void shouldRetainCommittedGroundEdgeWhenAlternativeLeadsToSameDestinationRegion() {
         BotNavigationGraph.Edge committedDrop = new BotNavigationGraph.Edge(
                 80, 83, BotNavigationGraph.EdgeType.DROP,
@@ -629,6 +675,7 @@ class BotNavigationManagerTest {
         entry.movementProfile = BotMovementProfile.base();
 
         // Simulate the state right after AI tick attached the bot to the rope at firstClimbableY.
+        entry.climbVerticalDir = -1;
         BotPhysicsEngine.attachToRope(entry, bot, rope, BotPhysicsEngine.firstClimbableY(rope));
         assertTrue(entry.climbing);
         assertEquals(BotPhysicsEngine.firstClimbableY(rope), bot.getPosition().y);
