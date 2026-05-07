@@ -616,6 +616,48 @@ class BotNavigationGraphProviderTest {
     }
 
     @Test
+    void shouldNotPathThroughRopeOscillationLoop() {
+        // Regression: pathlog-Leroy-2026-05-07T081138 — bot grounded on a foothold (r=31)
+        // whose surface sits 2 px above a rope-top got stuck oscillating onto/off the rope
+        // because rope-grab CLIMB edges had cost=0. A* tied the direct PORTAL+DROP path with
+        // a useless CLIMB-onto-rope→CLIMB-off-rope+PORTAL+DROP detour and could pick the loop
+        // variant. With non-zero cost on the snap-grab/top-step CLIMB edges, the direct path
+        // is strictly cheaper.
+        BotNavigationGraph graph = kerningGraph();
+        MapleMap map = kerning();
+        Point groundedAtRopeColumn = new Point(1505, -607);
+        Point goalOnLowerPlatform = new Point(1640, -752);
+        int fromRegionId = graph.findRegionId(map, groundedAtRopeColumn);
+        int targetRegionId = graph.findRegionId(map, goalOnLowerPlatform);
+        assertTrue(fromRegionId > 0);
+        assertTrue(targetRegionId > 0);
+
+        List<BotNavigationGraph.Edge> path = BotNavigationManager.findPath(
+                graph, map, groundedAtRopeColumn, fromRegionId, targetRegionId, goalOnLowerPlatform);
+        assertFalse(path.isEmpty(), "expected a path from r" + fromRegionId + " to r" + targetRegionId);
+
+        BotNavigationGraph.Edge first = path.getFirst();
+        BotNavigationGraph.Region toRegion = graph.getRegion(first.toRegionId);
+        assertFalse(first.type == BotNavigationGraph.EdgeType.CLIMB && toRegion != null && toRegion.isRopeRegion,
+                "Path from a foothold to a non-rope target must not start by grabbing a rope; got " + first.type
+                        + " r" + first.fromRegionId + "->r" + first.toRegionId);
+    }
+
+    @Test
+    void shouldAssignNonZeroCostToSnapClimbEdges() {
+        BotNavigationGraph graph = kerningGraph();
+        long zeroCostSnapClimbEdges = graph.regions.stream()
+                .filter(region -> !region.isRopeRegion)
+                .flatMap(region -> graph.getOutgoing(region.id).stream())
+                .filter(edge -> edge.type == BotNavigationGraph.EdgeType.CLIMB)
+                .filter(edge -> edge.cost == 0)
+                .count();
+        assertEquals(0, zeroCostSnapClimbEdges,
+                "Foothold-to-rope CLIMB edges (and rope-top step-off) must carry non-zero cost so A*"
+                        + " never ties the direct path with a useless rope detour");
+    }
+
+    @Test
     void shouldDiscoverJumpEdgesAcrossWideIntermediatePlatform() {
         // Regression: pathlog-Clawer-2026-05-07T062632 — at base profile (100%) the bot at
         // (965,0) on r=114 had no direct JUMP edge to r=137 (owner foothold) and no JUMP edge

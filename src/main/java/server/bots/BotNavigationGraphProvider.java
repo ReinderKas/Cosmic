@@ -28,7 +28,7 @@ import java.util.concurrent.Executors;
 final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
-    private static final int GRAPH_VERSION = 40;
+    private static final int GRAPH_VERSION = 41;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
     private static final int DOWN_JUMP_PRELAUNCH_WINDOW_PX = 20;
     private static final int SAME_SOLID_NEST_GAP_PX = 8;
@@ -1554,13 +1554,13 @@ final class BotNavigationGraphProvider {
                 if (canGrab) {
                     Point ropePoint = new Point(ropeX, Math.max(firstClimbableY, Math.min(anchor.y, rope.bottomY())));
                     addEdge(ground.id, ropeRegion.id, BotNavigationGraph.EdgeType.CLIMB,
-                            anchor, ropePoint, 0, 0, 0, outgoing, edgeKeys);
+                            anchor, ropePoint, 0, 0, BotPhysicsEngine.cfg.TICK_MS, outgoing, edgeKeys);
                     continue;
                 }
 
                 if (canTopGrab) {
                     addEdge(ground.id, ropeRegion.id, BotNavigationGraph.EdgeType.CLIMB,
-                            anchor, new Point(ropeX, firstClimbableY), 0, 0, 0, outgoing, edgeKeys);
+                            anchor, new Point(ropeX, firstClimbableY), 0, 0, BotPhysicsEngine.cfg.TICK_MS, outgoing, edgeKeys);
                     continue;
                 }
 
@@ -1690,7 +1690,7 @@ final class BotNavigationGraphProvider {
 
         Point ropePoint = new Point(rope.x(), rope.topY());
         addEdge(ropeRegion.id, ground.id, BotNavigationGraph.EdgeType.CLIMB,
-                ropePoint, landPoint, 0, 0, 0, outgoing, edgeKeys);
+                ropePoint, landPoint, 0, 0, BotPhysicsEngine.cfg.TICK_MS, outgoing, edgeKeys);
     }
     private static List<Integer> ropeAnchorYs(Rope rope) {
         List<Integer> ys = new ArrayList<>();
@@ -1766,7 +1766,7 @@ final class BotNavigationGraphProvider {
                 new Point(portal.getPosition().x, portal.getPosition().y - snapUp));
         BotNavigationGraph.Region to = findRegionBelow(map, regionsById, regionIdByFootholdId,
                 new Point(targetPortal.getPosition().x, targetPortal.getPosition().y - snapUp));
-        if (from == null || to == null || from.id == to.id) {
+        if (from == null || to == null) {
             return;
         }
 

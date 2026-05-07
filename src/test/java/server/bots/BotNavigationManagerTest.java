@@ -559,14 +559,18 @@ class BotNavigationManagerTest {
         Point target = new Point(1265, 331);
         int startRegionId = graph.findRegionId(lithHarbor, start);
         int targetRegionId = graph.findRopeRegionId(target);
-        List<BotNavigationGraph.Edge> path = BotNavigationManager.findPath(
-                graph, lithHarbor, start, startRegionId, targetRegionId, target);
-        assertFalse(path.isEmpty());
-        BotNavigationGraph.Edge ropeEntry = path.getFirst();
-        assertEquals(BotNavigationGraph.EdgeType.CLIMB, ropeEntry.type);
-        assertEquals(0, ropeEntry.launchStepX);
+        // The intent of this test is to verify out-of-launch-window rope entries are rejected.
+        // Look up the vertical (stepX=0) rope-entry edge in the graph directly rather than via
+        // findPath, which now picks the time-cheapest entry (often a horizontal jump-grab).
+        BotNavigationGraph.Edge ropeEntry = graph.getOutgoing(startRegionId).stream()
+                .filter(edge -> edge.type == BotNavigationGraph.EdgeType.CLIMB
+                        && edge.toRegionId == targetRegionId
+                        && edge.launchStepX == 0
+                        && edge.containsLaunchX(1257))
+                .findFirst()
+                .orElse(null);
+        assertNotNull(ropeEntry, "expected a vertical (stepX=0) rope-entry CLIMB edge containing x=1257");
         assertTrue(ropeEntry.launchMinX < ropeEntry.launchMaxX);
-        assertTrue(ropeEntry.containsLaunchX(1257));
 
         BotNavigationGraph.Region fromRegion = graph.getRegion(ropeEntry.fromRegionId);
         int outsideLaunchX = ropeEntry.launchMaxX < fromRegion.maxX
