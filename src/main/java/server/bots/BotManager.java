@@ -3466,12 +3466,16 @@ public class BotManager {
         bot.getMap().broadcastMessage(PacketCreator.getChatText(bot.getId(), text, false, 0));
     }
 
+    void botSay(Character bot, ReplyChannel channel, String text) {
+        switch (channel) {
+            case PARTY, WHISPER -> botSayParty(bot, text);
+            default -> botSay(bot, text);
+        }
+    }
+
     /** Bot-to-bot visible say — routes MAP→map broadcast, PARTY→party, WHISPER→party fallback. */
     void botSay(BotEntry entry, String text) {
-        switch (entry.replyChannel) {
-            case PARTY, WHISPER -> botSayParty(entry.bot, text);
-            default -> botSay(entry.bot, text);
-        }
+        botSay(entry.bot, entry.replyChannel, text);
     }
 
     /** Owner-directed reply — routes MAP→map broadcast, PARTY→party, WHISPER→whisper to owner. */

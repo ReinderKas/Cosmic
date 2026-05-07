@@ -15,6 +15,7 @@ final class BotPerformanceMonitor {
         public boolean ENABLED = true;
         public int LOG_INTERVAL_MS = 15000;
         public double SLOW_SAMPLE_MS = 50.0;
+        public double REPORT_MAX_MS = 250.0;
     }
 
     private static final class Stat {
@@ -90,23 +91,30 @@ final class BotPerformanceMonitor {
         }
 
         double intervalSeconds = Math.max(0.001, (now - lastLogAtMs) / 1000.0);
-        double totalAllMs = statsBySection.values().stream()
-                .mapToDouble(stat -> stat.totalNs / 1_000_000.0)
-                .sum();
-        List<Map.Entry<String, Stat>> slowSections = new ArrayList<>();
+        List<Map.Entry<String, Stat>> reportSections = new ArrayList<>();
         for (Map.Entry<String, Stat> entry : statsBySection.entrySet()) {
-            if (entry.getValue().maxNs >= slowThresholdNs()) {
-                slowSections.add(entry);
+            if (entry.getValue().maxNs >= reportThresholdNs()) {
+                reportSections.add(entry);
             }
         }
-        slowSections.sort(Comparator.comparingLong((Map.Entry<String, Stat> entry) -> entry.getValue().maxNs).reversed());
+        reportSections.sort(Comparator.comparingLong((Map.Entry<String, Stat> entry) -> entry.getValue().maxNs).reversed());
 
-        StringBuilder line = new StringBuilder("bot-perf slow>=")
+        if (reportSections.isEmpty()) {
+            statsBySection.clear();
+            lastLogAtMs = now;
+            nextLogAtMs = now + cfg.LOG_INTERVAL_MS;
+            return;
+        }
+
+        StringBuilder line = new StringBuilder("bot-perf report>=")
+                .append(formatMs(cfg.REPORT_MAX_MS))
+                .append("ms")
+                .append(" slow>=")
                 .append(formatMs(cfg.SLOW_SAMPLE_MS))
                 .append("ms ");
         boolean first = true;
         int loggedSections = 0;
-        for (Map.Entry<String, Stat> entry : slowSections) {
+        for (Map.Entry<String, Stat> entry : reportSections) {
             Stat stat = entry.getValue();
             if (loggedSections >= MAX_LOGGED_SECTIONS) {
                 break;
@@ -119,24 +127,22 @@ final class BotPerformanceMonitor {
 
             double averageMs = stat.totalNs / (double) Math.max(1L, stat.count) / 1_000_000.0;
             double totalMs = stat.totalNs / 1_000_000.0;
+            double cpuMsPerSec = totalMs / intervalSeconds;
+            double cpuCore = cpuMsPerSec / 1000.0;
             double maxMs = stat.maxNs / 1_000_000.0;
             double slowAverageMs = stat.slowTotalNs / (double) Math.max(1L, stat.slowCount) / 1_000_000.0;
             double slowPct = stat.slowCount * 100.0 / Math.max(1L, stat.count);
-            double totalPct = totalAllMs > 0.0 ? totalMs * 100.0 / totalAllMs : 0.0;
             line.append(entry.getKey())
                     .append(" avg=")
                     .append(formatMs(averageMs))
                     .append("ms")
-                    .append(" total=")
-                    .append(formatMs(totalMs))
-                    .append("ms")
-                    .append(" totalPct=")
-                    .append(formatPct(totalPct))
-                    .append("%")
                     .append(" cps=")
                     .append(String.format(Locale.ROOT, "%.1f", stat.count / intervalSeconds))
-                    .append(" cpuMsPerSec=")
-                    .append(formatMs(totalMs / intervalSeconds))
+                    .append(" cpu=")
+                    .append(formatMs(cpuMsPerSec))
+                    .append("ms/s")
+                    .append(" core=")
+                    .append(formatCore(cpuCore))
                     .append(" max=")
                     .append(formatMs(maxMs))
                     .append("ms")
@@ -146,7 +152,7 @@ final class BotPerformanceMonitor {
                     .append(stat.slowCount)
                     .append("/")
                     .append(stat.count)
-                    .append(" slowPct=")
+                    .append(" slow%=")
                     .append(formatPct(slowPct))
                     .append("%")
                     .append(" slowAvg=")
@@ -155,10 +161,10 @@ final class BotPerformanceMonitor {
                     .append(" note=")
                     .append(noteFor(entry.getKey()));
         }
-        if (slowSections.size() > loggedSections) {
+        if (reportSections.size() > loggedSections) {
             line.append(" | omitted=")
-                    .append(slowSections.size() - loggedSections)
-                    .append(" lower-max slow sections");
+                    .append(reportSections.size() - loggedSections)
+                    .append(" lower-max report sections");
         }
 
         if (!first) {
@@ -184,11 +190,19 @@ final class BotPerformanceMonitor {
         return (long) (Math.max(0.0, cfg.SLOW_SAMPLE_MS) * 1_000_000.0);
     }
 
+    private static long reportThresholdNs() {
+        return (long) (Math.max(cfg.SLOW_SAMPLE_MS, cfg.REPORT_MAX_MS) * 1_000_000.0);
+    }
+
     private static String formatMs(double value) {
         return String.format(Locale.ROOT, "%.3f", value);
     }
 
     private static String formatPct(double value) {
         return String.format(Locale.ROOT, "%.1f", value);
+    }
+
+    private static String formatCore(double value) {
+        return String.format(Locale.ROOT, "%.3f", value);
     }
 }
