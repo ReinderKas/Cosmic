@@ -671,9 +671,16 @@ public class BotManager {
     public void notifyOwnerGainedItem(Character owner, Item item) {
         if (owner == null || item == null) return;
         if (ItemConstants.getInventoryType(item.getItemId()) != InventoryType.EQUIP) return;
-        for (BotEntry entry : getBotEntries(owner.getId())) {
-            BotOfferManager.notifyOwnerGainedEquip(entry, entry.bot, item);
-        }
+        List<BotEntry> entries = getBotEntries(owner.getId());
+        if (entries.isEmpty()) return;
+        // Run the per-bot upgrade-recommendation scan off the player's pickup thread. The
+        // scan is fire-and-forget (its only effect is a possible chat-prompt) so deferring
+        // by one timer tick keeps rapid pickups from stalling the player behind K×N DPs.
+        after(0L, () -> {
+            for (BotEntry entry : entries) {
+                BotOfferManager.notifyOwnerGainedEquip(entry, entry.bot, item);
+            }
+        });
     }
 
     /** Called when a trade recipient receives an item; skips circular own-bot trade scans. */

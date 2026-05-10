@@ -1113,6 +1113,16 @@ class BotEquipManager {
                 && !isWeaponCompatible(receiver, ii.getWeaponType(candidate.getItemId()))) return null;
         if (!isRecommendationCandidate(receiver, ii, candidate, primarySlot, scope)) return null;
 
+        // Cheap dominance pre-filter for IMMEDIATE scope: if the candidate is Pareto-dominated
+        // by what's already worn in its slot (over the receiver's job-relevant stats), the DP
+        // cannot choose it as a strict upgrade. Skipping the DP setup here turns the
+        // owner-pickup hot path (notifyOwnerGainedEquip) from O(K equips × N bots) full
+        // optimizer runs into a fast in-slot dominance check for the common trash-loot case.
+        // Cross-slot rescues are excluded by construction since relevant stats are job-trimmed.
+        if (scope == RecommendationScope.IMMEDIATE && !isEquipUsefulToBot(receiver, ii, candidate)) {
+            return null;
+        }
+
         Inventory receiverEquippedInv = receiver.getInventory(InventoryType.EQUIPPED);
 
         // Run the DP with the candidate added to the receiver's pool — recommend iff the
