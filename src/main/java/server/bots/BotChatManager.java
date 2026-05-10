@@ -1280,7 +1280,7 @@ public class BotChatManager {
             attackStat = bot.getTotalWatk();
             accuracy = formulas.getTotalAccuracy(bot);
             maxDmg = Math.max(1, bot.calculateMaxBaseDamage(attackStat));
-            minDmg = Math.max(1, bot.calculateMinBaseDamage(attackStat));
+            minDmg = Math.max(1, bot.calculateMinBaseDamage(attackStat, formulas.resolvePhysicalMastery(bot)));
             attackLabel = "watk";
             accuracyLabel = "acc";
         }

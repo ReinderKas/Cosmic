@@ -3,10 +3,15 @@ package server.combat;
 import client.BuffStat;
 import client.Character;
 import client.Job;
+import client.Skill;
+import client.SkillFactory;
 import client.inventory.Equip;
 import client.inventory.Inventory;
 import client.inventory.InventoryType;
+import client.inventory.Item;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 import server.StatEffect;
 
 import java.util.List;
@@ -129,15 +134,53 @@ class CombatFormulaProviderTest {
         StatEffect effect = mock(StatEffect.class);
         when(bot.getTotalWatk()).thenReturn(100);
         when(bot.calculateMaxBaseDamage(100)).thenReturn(1_000);
-        when(bot.calculateMinBaseDamage(100)).thenReturn(500);
+        when(bot.calculateMinBaseDamage(100, 0.6d)).thenReturn(500);
         when(effect.getDamage()).thenReturn(260);
+        mockWeapon(bot, 1432000);
 
-        CombatFormulaProvider.DamageProfile profile = provider.resolveDamageProfile(bot, 1001005, effect, false);
+        Skill masterySkill = mock(Skill.class);
+        StatEffect masteryEffect = mock(StatEffect.class);
+        when(masteryEffect.getMastery()).thenReturn(10);
+        when(masterySkill.getEffect(20)).thenReturn(masteryEffect);
+        when(bot.getSkillLevel(constants.skills.Spearman.SPEAR_MASTERY)).thenReturn(20);
 
-        assertEquals(1_300, profile.minDamage());
-        assertEquals(2_600, profile.maxDamage());
-        assertFalse(profile.magicAttack());
-        assertFalse(profile.alwaysHit());
+        try (MockedStatic<SkillFactory> skillFactory = Mockito.mockStatic(SkillFactory.class)) {
+            skillFactory.when(() -> SkillFactory.getSkill(constants.skills.Spearman.SPEAR_MASTERY)).thenReturn(masterySkill);
+
+            CombatFormulaProvider.DamageProfile profile = provider.resolveDamageProfile(bot, 1001005, effect, false);
+
+            assertEquals(1_300, profile.minDamage());
+            assertEquals(2_600, profile.maxDamage());
+            assertFalse(profile.magicAttack());
+            assertFalse(profile.alwaysHit());
+        }
+    }
+
+    @Test
+    void shouldResolvePhysicalMasteryFromWeaponMasterySkill() {
+        Character bot = mockDamageBot();
+        mockWeapon(bot, 1462000);
+
+        Skill masterySkill = mock(Skill.class);
+        StatEffect masteryEffect = mock(StatEffect.class);
+        when(masteryEffect.getMastery()).thenReturn(9);
+        when(masterySkill.getEffect(18)).thenReturn(masteryEffect);
+        when(bot.getSkillLevel(constants.skills.Crossbowman.CROSSBOW_MASTERY)).thenReturn(18);
+
+        try (MockedStatic<SkillFactory> skillFactory = Mockito.mockStatic(SkillFactory.class)) {
+            skillFactory.when(() -> SkillFactory.getSkill(constants.skills.Crossbowman.CROSSBOW_MASTERY)).thenReturn(masterySkill);
+
+            assertEquals(0.55d, provider.resolvePhysicalMastery(bot), 1.0e-12d);
+        }
+    }
+
+    @Test
+    void shouldFallbackToTenPercentPhysicalMasteryWithoutSkill() {
+        Character bot = mockDamageBot();
+        mockWeapon(bot, 1462000);
+        when(bot.getSkillLevel(constants.skills.Crossbowman.CROSSBOW_MASTERY)).thenReturn(0);
+
+        assertEquals(0.1d, provider.resolvePhysicalMastery(bot), 1.0e-12d);
     }
 
     @Test
@@ -283,7 +326,15 @@ class CombatFormulaProviderTest {
 
     private static Character mockDamageBot() {
         Character bot = mock(Character.class);
-        when(bot.getJob()).thenReturn(Job.BEGINNER);
+        when(bot.getJob()).thenReturn(Job.SPEARMAN);
         return bot;
+    }
+
+    private static void mockWeapon(Character bot, int itemId) {
+        Inventory equipped = mock(Inventory.class);
+        Item weapon = mock(Item.class);
+        when(bot.getInventory(InventoryType.EQUIPPED)).thenReturn(equipped);
+        when(equipped.getItem((short) -11)).thenReturn(weapon);
+        when(weapon.getItemId()).thenReturn(itemId);
     }
 }

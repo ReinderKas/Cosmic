@@ -142,7 +142,7 @@ public class StatEffect {
     private boolean skill;
     private List<Pair<BuffStat, Integer>> statups;
     private Map<MonsterStatus, Integer> monsterStatus;
-    private int x, y, range, mobCount, moneyCon, cooldown, morphId = 0, ghost, fatigue, berserk, booster;
+    private int x, y, mastery, range, mobCount, moneyCon, cooldown, morphId = 0, ghost, fatigue, berserk, booster;
     private double prop;
     private int itemCon, itemConNo;
     private int damage, attackCount, fixdamage;
@@ -481,6 +481,7 @@ public class StatEffect {
         }
         ret.x = x;
         ret.y = DataTool.getInt("y", source, 0);
+        ret.mastery = DataTool.getInt("mastery", source, 0);
 
         ret.damage = DataTool.getIntConvert("damage", source, 100);
         ret.fixdamage = DataTool.getIntConvert("fixdamage", source, -1);
@@ -1931,6 +1932,10 @@ public class StatEffect {
 
     public int getY() {
         return y;
+    }
+
+    public int getMastery() {
+        return mastery;
     }
 
     public int getRange() {

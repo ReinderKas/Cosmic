@@ -2,25 +2,35 @@ package server.combat;
 
 import client.BuffStat;
 import client.Character;
+import client.Job;
 import client.Skill;
 import client.SkillFactory;
 import client.inventory.Equip;
 import client.inventory.InventoryType;
 import client.inventory.Item;
+import client.inventory.WeaponType;
+import constants.skills.Bandit;
 import constants.skills.Aran;
 import constants.skills.Archer;
 import constants.skills.Assassin;
 import constants.skills.BlazeWizard;
+import constants.skills.Brawler;
 import constants.skills.Cleric;
+import constants.skills.Crossbowman;
 import constants.skills.DragonKnight;
 import constants.skills.Evan;
+import constants.skills.Fighter;
 import constants.skills.FPMage;
+import constants.skills.Gunslinger;
 import constants.skills.Hermit;
+import constants.skills.Hunter;
 import constants.skills.ILMage;
 import constants.skills.NightLord;
 import constants.skills.NightWalker;
+import constants.skills.Page;
 import constants.skills.Rogue;
 import constants.skills.Shadower;
+import constants.skills.Spearman;
 import constants.skills.ThunderBreaker;
 import constants.skills.WindArcher;
 import constants.game.GameConstants;
@@ -630,7 +640,7 @@ public final class CombatFormulaProvider {
             minDamage = maxDamage;
         } else {
             maxDamage = bot.calculateMaxBaseDamage(watk);
-            minDamage = bot.calculateMinBaseDamage(watk);
+            minDamage = bot.calculateMinBaseDamage(watk, resolvePhysicalMastery(bot));
         }
 
         if (skillId != 0 && effect != null && skillId != Hermit.SHADOW_MESO) {
@@ -759,6 +769,73 @@ public final class CombatFormulaProvider {
             }
         }
         return buffAccuracy + passiveSkillAccuracy + equipAccuracy;
+    }
+
+    public double resolvePhysicalMastery(Character bot) {
+        int masterySkillId = resolveWeaponMasterySkillId(bot);
+        if (masterySkillId == 0) {
+            return 0.1d;
+        }
+
+        int skillLevel = bot.getSkillLevel(masterySkillId);
+        if (skillLevel <= 0) {
+            return 0.1d;
+        }
+
+        Skill masterySkill = SkillFactory.getSkill(masterySkillId);
+        if (masterySkill == null) {
+            return 0.1d;
+        }
+
+        StatEffect effect = masterySkill.getEffect(skillLevel);
+        if (effect == null) {
+            return 0.1d;
+        }
+
+        return Math.max(0.1d, 0.1d + effect.getMastery() / 20.0d);
+    }
+
+    private int resolveWeaponMasterySkillId(Character bot) {
+        Item weaponItem = bot.getInventory(InventoryType.EQUIPPED).getItem((short) -11);
+        if (weaponItem == null) {
+            return 0;
+        }
+
+        WeaponType weaponType = resolveWeaponType(weaponItem.getItemId());
+
+        return switch (weaponType) {
+            case SWORD1H, SWORD2H -> bot.getJob().isA(Job.DAWNWARRIOR1) ? DawnWarrior.SWORD_MASTERY
+                    : bot.getJob().isA(Job.PAGE) ? Page.SWORD_MASTERY
+                    : Fighter.SWORD_MASTERY;
+            case GENERAL1H_SWING, GENERAL1H_STAB, GENERAL2H_SWING, GENERAL2H_STAB ->
+                    bot.getJob().isA(Job.PAGE) ? Page.BW_MASTERY : Fighter.AXE_MASTERY;
+            case SPEAR_STAB, SPEAR_SWING -> Spearman.SPEAR_MASTERY;
+            case POLE_ARM_SWING, POLE_ARM_STAB -> bot.getJob().isA(Job.ARAN1) ? Aran.POLEARM_MASTERY : Spearman.POLEARM_MASTERY;
+            case BOW -> bot.getJob().isA(Job.WINDARCHER1) ? WindArcher.BOW_MASTERY : Hunter.BOW_MASTERY;
+            case CROSSBOW -> Crossbowman.CROSSBOW_MASTERY;
+            case CLAW -> bot.getJob().isA(Job.NIGHTWALKER1) ? NightWalker.CLAW_MASTERY : Assassin.CLAW_MASTERY;
+            case DAGGER_THIEVES -> Bandit.DAGGER_MASTERY;
+            case KNUCKLE -> bot.getJob().isA(Job.THUNDERBREAKER1) ? ThunderBreaker.KNUCKLER_MASTERY : Brawler.KNUCKLER_MASTERY;
+            case GUN -> Gunslinger.GUN_MASTERY;
+            default -> 0;
+        };
+    }
+
+    private WeaponType resolveWeaponType(int itemId) {
+        return switch (itemId / 10000) {
+            case 130 -> WeaponType.SWORD1H;
+            case 131, 141 -> WeaponType.GENERAL1H_SWING;
+            case 132, 142 -> WeaponType.GENERAL2H_SWING;
+            case 133 -> WeaponType.DAGGER_THIEVES;
+            case 143 -> WeaponType.SPEAR_STAB;
+            case 144 -> WeaponType.POLE_ARM_SWING;
+            case 145 -> WeaponType.BOW;
+            case 146 -> WeaponType.CROSSBOW;
+            case 147 -> WeaponType.CLAW;
+            case 148 -> WeaponType.KNUCKLE;
+            case 149 -> WeaponType.GUN;
+            default -> WeaponType.NOT_A_WEAPON;
+        };
     }
 
     /**

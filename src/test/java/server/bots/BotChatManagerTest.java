@@ -2,6 +2,7 @@ package server.bots;
 
 import client.Character;
 import client.Job;
+import client.inventory.Inventory;
 import org.junit.jupiter.api.Test;
 import server.maps.FieldLimit;
 import server.maps.MapleMap;
@@ -258,12 +259,16 @@ class BotChatManagerTest {
     @Test
     void shouldBuildPhysicalRangeReportFromEffectiveTotals() {
         Character bot = mock(Character.class);
+        Inventory equipped = mock(Inventory.class);
         when(bot.getJob()).thenReturn(Job.FIGHTER);
         when(bot.getLevel()).thenReturn(48);
         when(bot.getTotalWatk()).thenReturn(20);
         when(bot.getTotalDex()).thenReturn(100);
         when(bot.getTotalLuk()).thenReturn(40);
-        when(bot.calculateMinBaseDamage(20)).thenReturn(50);
+        when(bot.getInventory(client.inventory.InventoryType.EQUIPPED)).thenReturn(equipped);
+        when(equipped.getItem((short) -11)).thenReturn(null);
+        when(equipped.iterator()).thenReturn(List.<client.inventory.Item>of().iterator());
+        when(bot.calculateMinBaseDamage(20, 0.1d)).thenReturn(50);
         when(bot.calculateMaxBaseDamage(20)).thenReturn(99);
 
         String report = BotChatManager.buildRangeReport(bot,
