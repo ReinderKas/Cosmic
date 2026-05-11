@@ -11,6 +11,7 @@ import constants.game.CharacterStance;
 import org.mockito.MockedStatic;
 import org.junit.jupiter.api.Test;
 import server.StatEffect;
+import server.TimerManager;
 import server.life.Monster;
 import server.maps.Foothold;
 import server.maps.FootholdTree;
@@ -37,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -114,7 +116,15 @@ class BotManagerTest {
         Map<Integer, List<BotEntry>> bots = (Map<Integer, List<BotEntry>>) field(BotManager.class, "bots").get(manager);
         bots.put(owner.getId(), List.of(observerEntry));
 
-        try (MockedStatic<BotOfferManager> offers = mockStatic(BotOfferManager.class)) {
+        TimerManager inlineTimer = mock(TimerManager.class);
+        when(inlineTimer.schedule(any(Runnable.class), anyLong())).thenAnswer(inv -> {
+            ((Runnable) inv.getArgument(0)).run();
+            return null;
+        });
+        try (MockedStatic<BotOfferManager> offers = mockStatic(BotOfferManager.class);
+             MockedStatic<TimerManager> timer = mockStatic(TimerManager.class)) {
+            timer.when(TimerManager::getInstance).thenReturn(inlineTimer);
+
             manager.notifyOwnerGainedTradeItem(owner, tradedEquip, sourcePlayer);
 
             offers.verify(() -> BotOfferManager.notifyOwnerGainedEquip(observerEntry, observerBot, tradedEquip));

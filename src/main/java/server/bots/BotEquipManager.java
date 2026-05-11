@@ -853,13 +853,24 @@ class BotEquipManager {
     private static boolean validateReqs(OptimizerHooks hooks, DpNode node,
                                          List<Short> dpSlots, Equip weapon) {
         StatSnapshot s = node.snap;
-        if (weapon != null && !hooks.meetsReqs(weapon, s.job(), s.level(),
-                s.str(), s.dex(), s.int_(), s.luk(), s.fame())) return false;
+        // Equip-order constraint: each item's reqs must be satisfied by the stats present
+        // BEFORE that item is worn — an item's own contribution cannot count toward its own
+        // prereq. So check each pick (and the weapon) against the snapshot with that pick's
+        // stats removed. If every pick passes its without-self check, a valid wear order
+        // exists (equip the highest-margin items last).
+        if (weapon != null) {
+            StatSnapshot withoutSelf = s.swap(weapon, null);
+            if (!hooks.meetsReqs(weapon, withoutSelf.job(), withoutSelf.level(),
+                    withoutSelf.str(), withoutSelf.dex(), withoutSelf.int_(),
+                    withoutSelf.luk(), withoutSelf.fame())) return false;
+        }
         for (int i = 0; i < dpSlots.size(); i++) {
             Equip p = node.picks[i];
             if (p == null) continue;
-            if (!hooks.meetsReqs(p, s.job(), s.level(),
-                    s.str(), s.dex(), s.int_(), s.luk(), s.fame())) return false;
+            StatSnapshot withoutSelf = s.swap(p, null);
+            if (!hooks.meetsReqs(p, withoutSelf.job(), withoutSelf.level(),
+                    withoutSelf.str(), withoutSelf.dex(), withoutSelf.int_(),
+                    withoutSelf.luk(), withoutSelf.fame())) return false;
         }
         return true;
     }
@@ -880,9 +891,13 @@ class BotEquipManager {
             for (int i = 0; i < dpSlots.size(); i++) {
                 Equip p = picks[i];
                 if (p == null) continue;
-                if (!hooks.meetsReqs(p, s.job(), s.level(),
-                        s.str(), s.dex(), s.int_(), s.luk(), s.fame())) {
-                    s = s.swap(p, null);
+                // Equip-order: check p's reqs against the snapshot with p removed (an item's
+                // own stats can't satisfy its own req).
+                StatSnapshot withoutSelf = s.swap(p, null);
+                if (!hooks.meetsReqs(p, withoutSelf.job(), withoutSelf.level(),
+                        withoutSelf.str(), withoutSelf.dex(), withoutSelf.int_(),
+                        withoutSelf.luk(), withoutSelf.fame())) {
+                    s = withoutSelf;
                     hp -= p.getHp();
                     mp -= p.getMp();
                     statSum -= usefulStatSum(p, s.job());
@@ -891,8 +906,12 @@ class BotEquipManager {
                 }
             }
         }
-        if (weapon != null && !hooks.meetsReqs(weapon, s.job(), s.level(),
-                s.str(), s.dex(), s.int_(), s.luk(), s.fame())) return null;
+        if (weapon != null) {
+            StatSnapshot withoutWeapon = s.swap(weapon, null);
+            if (!hooks.meetsReqs(weapon, withoutWeapon.job(), withoutWeapon.level(),
+                    withoutWeapon.str(), withoutWeapon.dex(), withoutWeapon.int_(),
+                    withoutWeapon.luk(), withoutWeapon.fame())) return null;
+        }
         return new DpNode(s, hp, mp, statSum, picks);
     }
 
