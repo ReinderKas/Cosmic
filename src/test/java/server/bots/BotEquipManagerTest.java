@@ -590,7 +590,7 @@ class BotEquipManagerTest {
     }
 
     @Test
-    void selfReserveSameReqDifferentItemIdDoesNotDominate() {
+    void selfReserveSameReqDifferentItemIdDoesDominate() {
         Character bot = mock(Character.class);
         when(bot.getJob()).thenReturn(Job.SPEARMAN);
 
@@ -604,8 +604,146 @@ class BotEquipManagerTest {
         Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks, List.of(itemA, itemB));
 
         assertTrue(keep.contains(itemA));
-        assertTrue(keep.contains(itemB),
-                "same req signature but different itemId should not dominate");
+        assertFalse(keep.contains(itemB),
+                "items sharing a requirement profile should dominate freely across item ids");
+    }
+
+    @Test
+    void selfReserveWeightsDexIntoAccForWarriorDominance_redBandanaDominated() {
+        // From equiplog-Leroy-2026-05-11T031549.txt: Spearman with Red Bandana#1 (acc=4, dex=0)
+        // and Yellow Metal Gear#18 (dex=7, acc=0). Without DEX→ACC weighting, neither dominates
+        // (Red has more raw ACC). With 1:1 weighting Yellow's effective acc = 7 > 4 = Red's.
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.SPEARMAN);
+
+        Equip redBandana = equipWithIdStats(1002022, 0, 0, 4);
+        Equip yellowMetalGear = equipWithIdStats(1002053, 0, 7, 0);
+
+        BotEquipManager.SelfReserveHooks hooks = mock(BotEquipManager.SelfReserveHooks.class);
+        stubReserveItem(hooks, Job.SPEARMAN, redBandana, "Cp", 10, 0, 0, 0, 0, 0, 0);
+        stubReserveItem(hooks, Job.SPEARMAN, yellowMetalGear, "Cp", 10, 0, 0, 0, 0, 0, 0);
+
+        Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks,
+                List.of(redBandana, yellowMetalGear));
+
+        assertTrue(keep.contains(yellowMetalGear));
+        assertFalse(keep.contains(redBandana),
+                "Red Bandana (acc=4) should be dominated by Yellow Metal Gear (dex=7) under DEX→ACC weighting");
+    }
+
+    @Test
+    void selfReserveWeightsDexIntoAccForWarriorDominance_ivoryPantsDominated() {
+        // Two Ivory Shouldermail Pants from the same log: #10 (dex=6, acc=4 → weighted-acc=10)
+        // and #21 (dex=8, acc=3 → weighted-acc=11). Same req profile, same item id, but #21
+        // strictly dominates #10 on DEX and weighted-ACC.
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.SPEARMAN);
+
+        Equip ivoryPants10 = equipWithIdStats(1060076, 0, 6, 4);
+        Equip ivoryPants21 = equipWithIdStats(1060076, 0, 8, 3);
+
+        BotEquipManager.SelfReserveHooks hooks = mock(BotEquipManager.SelfReserveHooks.class);
+        stubReserveItem(hooks, Job.SPEARMAN, ivoryPants10, "Pn", 50, 1, 180, 0, 0, 0, 0);
+        stubReserveItem(hooks, Job.SPEARMAN, ivoryPants21, "Pn", 50, 1, 180, 0, 0, 0, 0);
+
+        Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks,
+                List.of(ivoryPants10, ivoryPants21));
+
+        assertTrue(keep.contains(ivoryPants21));
+        assertFalse(keep.contains(ivoryPants10),
+                "Ivory Pants dex=6/acc=4 should be dominated by dex=8/acc=3 under DEX→ACC weighting");
+    }
+
+    @Test
+    void selfReserveSpearmanWithSpearMasteryRejectsAxeAndPolearm() {
+        // Spearman who has only put SP into Spear Mastery (not Polearm Mastery) should not
+        // reserve polearms or axes from inventory.
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.SPEARMAN);
+        when(bot.getSkillLevel(Spearman.SPEAR_MASTERY)).thenReturn(1);
+        when(bot.getSkillLevel(Spearman.SPEAR_BOOSTER)).thenReturn(0);
+        when(bot.getSkillLevel(Spearman.POLEARM_MASTERY)).thenReturn(0);
+        when(bot.getSkillLevel(Spearman.POLEARM_BOOSTER)).thenReturn(0);
+
+        Equip spear = equipWithIdStats(1432012, 2, 0, 0);
+        Equip polearm = equipWithIdStats(1442012, 4, 0, 0);
+        Equip axe = equipWithIdStats(1312012, 6, 0, 0);
+
+        BotEquipManager.SelfReserveHooks hooks = mock(BotEquipManager.SelfReserveHooks.class);
+        stubReserveItem(hooks, Job.SPEARMAN, spear, "Wp", 43, 1, 0, 0, 0, 0, 0);
+        stubReserveItem(hooks, Job.SPEARMAN, polearm, "Wp", 43, 1, 0, 0, 0, 0, 0);
+        stubReserveItem(hooks, Job.SPEARMAN, axe, "Wp", 43, 1, 0, 0, 0, 0, 0);
+        when(hooks.getWeaponType(1432012)).thenReturn(WeaponType.SPEAR_STAB);
+        when(hooks.getWeaponType(1442012)).thenReturn(WeaponType.POLE_ARM_SWING);
+        when(hooks.getWeaponType(1312012)).thenReturn(WeaponType.GENERAL2H_SWING);
+
+        Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks,
+                List.of(spear, polearm, axe));
+
+        assertTrue(keep.contains(spear), "spear-mastery spearman should keep spears");
+        assertFalse(keep.contains(polearm),
+                "spear-only spearman should not reserve polearms");
+        assertFalse(keep.contains(axe),
+                "spearman should never reserve axes regardless of mastery");
+    }
+
+    @Test
+    void selfReserveSpearmanDoesNotReserveMapleDoomSinger() {
+        // From equiplog-Leroy-2026-05-11T031549.txt: Maple Doom Singer (2-handed mace) was
+        // appearing in the spearman's reserved set. As a non-spear/non-polearm weapon, it must
+        // never be reserved regardless of mastery layout.
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.SPEARMAN);
+        when(bot.getSkillLevel(Spearman.SPEAR_MASTERY)).thenReturn(1);
+        when(bot.getSkillLevel(Spearman.POLEARM_MASTERY)).thenReturn(1);
+
+        Equip mapleImpaler = equipWithIdStats(1432012, 2, 0, 0);
+        Equip mapleDoomSinger = equipWithIdStats(1422014, 4, 0, 0);
+
+        BotEquipManager.SelfReserveHooks hooks = mock(BotEquipManager.SelfReserveHooks.class);
+        stubReserveItem(hooks, Job.SPEARMAN, mapleImpaler, "Wp", 43, 1, 0, 0, 0, 0, 0);
+        // Maple Doom Singer (item 1422014) is a 2-handed weapon — text slot "WpSi", not "Wp".
+        // The earlier bug was that isWeaponSlot only matched "Wp", so 2H weapons skipped the
+        // mastery filter and stayed in the reserved set.
+        stubReserveItem(hooks, Job.SPEARMAN, mapleDoomSinger, "WpSi", 43, 1, 0, 0, 0, 0, 0);
+        when(hooks.getWeaponType(1432012)).thenReturn(WeaponType.SPEAR_STAB);
+        when(hooks.getWeaponType(1422014)).thenReturn(WeaponType.GENERAL2H_SWING);
+
+        Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks,
+                List.of(mapleImpaler, mapleDoomSinger));
+
+        assertTrue(keep.contains(mapleImpaler));
+        assertFalse(keep.contains(mapleDoomSinger),
+                "spearman must not reserve Maple Doom Singer (2-handed mace)");
+    }
+
+    @Test
+    void selfReserveSpearmanWithBothMasteriesKeepsSpearAndPolearmRejectsAxe() {
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.SPEARMAN);
+        when(bot.getSkillLevel(Spearman.SPEAR_MASTERY)).thenReturn(1);
+        when(bot.getSkillLevel(Spearman.SPEAR_BOOSTER)).thenReturn(0);
+        when(bot.getSkillLevel(Spearman.POLEARM_MASTERY)).thenReturn(1);
+        when(bot.getSkillLevel(Spearman.POLEARM_BOOSTER)).thenReturn(0);
+
+        Equip spear = equipWithIdStats(1432012, 2, 0, 0);
+        Equip polearm = equipWithIdStats(1442012, 4, 0, 0);
+        Equip axe = equipWithIdStats(1312012, 6, 0, 0);
+
+        BotEquipManager.SelfReserveHooks hooks = mock(BotEquipManager.SelfReserveHooks.class);
+        stubReserveItem(hooks, Job.SPEARMAN, spear, "Wp", 43, 1, 0, 0, 0, 0, 0);
+        stubReserveItem(hooks, Job.SPEARMAN, polearm, "Wp", 43, 1, 0, 0, 0, 0, 0);
+        stubReserveItem(hooks, Job.SPEARMAN, axe, "Wp", 43, 1, 0, 0, 0, 0, 0);
+        when(hooks.getWeaponType(1432012)).thenReturn(WeaponType.SPEAR_STAB);
+        when(hooks.getWeaponType(1442012)).thenReturn(WeaponType.POLE_ARM_SWING);
+        when(hooks.getWeaponType(1312012)).thenReturn(WeaponType.GENERAL2H_SWING);
+
+        Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks,
+                List.of(spear, polearm, axe));
+
+        assertTrue(keep.contains(spear));
+        assertTrue(keep.contains(polearm));
+        assertFalse(keep.contains(axe));
     }
 
     @Test

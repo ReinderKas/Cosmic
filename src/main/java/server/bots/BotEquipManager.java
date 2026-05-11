@@ -1262,11 +1262,20 @@ class BotEquipManager {
     private static boolean paretoDominates(EnumSet<RelevantStat> relevant, Equip a, Equip b) {
         boolean strictlyGreater = false;
         for (RelevantStat s : relevant) {
-            int va = s.of(a), vb = s.of(b);
+            int va = effectiveStatValue(s, a), vb = effectiveStatValue(s, b);
             if (va < vb) return false;
             if (va > vb) strictlyGreater = true;
         }
         return strictlyGreater;
+    }
+
+    // For classes that score gear ACC (warriors, STR-pirates), DEX also contributes to
+    // in-game accuracy via stat scaling. The client uses ~0.8 acc per DEX, but DEX is more
+    // generally useful, so for dominance we weight DEX 1:1 with ACC — a DEX-heavy item can
+    // outclass a low-ACC item even with zero raw ACC.
+    private static int effectiveStatValue(RelevantStat s, Equip e) {
+        if (s == RelevantStat.ACC) return e.getAcc() + e.getDex();
+        return s.of(e);
     }
 
     static boolean isEquipUsefulToBot(Character recipient, EquipUsefulnessHooks hooks, Equip item) {
@@ -1400,7 +1409,6 @@ class BotEquipManager {
         if (!reqsAtLeastAsEasy(hooks, better, worse)
                 && !hooks.meetsReqs(better, bot.getJob(), bot.getLevel(),
                                     bot.getStr(), bot.getDex(), bot.getInt(), bot.getLuk(), bot.getFame())) return false;
-        if (sameRequirementSignature(hooks, better, worse) && better.getItemId() != worse.getItemId()) return false;
         return true;
     }
 
@@ -1440,7 +1448,12 @@ class BotEquipManager {
         return textSlotKey(EquipUsefulnessHooks.from(ii), equip);
     }
 
-    private static boolean isWeaponSlot(String textSlot) { return "Wp".equals(textSlot); }
+    private static boolean isWeaponSlot(String textSlot) {
+        // Weapons can come back as "Wp" (1H), "WpSi" (2H — occupies shield slot), or "WpSp"
+        // (LOW_WEAPON). All three resolve to the -11 weapon slot and must be routed through
+        // the weapon-type compatibility check (isWeaponCompatible).
+        return "Wp".equals(textSlot) || "WpSi".equals(textSlot) || "WpSp".equals(textSlot);
+    }
 
     private static boolean meetsReqsNaked(Character bot, ItemInformationProvider ii,
                                           StatSnapshot naked, Equip equip) {
