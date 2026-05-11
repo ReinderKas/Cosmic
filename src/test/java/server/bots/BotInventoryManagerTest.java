@@ -11,6 +11,7 @@ import java.lang.reflect.Method;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.eq;
@@ -64,6 +65,27 @@ class BotInventoryManagerTest {
         assertTrue(freebieMsgs.contains("enjoy"));
         assertTrue(freebieMsgs.contains(":)"));
         assertTrue(freebieMsgs.contains("hope that helps"));
+    }
+
+    @Test
+    void shouldCancelUnmanagedBotTradeWhenManualTimeoutExpires() {
+        BotEntry entry = new BotEntry(mock(Character.class), null, null);
+        Character bot = entry.bot;
+        Trade trade = mock(Trade.class);
+
+        when(bot.getId()).thenReturn(99);
+        when(bot.getTrade()).thenReturn(trade);
+
+        BotInventoryManager.tickManualTrade(entry, bot);
+        entry.manualTradeTimeoutMs = BotMovementManager.cfg.TICK_MS;
+
+        try (MockedStatic<Trade> trades = mockStatic(Trade.class)) {
+            BotInventoryManager.tickManualTrade(entry, bot);
+
+            trades.verify(() -> Trade.cancelTrade(bot, Trade.TradeResult.NO_RESPONSE));
+            assertNull(entry.manualTradeRef);
+            assertTrue(entry.manualTradeTimeoutMs == 0);
+        }
     }
 
     @SuppressWarnings("unchecked")

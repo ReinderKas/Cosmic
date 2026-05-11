@@ -37,6 +37,7 @@ import java.util.function.Predicate;
 class BotInventoryManager {
     private static final Logger log = LoggerFactory.getLogger(BotInventoryManager.class);
     private static final long TRADE_COMMAND_PROFILE_WARN_NS = 50_000_000L;
+    private static final int MANUAL_TRADE_TIMEOUT_MS = 60_000;
     private record PreparedTradeItems(List<Item> items, String errorMessage) {}
     private record EquipTradeGroups(List<Item> normal,
                                     List<Item> reservedForOther,
@@ -271,9 +272,26 @@ class BotInventoryManager {
 
         Trade trade = bot.getTrade();
         Character owner = entry.owner;
-        if (trade == null || owner == null) {
+        if (trade == null) {
+            clearManualTradeState(entry, bot);
+            return;
+        }
+
+        if (trade != entry.manualTradeRef) {
             manualTradeGreetingSent.remove(bot.getId());
             entry.manualTradeAcceptDelayMs = 0;
+            entry.manualTradeRef = trade;
+            entry.manualTradeTimeoutMs = MANUAL_TRADE_TIMEOUT_MS;
+        } else if (entry.manualTradeTimeoutMs > 0) {
+            entry.manualTradeTimeoutMs = BotMovementManager.tickDown(entry.manualTradeTimeoutMs);
+            if (entry.manualTradeTimeoutMs == 0) {
+                Trade.cancelTrade(bot, Trade.TradeResult.NO_RESPONSE);
+                clearManualTradeState(entry, bot);
+                return;
+            }
+        }
+
+        if (owner == null) {
             return;
         }
 
@@ -770,9 +788,17 @@ class BotInventoryManager {
         resetTradeState(entry, bot);
     }
 
+    private static void clearManualTradeState(BotEntry entry, Character bot) {
+        manualTradeGreetingSent.remove(bot.getId());
+        entry.manualTradeAcceptDelayMs = 0;
+        entry.manualTradeRef = null;
+        entry.manualTradeTimeoutMs = 0;
+    }
+
     private static void resetTradeState(BotEntry entry, Character bot) {
         boolean hadRestores = !entry.pendingTradeRestoreSlots.isEmpty();
         restoreTemporarilyUnequippedItems(entry, bot);
+        clearManualTradeState(entry, bot);
         entry.pendingTradeCategory = null;
         entry.pendingTradeCategoryMsg = null;
         entry.pendingTradeItems    = null;

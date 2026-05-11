@@ -2,6 +2,7 @@ package server.bots;
 
 import client.Character;
 import client.inventory.Item;
+import server.Trade;
 import server.life.Monster;
 import server.maps.Foothold;
 import server.maps.MapItem;
@@ -308,6 +309,8 @@ public class BotEntry {
 
     // Manual trade: countdown before bot accepts an incoming trade invite (both owner and peer-bot)
     int manualTradeAcceptDelayMs = 0;
+    Trade manualTradeRef = null;
+    int manualTradeTimeoutMs = 0;
 
     // Movement packet cache so repeated no-op packets are suppressed
     boolean movementBroadcastValid = false;
