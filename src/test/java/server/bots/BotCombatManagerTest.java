@@ -13,7 +13,9 @@ import constants.skills.Archer;
 import constants.skills.Beginner;
 import constants.skills.Cleric;
 import constants.skills.Hunter;
+import constants.skills.ILWizard;
 import constants.skills.Magician;
+import constants.skills.Rogue;
 import constants.skills.Warrior;
 import net.packet.Packet;
 import org.junit.jupiter.api.Test;
@@ -150,6 +152,166 @@ class BotCombatManagerTest {
 
         assertEquals(Warrior.POWER_STRIKE, entry.attackSkillId);
         assertEquals(Warrior.SLASH_BLAST, entry.aoeSkillId);
+    }
+
+    @Test
+    void shouldNotTreatMpEaterAsActiveAttackSkill() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.IL_WIZARD);
+        when(bot.getLevel()).thenReturn(35);
+
+        Skill thunderbolt = skillWithAttack(ILWizard.THUNDERBOLT, 1, 6, 115);
+        Skill mpEater = new Skill(ILWizard.MP_EATER);
+        StatEffect passiveEffect = mock(StatEffect.class);
+        when(passiveEffect.getDamage()).thenReturn(115);
+        when(passiveEffect.getAttackCount()).thenReturn(1);
+        when(passiveEffect.getBulletCount()).thenReturn((short) 0);
+        when(passiveEffect.getMobCount()).thenReturn(1);
+        when(passiveEffect.isOverTime()).thenReturn(false);
+        mpEater.addLevelEffect(passiveEffect);
+
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        skills.put(mpEater, null);
+        skills.put(thunderbolt, null);
+        when(bot.getSkills()).thenReturn(skills);
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skill.getId() == ILWizard.MP_EATER || skill.getId() == ILWizard.THUNDERBOLT ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertEquals(ILWizard.THUNDERBOLT, entry.aoeSkillId);
+        assertEquals(0, entry.attackSkillId);
+        assertFalse(entry.buffSkillIds.contains(ILWizard.MP_EATER));
+    }
+
+    @Test
+    void shouldStillCacheMagicClawAsActiveAttackSkill() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.MAGICIAN);
+        when(bot.getLevel()).thenReturn(18);
+
+        Skill magicClaw = skillWithAttack(Magician.MAGIC_CLAW, 2, 1, 40);
+        Skill fakePassive = passiveSkillWithCombatMetadata(ILWizard.MP_EATER, 115, 1, 1);
+
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        skills.put(fakePassive, null);
+        skills.put(magicClaw, null);
+        when(bot.getSkills()).thenReturn(skills);
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skill.getId() == ILWizard.MP_EATER || skill.getId() == Magician.MAGIC_CLAW ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertEquals(Magician.MAGIC_CLAW, entry.attackSkillId);
+    }
+
+    @Test
+    void shouldStillCacheDoubleShotAsActiveAttackSkill() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.BOWMAN);
+        when(bot.getLevel()).thenReturn(12);
+
+        Skill doubleShot = skillWithAttack(Archer.DOUBLE_SHOT, 2, 1, 130);
+        Skill fakePassive = passiveSkillWithCombatMetadata(Archer.CRITICAL_SHOT, 200, 1, 1);
+
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        skills.put(fakePassive, null);
+        skills.put(doubleShot, null);
+        when(bot.getSkills()).thenReturn(skills);
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skill.getId() == Archer.CRITICAL_SHOT || skill.getId() == Archer.DOUBLE_SHOT ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertEquals(Archer.DOUBLE_SHOT, entry.attackSkillId);
+    }
+
+    @Test
+    void shouldStillCacheLuckySevenAsActiveAttackSkill() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.THIEF);
+        when(bot.getLevel()).thenReturn(14);
+
+        Skill luckySeven = skillWithAttack(Rogue.LUCKY_SEVEN, 2, 1, 150);
+        Skill fakePassive = passiveSkillWithCombatMetadata(Archer.CRITICAL_SHOT, 200, 1, 1);
+
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        skills.put(fakePassive, null);
+        skills.put(luckySeven, null);
+        when(bot.getSkills()).thenReturn(skills);
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skill.getId() == Archer.CRITICAL_SHOT || skill.getId() == Rogue.LUCKY_SEVEN ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertEquals(Rogue.LUCKY_SEVEN, entry.attackSkillId);
+    }
+
+    @Test
+    void shouldStillCacheThunderboltAsActiveAttackSkill() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.IL_WIZARD);
+        when(bot.getLevel()).thenReturn(35);
+
+        Skill thunderbolt = skillWithAttack(ILWizard.THUNDERBOLT, 1, 6, 115);
+        Skill fakePassive = passiveSkillWithCombatMetadata(ILWizard.MP_EATER, 115, 1, 1);
+
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        skills.put(fakePassive, null);
+        skills.put(thunderbolt, null);
+        when(bot.getSkills()).thenReturn(skills);
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skill.getId() == ILWizard.MP_EATER || skill.getId() == ILWizard.THUNDERBOLT ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertEquals(ILWizard.THUNDERBOLT, entry.aoeSkillId);
+    }
+
+    @Test
+    void shouldIgnorePassiveCombatMetadataWithoutActiveSkillAction() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.BOWMAN);
+        when(bot.getLevel()).thenReturn(12);
+
+        Skill criticalShot = new Skill(Archer.CRITICAL_SHOT);
+        StatEffect passiveEffect = mock(StatEffect.class);
+        when(passiveEffect.getDamage()).thenReturn(200);
+        when(passiveEffect.getAttackCount()).thenReturn(1);
+        when(passiveEffect.getBulletCount()).thenReturn((short) 0);
+        when(passiveEffect.getMobCount()).thenReturn(1);
+        when(passiveEffect.isOverTime()).thenReturn(false);
+        criticalShot.addLevelEffect(passiveEffect);
+
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        skills.put(criticalShot, null);
+        when(bot.getSkills()).thenReturn(skills);
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skill.getId() == Archer.CRITICAL_SHOT ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertEquals(0, entry.attackSkillId);
+        assertEquals(0, entry.aoeSkillId);
+        assertTrue(entry.buffSkillIds.isEmpty());
     }
 
     @Test
@@ -751,6 +913,7 @@ class BotCombatManagerTest {
 
     private static Skill skillWithAttack(int skillId, int attackCount, int mobCount, int damage) {
         Skill skill = new Skill(skillId);
+        skill.setAction(true);
         StatEffect effect = mock(StatEffect.class);
         when(effect.getAttackCount()).thenReturn(attackCount);
         when(effect.getMobCount()).thenReturn(mobCount);
@@ -758,6 +921,18 @@ class BotCombatManagerTest {
         when(effect.getDuration()).thenReturn(0);
         when(effect.getMpCon()).thenReturn((short) 1);
         when(effect.canPaySkillCost(any(Character.class))).thenReturn(true);
+        skill.addLevelEffect(effect);
+        return skill;
+    }
+
+    private static Skill passiveSkillWithCombatMetadata(int skillId, int damage, int attackCount, int mobCount) {
+        Skill skill = new Skill(skillId);
+        StatEffect effect = mock(StatEffect.class);
+        when(effect.getDamage()).thenReturn(damage);
+        when(effect.getAttackCount()).thenReturn(attackCount);
+        when(effect.getBulletCount()).thenReturn((short) 0);
+        when(effect.getMobCount()).thenReturn(mobCount);
+        when(effect.isOverTime()).thenReturn(false);
         skill.addLevelEffect(effect);
         return skill;
     }

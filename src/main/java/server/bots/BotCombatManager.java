@@ -438,9 +438,11 @@ class BotCombatManager {
             if (lvl <= 0) continue;
 
             StatEffect fx = skill.getEffect(lvl);
+            if (!isActivelyCastableSkill(skill, fx)) {
+                continue;
+            }
             int atk = effectiveHitCount(fx);
             int mobs = fx.getMobCount();
-            int dur = fx.getDuration();
 
             if (isHealSkill(skill.getId())) {
                 entry.healSkillId = skill.getId();
@@ -2186,6 +2188,18 @@ class BotCombatManager {
 
     private static boolean isPartySupportSkill(int skillId) {
         return PARTY_SUPPORT_SKILL_IDS.contains(skillId);
+    }
+
+    private static boolean isActivelyCastableSkill(Skill skill, StatEffect effect) {
+        if (skill == null || effect == null) {
+            return false;
+        }
+        if (effect.isOverTime()) {
+            return true;
+        }
+        // Bot-only cache guard: passive skills can expose combat-ish WZ metadata even though
+        // the client never actively casts them. Restrict active combat selection to real action skills.
+        return skill.getAction();
     }
 
     private static boolean isHealSkill(int skillId) {
