@@ -22,7 +22,7 @@ final class BotScrollReactionManager {
     private static final List<String> SCROLL_SUCCESS_REACTIONS = List.of(
             "nice", "nice!",
             "gz",
-            "clean", "clean!"
+            "clean", "clean!",
             "juicy",
             "anything good?",
             "whachu scrollin?",
@@ -66,7 +66,6 @@ final class BotScrollReactionManager {
             "the odds hate you rn",
             "ok thats just mean",
             "this map is cold");
-    private static int SCROLL_STREAK_REACTION_CHANCE;
 
     private BotScrollReactionManager() {
     }
