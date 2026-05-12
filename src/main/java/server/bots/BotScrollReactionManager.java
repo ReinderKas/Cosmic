@@ -32,7 +32,7 @@ final class BotScrollReactionManager {
             "big pass",
             "solid",
             "not bad",
-            "blessed", "damn",
+            "blessed", "dayum",
             "yoo nice", ":)", ":D", "again!", "do it again!");
     private static final List<String> SCROLL_FAIL_REACTIONS = List.of(
             "rip", "f", "F",
@@ -43,19 +43,18 @@ final class BotScrollReactionManager {
             "rough",
             "tragic",
             "unlucky",
-            "damn",
+            "dayum",
             "scroll said no",
             "maybe next one",
             "happens");
     private static final List<String> SCROLL_SUCCESS_STREAK_REACTIONS = List.of(
-            "ok youre cookin", "you are cooking", "!!!!", "!!!!!!!!",
-            "thats a combo", "super combo", "woww", "holyy", "holy", "sheeshhh", "omg", "omg!!", "wtf", "WTF", "WTF!!",
-            "cant miss rn", "no miss!",
+            "ok youre cookin", "you are cooking!!", "!!!!", "!!!!!!!!", "OMFG",
+            "thats a combo", "super combo", "woww", "WOWWWW", "HOLYYY", "HOLY", "holyyy", "sheeshhh", "omg!!", "wtf", "WTF", "WTF!!",
+            "cant miss rn", "no miss!", "CRAZY", "CRAZY!!",
             "buddy is on a run", "today is your day!",
-            "save some luck for us", "crazy", "that's crazyyyyy", "crazy man", "crazy man!",
-            "another one?", "another one", "another one!", "again!again!", "again!",
-            "damn", "daaaaaamn", "dayum",
-            "youre farming hits");
+            "save some luck for us", "crazy", "that's crazyyyyy", "crazy man", "crazy! man",
+            "another one?", "another one", "MORE", "MOARRR", "another one!", "again!again!", "again!", "AGAIN!",
+            "daaaaaamn", "DAYUM!");
     private static final List<String> SCROLL_FAIL_STREAK_REACTIONS = List.of(
             "ok thats cursed", "cursed", "bad luck",
             "that streak is nasty", "damn", "fak",
