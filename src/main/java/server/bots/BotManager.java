@@ -938,11 +938,39 @@ public class BotManager {
             return;
         }
 
+        // Group supply requests ("need pots", "anyone have hp pots", "need arrows"
+        // etc.) elicit a single response from the bot group. Broadcasting these
+        // would have every bot run handleNeedPotionCommand independently, each
+        // selecting the same best-stocked donor → duplicate offer messages and
+        // duplicate trade requests to the owner.
+        if (BotChatManager.isGroupSupplyRequest(message)) {
+            BotEntry responder = pickGroupSupplyResponder(owner, entries);
+            if (responder != null) {
+                responder.replyChannel = channel;
+                BotChatManager.handleChat(responder, message);
+            }
+            return;
+        }
+
         // No name prefix — broadcast to all bots
         for (BotEntry entry : entries) {
             entry.replyChannel = channel;
             BotChatManager.handleChat(entry, message);
         }
+    }
+
+    /** Prefer a bot in the owner's current map so its reply/trade is visible. */
+    private static BotEntry pickGroupSupplyResponder(Character owner, List<BotEntry> entries) {
+        if (entries == null || entries.isEmpty()) {
+            return null;
+        }
+        int ownerMapId = owner != null ? owner.getMapId() : -1;
+        for (BotEntry entry : entries) {
+            if (entry.bot != null && entry.bot.getMapId() == ownerMapId) {
+                return entry;
+            }
+        }
+        return entries.get(0);
     }
 
     private boolean handlePendingLootOfferResponse(Character speaker, String message) {
@@ -2550,19 +2578,15 @@ public class BotManager {
     }
 
     private void startFarmHere(BotEntry entry, Point dest) {
-        clearMode(entry);
+        // Sentry/farm-here is an active combat mode that just anchors to a fixed spot.
+        // Route through the shared active-mode reset so it stays in lock-step with
+        // grind/patrol (self-buff, pot-share, ammo-low, "low on pots" fallback all
+        // gate on entry.grinding — see kb feedback_bot_coding_guidelines).
+        enterActiveMode(entry);
         entry.farmAnchor = new Point(dest);
         entry.farmAnchorMapId = entry.bot.getMapId();
         entry.moveTarget = new Point(dest);
         entry.moveTargetPrecise = true;
-        entry.grindTarget = null;
-        entry.nextGrindTargetSearchAtMs = 0L;
-        entry.moveWindowMs = 0;
-        entry.degenAttackDone = false;
-        entry.retreatHoldUntilMs = 0L;
-        entry.retreatHoldPos = null;
-        entry.wanderDirection = 0;
-        BotMovementManager.clearNavigationState(entry);
     }
 
     public void issuePatrol(BotEntry entry, Point ownerPos) {
@@ -2582,7 +2606,7 @@ public class BotManager {
     }
 
     private void startPatrol(BotEntry entry, int regionId) {
-        startGrind(entry);          // sets grinding = true, clears other modes including any prior patrolRegionId
+        enterActiveMode(entry);
         entry.patrolRegionId = regionId;
         entry.patrolMapId = entry.bot.getMapId();
         entry.patrolWanderTarget = null;
@@ -2639,12 +2663,29 @@ public class BotManager {
     }
 
     private void startGrind(BotEntry entry) {
+        enterActiveMode(entry);
+    }
+
+    /**
+     * Shared baseline for all active combat modes (grind / sentry / patrol). Sets
+     * {@code grinding = true} and zeros out follow, move, and sub-mode state so
+     * each mode starts from the same baseline. Mode-specific fields (anchor /
+     * patrol region) are set by the caller after this returns.
+     *
+     * When adding a new active mode, route it through this helper to avoid the
+     * sentry-mode regression where {@code grinding=false} silently disabled the
+     * pot-share, self-buff, and ammo-low fallback paths.
+     */
+    private void enterActiveMode(BotEntry entry) {
         entry.followTargetId = 0;
         entry.following = false;
         entry.moveTarget = null;
         entry.moveTargetPrecise = false;
         entry.farmAnchor = null;
         entry.farmAnchorMapId = -1;
+        entry.patrolRegionId = -1;
+        entry.patrolMapId = -1;
+        entry.patrolWanderTarget = null;
         entry.grindTarget = null;
         entry.grindLootTarget = null;
         entry.nextGrindTargetSearchAtMs = 0L;

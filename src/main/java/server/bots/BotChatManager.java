@@ -868,6 +868,7 @@ public class BotChatManager {
             Point dest = entry.owner != null ? new Point(entry.owner.getPosition()) : null;
             if (dest != null) {
                 BotManager.after(BotManager.randMs(1000, 1500), () -> {
+                    prepareActiveModeEntry(entry);
                     BotManager.getInstance().issueFarmHere(entry, dest);
                     BotManager.getInstance().botReply(entry, BotManager.randomReply(MOVE_HERE_REPLIES));
                 });
@@ -876,6 +877,7 @@ public class BotChatManager {
             Point ownerPos = entry.owner != null ? new Point(entry.owner.getPosition()) : null;
             if (ownerPos != null) {
                 BotManager.after(BotManager.randMs(1000, 1500), () -> {
+                    prepareActiveModeEntry(entry);
                     BotManager.getInstance().issuePatrol(entry, ownerPos);
                     BotManager.getInstance().botReply(entry, BotManager.randomReply(MOVE_HERE_REPLIES));
                 });
@@ -899,12 +901,8 @@ public class BotChatManager {
             });
         } else if (isGrindCommand(message)) {
             BotManager.after(BotManager.randMs(1500, 2000), () -> {
-                BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem);
-                entry.nextGearSuggestionAt = 0;
-                maybeSuggestGearToSiblings(entry, entry.bot);
-                BotPotionManager.setupAutopotForBot(entry.bot);
+                prepareActiveModeEntry(entry);
                 BotManager.getInstance().botReply(entry, BotPotionManager.grindStartMessage(entry.bot));
-                BotPotionManager.checkPotShareOnModeStart(entry, entry.bot);
                 BotManager.after(BotManager.randMs(250, 750), () -> {
                     BotManager.getInstance().issueGrind(entry);
                     checkBotStatus(entry, entry.bot);
@@ -1738,6 +1736,20 @@ public class BotChatManager {
         }
     }
 
+    /**
+     * Shared prelude for owner-issued active-combat-mode commands (grind / sentry
+     * / patrol). Keeps the modes in lock-step on autoEquip, gear suggestion,
+     * autopot keybind setup, and the initial pot-share request — otherwise new
+     * modes silently miss one of these (the original sentry-mode bug).
+     */
+    private static void prepareActiveModeEntry(BotEntry entry) {
+        BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem);
+        entry.nextGearSuggestionAt = 0;
+        maybeSuggestGearToSiblings(entry, entry.bot);
+        BotPotionManager.setupAutopotForBot(entry.bot);
+        BotPotionManager.checkPotShareOnModeStart(entry, entry.bot);
+    }
+
     /** Returns true when the owner hasn't moved in ≥5 min (AFK). Skip chat interactions. */
     static boolean isOwnerIdle(BotEntry entry) {
         return entry.ownerWasAfk;
@@ -1766,6 +1778,19 @@ public class BotChatManager {
 
     static boolean isNeedAmmoCommand(String message) {
         return NEED_AMMO_PATTERN.matcher(message).find();
+    }
+
+    /**
+     * Group-wide supply requests ("need pots", "anyone have hp pots", "need arrows"
+     * etc.) trigger a single response from the bot group. Broadcasting these to
+     * every entry causes duplicate replies and duplicate trades because each bot
+     * independently selects the same donor sibling.
+     */
+    static boolean isGroupSupplyRequest(String message) {
+        return isNeedHpPotCommand(message)
+                || isNeedMpPotCommand(message)
+                || isNeedPotCommand(message)
+                || isNeedAmmoCommand(message);
     }
 
     private static void handleRequestUpgradeCommand(BotEntry entry, Character bot) {
