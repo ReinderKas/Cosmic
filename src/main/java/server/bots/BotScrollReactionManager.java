@@ -14,11 +14,11 @@ final class BotScrollReactionManager {
     private static final int REACTION_RADIUS_PX = 600;
     private static final int EMOTE_CHANCE_PCT = 16;
     private static final int CHAT_CHANCE_PCT = 8;
-    private static final int FIDGET_CHANCE_PCT = 3;
+    private static final int FIDGET_CHANCE_PCT = 6;
     private static final int REACTION_COOLDOWN_MS = 10_000;
     private static final int LOAD_DECAY_MS = 60_000;
     private static final int STREAK_WINDOW_MS = 45_000;
-    private static final int SCROLL_STREAK_REACTION_CHANCE = 45;
+    private static final int STREAK_PRUNE_INTERVAL_MS = 60_000;
     private static final List<String> SCROLL_SUCCESS_REACTIONS = List.of(
             "nice", "nice!",
             "gz",
@@ -110,17 +110,17 @@ final class BotScrollReactionManager {
                 if (dx * dx + dy * dy > maxDistSq) {
                     continue;
                 }
-                maybeReact(entry, success, scrollSuccessRate, now);
+                maybeReact(entry, source.getId(), success, scrollSuccessRate, now);
             }
         }
     }
 
-    static void maybeReact(BotEntry entry, boolean success, int scrollSuccessRate, long now) {
+    static void maybeReact(BotEntry entry, int scrollerId, boolean success, int scrollSuccessRate, long now) {
         if (entry == null || entry.bot == null) {
             return;
         }
 
-        int streak = updateReactionStreak(entry, success, now);
+        int streak = updateReactionStreak(entry, scrollerId, success, now);
         double load = recordReactionLoad(entry, now);
         if (now < entry.nextScrollReactionAtMs) {
             return;
@@ -175,73 +175,60 @@ final class BotScrollReactionManager {
             return 1.0;
         }
         if (load <= 3.5) {
-            return 0.35;
+            return 0.5;
         }
         if (load <= 5.0) {
-            return 0.12;
+            return 0.3;
         }
-        return 0.03;
+        return 0.2;
     }
 
     static double successRateChanceScale(int scrollSuccessRate) {
-        if (scrollSuccessRate <= 0) {
+        if (scrollSuccessRate <= 20) {
+            return 2;
+        }
+        if (scrollSuccessRate <= 40) {
+            return 1.5;
+        }
+        if (scrollSuccessRate <= 80) {
             return 1.0;
         }
-        if (scrollSuccessRate <= 10) {
-            return 1.3;
+        if (scrollSuccessRate <= 90) {
+            return 0.5;
         }
-        if (scrollSuccessRate <= 30) {
-            return 1.18;
-        }
-        if (scrollSuccessRate >= 100) {
-            return 0.18;
-        }
-        return 1.0;
+        return 0.25;
     }
 
-    static int updateReactionStreak(BotEntry entry, boolean success, long now) {
-        if (entry == null) {
+    static int updateReactionStreak(BotEntry entry, int scrollerId, boolean success, long now) {
+        if (entry == null || scrollerId <= 0) {
             return 0;
         }
 
+        pruneStreaks(entry, now);
         long windowMs = Math.max(1, STREAK_WINDOW_MS);
-        if (entry.lastScrollReactionOutcomeAtMs == 0L
-                || now - entry.lastScrollReactionOutcomeAtMs > windowMs
-                || entry.lastScrollReactionWasSuccess != success) {
-            entry.scrollReactionStreak = 1;
+        BotEntry.ScrollReactionStreakState state = entry.scrollReactionStreaksByScroller
+                .computeIfAbsent(scrollerId, ignored -> new BotEntry.ScrollReactionStreakState());
+        if (state.lastOutcomeAtMs == 0L
+                || now - state.lastOutcomeAtMs > windowMs
+                || state.lastWasSuccess != success) {
+            state.streak = 1;
         } else {
-            entry.scrollReactionStreak++;
+            state.streak++;
         }
-        entry.lastScrollReactionWasSuccess = success;
-        entry.lastScrollReactionOutcomeAtMs = now;
-        return entry.scrollReactionStreak;
+        state.lastWasSuccess = success;
+        state.lastOutcomeAtMs = now;
+        return state.streak;
     }
 
     static double streakChanceScale(int streak, boolean success, int scrollSuccessRate) {
         if (!success || streak < 2 || scrollSuccessRate >= 100) {
             return 1.0;
         }
-        return Math.min(1.35, 1.0 + 0.12 * Math.min(3, streak - 1));
+        return Math.min(1.5, 1.0 + (0.2 * streak * streak));
     }
 
     static boolean isStreakChatEligible(int streak, int scrollSuccessRate) {
         return streak >= 3 && scrollSuccessRate < 100;
-    }
-
-    static int successReactionCount() {
-        return SCROLL_SUCCESS_REACTIONS.size();
-    }
-
-    static int failReactionCount() {
-        return SCROLL_FAIL_REACTIONS.size();
-    }
-
-    static int successStreakReactionCount() {
-        return SCROLL_SUCCESS_STREAK_REACTIONS.size();
-    }
-
-    static int failStreakReactionCount() {
-        return SCROLL_FAIL_STREAK_REACTIONS.size();
     }
 
     static int streakWindowMs() {
@@ -249,9 +236,9 @@ final class BotScrollReactionManager {
     }
 
     private static String selectChatLine(boolean success, int streak, int scrollSuccessRate) {
-        if (isStreakChatEligible(streak, scrollSuccessRate) && ThreadLocalRandom.current().nextInt(100) < SCROLL_STREAK_REACTION_CHANCE) {
+        if (isStreakChatEligible(streak, scrollSuccessRate) && ThreadLocalRandom.current().nextInt(100) < 75) {
             return BotManager.randomReply(success ? SCROLL_SUCCESS_STREAK_REACTIONS : SCROLL_FAIL_STREAK_REACTIONS);
-        }
+        } // 75% chance to use streak chat
         return BotManager.randomReply(success ? SCROLL_SUCCESS_REACTIONS : SCROLL_FAIL_REACTIONS);
     }
 
@@ -265,6 +252,16 @@ final class BotScrollReactionManager {
         }
         Integer success = stats.get("success");
         return success == null ? 0 : success;
+    }
+
+    private static void pruneStreaks(BotEntry entry, long now) {
+        if (now < entry.nextScrollReactionStreakPruneAtMs) {
+            return;
+        }
+        long cutoff = now - STREAK_WINDOW_MS;
+        entry.scrollReactionStreaksByScroller.entrySet()
+                .removeIf(it -> it.getValue() == null || it.getValue().lastOutcomeAtMs < cutoff);
+        entry.nextScrollReactionStreakPruneAtMs = now + STREAK_PRUNE_INTERVAL_MS;
     }
 
     private static boolean rollPercent(int baseChancePct, double chanceScale) {

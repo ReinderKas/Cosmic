@@ -22,6 +22,12 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class BotEntry {
+    static final class ScrollReactionStreakState {
+        int streak = 0;
+        boolean lastWasSuccess = false;
+        long lastOutcomeAtMs = 0L;
+    }
+
     final Character bot;
     volatile Character owner;
     volatile boolean following = false;
@@ -290,9 +296,8 @@ public class BotEntry {
     double recentScrollReactionLoad = 0.0;
     long lastScrollReactionObservedAtMs = 0L;
     long nextScrollReactionAtMs = 0L;
-    int scrollReactionStreak = 0;
-    boolean lastScrollReactionWasSuccess = false;
-    long lastScrollReactionOutcomeAtMs = 0L;
+    final Map<Integer, ScrollReactionStreakState> scrollReactionStreaksByScroller = new HashMap<>();
+    long nextScrollReactionStreakPruneAtMs = 0L;
 
     // Path logging (debug)
     BotPathLogger pathLogger = null;
