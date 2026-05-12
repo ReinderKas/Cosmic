@@ -2,7 +2,6 @@ package server.bots;
 
 import client.BuffStat;
 import client.Character;
-import client.Client;
 import client.Job;
 import client.Skill;
 import client.SkillFactory;
@@ -11,15 +10,15 @@ import client.inventory.InventoryType;
 import client.inventory.WeaponType;
 import constants.game.CharacterStance;
 import constants.skills.Archer;
+import constants.skills.Assassin;
 import constants.skills.Beginner;
 import constants.skills.Cleric;
 import constants.skills.Hunter;
 import constants.skills.ILWizard;
 import constants.skills.Magician;
 import constants.skills.Rogue;
+import constants.skills.Spearman;
 import constants.skills.Warrior;
-import net.server.channel.handlers.AbstractDealDamageHandler;
-import net.server.channel.handlers.MagicDamageHandler;
 import net.packet.Packet;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
@@ -164,14 +163,7 @@ class BotCombatManagerTest {
         when(bot.getLevel()).thenReturn(35);
 
         Skill thunderbolt = skillWithAttack(ILWizard.THUNDERBOLT, 1, 6, 115);
-        Skill mpEater = new Skill(ILWizard.MP_EATER);
-        StatEffect passiveEffect = mock(StatEffect.class);
-        when(passiveEffect.getDamage()).thenReturn(115);
-        when(passiveEffect.getAttackCount()).thenReturn(1);
-        when(passiveEffect.getBulletCount()).thenReturn((short) 0);
-        when(passiveEffect.getMobCount()).thenReturn(1);
-        when(passiveEffect.isOverTime()).thenReturn(false);
-        mpEater.addLevelEffect(passiveEffect);
+        Skill mpEater = passiveOverTimeSkillWithCombatMetadata(ILWizard.MP_EATER, 115, 1, 1);
 
         Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
         skills.put(mpEater, null);
@@ -188,6 +180,28 @@ class BotCombatManagerTest {
         assertEquals(ILWizard.THUNDERBOLT, entry.aoeSkillId);
         assertEquals(0, entry.attackSkillId);
         assertFalse(entry.buffSkillIds.contains(ILWizard.MP_EATER));
+    }
+
+    @Test
+    void shouldCacheActionBackedSupportBuffButNotPassiveOverTimeSkill() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.CLERIC);
+        when(bot.getLevel()).thenReturn(35);
+
+        Skill bless = skillWithBuffAction(Cleric.BLESS);
+        Skill mpEater = passiveOverTimeSkillWithCombatMetadata(Cleric.MP_EATER, 0, 1, 1);
+
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        skills.put(mpEater, null);
+        skills.put(bless, null);
+        when(bot.getSkills()).thenReturn(skills);
+        when(bot.getSkillLevel(any(Skill.class))).thenReturn((byte) 1);
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertFalse(entry.buffSkillIds.contains(Cleric.MP_EATER));
+        assertTrue(entry.buffSkillIds.contains(Cleric.BLESS));
     }
 
     @Test
@@ -287,87 +301,6 @@ class BotCombatManagerTest {
     }
 
     @Test
-    void shouldApplyMpEaterForBotMagicClawThroughSharedMagicHandler() {
-        MapleMap map = mock(MapleMap.class);
-        Monster target = mockMob(new Point(140, 200), 9300500);
-        Character bot = mockBot(new Point(100, 200), map, 20_000, null);
-        Client client = mock(Client.class);
-        when(bot.getClient()).thenReturn(client);
-        when(bot.getJob()).thenReturn(Job.IL_WIZARD);
-        when(map.isOwnershipRestricted(bot)).thenReturn(false);
-        when(map.getMonsterByOid(target.getObjectId())).thenReturn(target);
-        when(map.getMapObject(target.getObjectId())).thenReturn(target);
-        when(target.getSkills()).thenReturn(Set.of());
-
-        Skill magicClaw = skillWithAttack(Magician.MAGIC_CLAW, 2, 1, 40);
-        Skill mpEater = new Skill(ILWizard.MP_EATER);
-        StatEffect mpEaterEffect = mock(StatEffect.class);
-        mpEater.addLevelEffect(mpEaterEffect);
-
-        AbstractDealDamageHandler.AttackInfo attack = magicAttack(Magician.MAGIC_CLAW, 1, 2, target);
-
-        doAnswer(invocation -> {
-            Skill skill = invocation.getArgument(0);
-            return (byte) switch (skill.getId()) {
-                case Magician.MAGIC_CLAW, ILWizard.MP_EATER -> 1;
-                default -> 0;
-            };
-        }).when(bot).getSkillLevel(any(Skill.class));
-
-        try (MockedStatic<SkillFactory> skillFactory = Mockito.mockStatic(SkillFactory.class)) {
-            skillFactory.when(() -> SkillFactory.getSkill(Magician.MAGIC_CLAW)).thenReturn(magicClaw);
-            skillFactory.when(() -> SkillFactory.getSkill(ILWizard.MP_EATER)).thenReturn(mpEater);
-
-            MagicDamageHandler.applyMagicAttackEffects(attack, bot, client);
-        }
-
-        verify(mpEaterEffect).applyPassive(bot, target, 0);
-    }
-
-    @Test
-    void shouldApplyMpEaterForEachBotThunderboltTargetThroughSharedMagicHandler() {
-        MapleMap map = mock(MapleMap.class);
-        Monster first = mockMob(new Point(140, 200), 9300501);
-        Monster second = mockMob(new Point(180, 200), 9300502);
-        Character bot = mockBot(new Point(100, 200), map, 20_000, null);
-        Client client = mock(Client.class);
-        when(bot.getClient()).thenReturn(client);
-        when(bot.getJob()).thenReturn(Job.IL_WIZARD);
-        when(map.isOwnershipRestricted(bot)).thenReturn(false);
-        when(map.getMonsterByOid(first.getObjectId())).thenReturn(first);
-        when(map.getMonsterByOid(second.getObjectId())).thenReturn(second);
-        when(map.getMapObject(first.getObjectId())).thenReturn(first);
-        when(map.getMapObject(second.getObjectId())).thenReturn(second);
-        when(first.getSkills()).thenReturn(Set.of());
-        when(second.getSkills()).thenReturn(Set.of());
-
-        Skill thunderbolt = skillWithAttack(ILWizard.THUNDERBOLT, 1, 6, 115);
-        Skill mpEater = new Skill(ILWizard.MP_EATER);
-        StatEffect mpEaterEffect = mock(StatEffect.class);
-        mpEater.addLevelEffect(mpEaterEffect);
-
-        AbstractDealDamageHandler.AttackInfo attack = magicAttack(ILWizard.THUNDERBOLT, 1, 1, first, second);
-
-        doAnswer(invocation -> {
-            Skill skill = invocation.getArgument(0);
-            return (byte) switch (skill.getId()) {
-                case ILWizard.THUNDERBOLT, ILWizard.MP_EATER -> 1;
-                default -> 0;
-            };
-        }).when(bot).getSkillLevel(any(Skill.class));
-
-        try (MockedStatic<SkillFactory> skillFactory = Mockito.mockStatic(SkillFactory.class)) {
-            skillFactory.when(() -> SkillFactory.getSkill(ILWizard.THUNDERBOLT)).thenReturn(thunderbolt);
-            skillFactory.when(() -> SkillFactory.getSkill(ILWizard.MP_EATER)).thenReturn(mpEater);
-
-            MagicDamageHandler.applyMagicAttackEffects(attack, bot, client);
-        }
-
-        verify(mpEaterEffect).applyPassive(bot, first, 0);
-        verify(mpEaterEffect).applyPassive(bot, second, 0);
-    }
-
-    @Test
     void shouldIgnorePassiveCombatMetadataWithoutActiveSkillAction() {
         Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
         when(bot.getJob()).thenReturn(Job.BOWMAN);
@@ -396,6 +329,60 @@ class BotCombatManagerTest {
         assertEquals(0, entry.attackSkillId);
         assertEquals(0, entry.aoeSkillId);
         assertTrue(entry.buffSkillIds.isEmpty());
+    }
+
+    @Test
+    void shouldIgnoreFinalAttackPassiveDamageMetadata() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.HUNTER);
+        when(bot.getLevel()).thenReturn(35);
+
+        Skill finalAttack = passiveSkillWithCombatMetadata(Hunter.FINAL_ATTACK, 105, 1, 1);
+        finalAttack.setSkillType(3);
+
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        skills.put(finalAttack, null);
+        when(bot.getSkills()).thenReturn(skills);
+        when(bot.getSkillLevel(any(Skill.class))).thenReturn((byte) 1);
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertEquals(0, entry.attackSkillId);
+        assertEquals(0, entry.aoeSkillId);
+        assertTrue(entry.buffSkillIds.isEmpty());
+    }
+
+    @Test
+    void shouldClassifyInspectedSecondJobSkillsFromRealWzData() {
+        SkillFactory.loadAllSkills();
+
+        assertRealWzCache(Job.IL_WIZARD, 35,
+                Set.of(ILWizard.MP_EATER, ILWizard.MEDITATION, ILWizard.SLOW, ILWizard.COLD_BEAM, ILWizard.THUNDERBOLT),
+                ILWizard.COLD_BEAM, ILWizard.THUNDERBOLT,
+                Set.of(ILWizard.MEDITATION, ILWizard.SLOW),
+                Set.of(ILWizard.MP_EATER));
+        assertRealWzCache(Job.CLERIC, 35,
+                Set.of(Cleric.MP_EATER, Cleric.HEAL, Cleric.INVINCIBLE, Cleric.BLESS, Cleric.HOLY_ARROW),
+                Cleric.HOLY_ARROW, 0,
+                Set.of(Cleric.INVINCIBLE, Cleric.BLESS),
+                Set.of(Cleric.MP_EATER));
+        assertRealWzCache(Job.HUNTER, 35,
+                Set.of(Archer.DOUBLE_SHOT, Hunter.FINAL_ATTACK, Hunter.BOW_BOOSTER, Hunter.SOUL_ARROW, Hunter.ARROW_BOMB),
+                Archer.DOUBLE_SHOT, Hunter.ARROW_BOMB,
+                Set.of(Hunter.BOW_BOOSTER, Hunter.SOUL_ARROW),
+                Set.of(Hunter.FINAL_ATTACK));
+        assertRealWzCache(Job.ASSASSIN, 35,
+                Set.of(Rogue.LUCKY_SEVEN, Assassin.CRITICAL_THROW, Assassin.CLAW_BOOSTER, Assassin.HASTE, Assassin.DRAIN),
+                Rogue.LUCKY_SEVEN, 0,
+                Set.of(Assassin.CLAW_BOOSTER, Assassin.HASTE),
+                Set.of(Assassin.CRITICAL_THROW));
+        assertRealWzCache(Job.SPEARMAN, 35,
+                Set.of(Warrior.POWER_STRIKE, Warrior.SLASH_BLAST, Spearman.FINAL_ATTACK_SPEAR,
+                        Spearman.FINAL_ATTACK_POLEARM, Spearman.SPEAR_BOOSTER, Spearman.IRON_WILL, Spearman.HYPER_BODY),
+                Warrior.POWER_STRIKE, Warrior.SLASH_BLAST,
+                Set.of(Spearman.SPEAR_BOOSTER, Spearman.IRON_WILL, Spearman.HYPER_BODY),
+                Set.of(Spearman.FINAL_ATTACK_SPEAR, Spearman.FINAL_ATTACK_POLEARM));
     }
 
     @Test
@@ -997,7 +984,6 @@ class BotCombatManagerTest {
 
     private static Skill skillWithAttack(int skillId, int attackCount, int mobCount, int damage) {
         Skill skill = new Skill(skillId);
-        skill.setAction(true);
         StatEffect effect = mock(StatEffect.class);
         when(effect.getAttackCount()).thenReturn(attackCount);
         when(effect.getMobCount()).thenReturn(mobCount);
@@ -1005,6 +991,18 @@ class BotCombatManagerTest {
         when(effect.getDuration()).thenReturn(0);
         when(effect.getMpCon()).thenReturn((short) 1);
         when(effect.canPaySkillCost(any(Character.class))).thenReturn(true);
+        skill.addLevelEffect(effect);
+        return skill;
+    }
+
+    private static Skill passiveOverTimeSkillWithCombatMetadata(int skillId, int damage, int attackCount, int mobCount) {
+        Skill skill = new Skill(skillId);
+        StatEffect effect = mock(StatEffect.class);
+        when(effect.getDamage()).thenReturn(damage);
+        when(effect.getAttackCount()).thenReturn(attackCount);
+        when(effect.getBulletCount()).thenReturn((short) 0);
+        when(effect.getMobCount()).thenReturn(mobCount);
+        when(effect.isOverTime()).thenReturn(true);
         skill.addLevelEffect(effect);
         return skill;
     }
@@ -1021,20 +1019,47 @@ class BotCombatManagerTest {
         return skill;
     }
 
-    private static AbstractDealDamageHandler.AttackInfo magicAttack(int skillId, int skillLevel, int numDamage, Monster... targets) {
-        AbstractDealDamageHandler.AttackInfo attack = new AbstractDealDamageHandler.AttackInfo();
-        attack.skill = skillId;
-        attack.skilllevel = skillLevel;
-        attack.numDamage = numDamage;
-        attack.numAttacked = targets.length;
-        attack.numAttackedAndDamage = (targets.length << 4) | numDamage;
-        attack.magic = true;
-        attack.targets = new LinkedHashMap<>();
-        for (Monster target : targets) {
-            attack.targets.put(target.getObjectId(),
-                    new AbstractDealDamageHandler.AttackTarget((short) 0, List.of(100)));
+    private static Skill skillWithBuffAction(int skillId) {
+        Skill skill = new Skill(skillId);
+        skill.setAction(true);
+        StatEffect effect = mock(StatEffect.class);
+        when(effect.isOverTime()).thenReturn(true);
+        skill.addLevelEffect(effect);
+        return skill;
+    }
+
+    private static void assertRealWzCache(Job job, int level, Set<Integer> skillIds,
+                                          int expectedAttackSkillId, int expectedAoeSkillId,
+                                          Set<Integer> expectedBuffSkillIds, Set<Integer> excludedSkillIds) {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(job);
+        when(bot.getLevel()).thenReturn(level);
+
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        for (int skillId : skillIds) {
+            Skill skill = SkillFactory.getSkill(skillId);
+            assertTrue(skill != null, "missing real WZ skill " + skillId);
+            skills.put(skill, null);
         }
-        return attack;
+        when(bot.getSkills()).thenReturn(skills);
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skillIds.contains(skill.getId()) ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertEquals(expectedAttackSkillId, entry.attackSkillId);
+        assertEquals(expectedAoeSkillId, entry.aoeSkillId);
+        for (int skillId : expectedBuffSkillIds) {
+            assertTrue(entry.buffSkillIds.contains(skillId), "expected cached buff " + skillId);
+        }
+        for (int skillId : excludedSkillIds) {
+            assertFalse(entry.buffSkillIds.contains(skillId), "unexpected cached buff " + skillId);
+            assertFalse(entry.attackSkillId == skillId || entry.aoeSkillId == skillId,
+                    "unexpected cached attack " + skillId);
+        }
     }
 
     private static Skill skillWithAnchoredAoe(int skillId, int attackCount, int mobCount, int damage) {

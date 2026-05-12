@@ -438,18 +438,17 @@ class BotCombatManager {
             if (lvl <= 0) continue;
 
             StatEffect fx = skill.getEffect(lvl);
-            if (!isActivelyCastableSkill(skill, fx)) {
-                continue;
-            }
             int atk = effectiveHitCount(fx);
             int mobs = fx.getMobCount();
 
             if (isHealSkill(skill.getId())) {
-                entry.healSkillId = skill.getId();
+                if (isActiveHealSkill(skill, fx)) {
+                    entry.healSkillId = skill.getId();
+                }
                 continue;  // not an attack skill; offensive use against undead handled in tickSupportHealing
             }
 
-            if (fx.getDamage() > 0 && !fx.isOverTime()) {  // damage > 0 identifies damaging skills
+            if (isActiveAttackSkill(skill, fx)) {
                 if (mobs >= 2) {
                     long score = (long) Math.max(0, fx.getDamage()) * Math.max(1, atk) * Math.max(1, mobs);
                     if (score > bestAoeScore) {
@@ -467,13 +466,7 @@ class BotCombatManager {
                 continue;
             }
 
-            // isOverTime() reflects the same SkillFactory whitelist that explicitly names buff skills
-            // (Magic Guard, Bless, Iron Body, etc.); more reliable than checking duration which can
-            // be -1000 when WZ has no "time" field.
-            if (!fx.isOverTime()) {
-                continue;
-            }
-
+            if (!isActiveSupportSkill(skill, fx)) continue;
             if (BUFF_BLACKLIST.contains(skill.getId())) continue;
             entry.buffSkillIds.add(skill.getId());
             entry.nextBuffAt.putIfAbsent(skill.getId(), 0L);
@@ -2190,16 +2183,30 @@ class BotCombatManager {
         return PARTY_SUPPORT_SKILL_IDS.contains(skillId);
     }
 
-    private static boolean isActivelyCastableSkill(Skill skill, StatEffect effect) {
+    private static boolean isActiveAttackSkill(Skill skill, StatEffect effect) {
         if (skill == null || effect == null) {
             return false;
         }
-        if (effect.isOverTime()) {
-            return true;
+        if (effect.isOverTime() || effect.getDamage() <= 0) {
+            return false;
         }
-        // Bot-only cache guard: passive skills can expose combat-ish WZ metadata even though
-        // the client never actively casts them. Restrict active combat selection to real action skills.
-        return skill.getAction();
+        if (skill.getSkillType() == 1 || skill.getSkillType() == 3) {
+            return false;
+        }
+        // v83 attack skills often omit a top-level action node; passive damage carriers do not
+        // carry a client-paid cost. Use WZ skillType for explicit passives and cost as the fallback.
+        return effect.getMpCon() > 0 || effect.getHpCon() > 0 || skill.isBeginnerSkill();
+    }
+
+    private static boolean isActiveSupportSkill(Skill skill, StatEffect effect) {
+        if (skill == null || effect == null || !effect.isOverTime()) {
+            return false;
+        }
+        return skill.getAction() || skill.getSkillType() == 2;
+    }
+
+    private static boolean isActiveHealSkill(Skill skill, StatEffect effect) {
+        return skill != null && effect != null && skill.getAction();
     }
 
     private static boolean isHealSkill(int skillId) {

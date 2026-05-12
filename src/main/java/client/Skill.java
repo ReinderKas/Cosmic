@@ -35,6 +35,7 @@ public class Skill {
     private Element element;
     private int animationTime;
     private final int job;
+    private int skillType = -1;
     private boolean action;
     private String action0;
     private String action1;
@@ -89,6 +90,14 @@ public class Skill {
 
     public boolean isBeginnerSkill() {
         return id % 10000000 < 10000;
+    }
+
+    public void setSkillType(int skillType) {
+        this.skillType = skillType;
+    }
+
+    public int getSkillType() {
+        return skillType;
     }
 
     public void setAction(boolean act) {
