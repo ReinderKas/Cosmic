@@ -125,7 +125,7 @@ final class BotScrollReactionManager {
             return;
         }
 
-        double chanceScale = streak >= 2 ? 1.0 : reactionChanceScale(load)
+        double chanceScale = (streak >= 2 ? 1.0 : reactionChanceScale(load))
                 * successRateChanceScale(scrollSuccessRate)
                 * streakChanceScale(streak, success, scrollSuccessRate);
         if (chanceScale <= 0.0) {
