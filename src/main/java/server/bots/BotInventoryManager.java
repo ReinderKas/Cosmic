@@ -899,6 +899,40 @@ class BotInventoryManager {
         return new PreparedTradeItems(collectItems(category, entry, bot), null);
     }
 
+    static List<Item> prioritizeEtcTradeItems(List<Item> items, Character recipient) {
+        if (items.size() <= 1) {
+            return items;
+        }
+
+        List<Item> serverSortedItems = new ArrayList<>(items);
+        serverSortedItems.sort(Comparator.comparingInt(Item::getItemId));
+        if (recipient == null) {
+            return serverSortedItems;
+        }
+
+        Inventory recipientEtc = recipient.getInventory(InventoryType.ETC);
+        if (recipientEtc == null) {
+            return serverSortedItems;
+        }
+
+        Set<Integer> recipientEtcItemIds = new HashSet<>();
+        for (Item recipientItem : recipientEtc) {
+            recipientEtcItemIds.add(recipientItem.getItemId());
+        }
+
+        List<Item> prioritized = new ArrayList<>(items.size());
+        List<Item> remainder = new ArrayList<>(items.size());
+        for (Item item : serverSortedItems) {
+            if (item.getInventoryType() == InventoryType.ETC && recipientEtcItemIds.contains(item.getItemId())) {
+                prioritized.add(item);
+            } else {
+                remainder.add(item);
+            }
+        }
+        prioritized.addAll(remainder);
+        return prioritized;
+    }
+
     private static List<Item> collectNamedItems(String fragment, Character bot) {
         List<Item> result = new ArrayList<>();
         String normalizedFragment = normalizeItemQuery(fragment);
@@ -1048,7 +1082,10 @@ class BotInventoryManager {
                 for (EquipsGroup g : EquipsGroup.values()) result.addAll(groups.itemsFor(g));
             }
             case "trash" -> result.addAll(collectTrashEquips(entry, bot));
-            case "etc"     -> collectFromBag(bot, result, InventoryType.ETC,   item -> true);
+            case "etc" -> {
+                collectFromBag(bot, result, InventoryType.ETC, item -> true);
+                result = prioritizeEtcTradeItems(result, entry.owner);
+            }
             default -> {
                 EquipsGroup eg = EquipsGroup.fromCategory(category);
                 if (eg != null) {

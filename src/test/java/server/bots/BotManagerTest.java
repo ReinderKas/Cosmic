@@ -1069,6 +1069,24 @@ class BotManagerTest {
     }
 
     @Test
+    void shouldPrioritizeEtcTradeItemsRecipientAlreadyHasBeforeItemIdOrder() {
+        Character recipient = mock(Character.class);
+        Inventory etcInventory = new Inventory(recipient, InventoryType.ETC, (byte) 24);
+
+        etcInventory.addItem(new Item(4000001, (short) 1, (short) 20));
+        when(recipient.getInventory(InventoryType.ETC)).thenReturn(etcInventory);
+
+        Item item4000002 = new Item(4000002, (short) 3, (short) 10);
+        Item item4000000 = new Item(4000000, (short) 1, (short) 10);
+        Item item4000001 = new Item(4000001, (short) 2, (short) 10);
+
+        List<Item> ordered = BotInventoryManager.prioritizeEtcTradeItems(
+                List.of(item4000002, item4000000, item4000001), recipient);
+
+        assertEquals(List.of(item4000001, item4000000, item4000002), ordered);
+    }
+
+    @Test
     void shouldMatchNaturalSupplyRequestPhrases() {
         assertTrue(BotChatManager.isNeedPotCommand("nned pot"));
         assertTrue(BotChatManager.isNeedPotCommand("need some pots"));
