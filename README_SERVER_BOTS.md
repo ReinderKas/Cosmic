@@ -179,9 +179,13 @@ Bots can hold short casual conversations with the owner using a tiny local model
 
 ### Setup
 1. Install [Ollama](https://ollama.com/download).
-2.1 (Potato / VPS / No GPU) Pull a tiny model: `ollama pull qwen3.5:0.8b` (~1 GB download + 2 GB RAM required extra). 
-2.2 (Gaming PC / Dedicated GPU) Pull something bigger, maybe 2-5B model
-3. Edit `src/main/java/server/bots/llm/BotLlmConfig.java`, set `enabled = true`. Rebuild.
+2. Download + Run a model (in PowerShell):
+
+| Requirements | Command to run | RAM Usage | Expected Intelligence |
+|---|---|---|---|
+| Decent CPU | `ollama run gemma4:e2b` | ~7 GB | Decent |
+| Beefy CPU or Has GPU | `ollama run gemma4:e4b` | ~10+ GB | The more RAM the merrier |
+3. Edit `src/main/java/server/bots/llm/BotLlmConfig.java`, set `enabled = true` and `model = xxxx` matching your selected model. Rebuild/Restart server.
 
 ### Behavior
 - LLM only fires when a message is **directly addressed** to a specific bot by name (`Jason hi`, `Leroy how are you`).
