@@ -78,20 +78,6 @@ public final class CommandTypoSuggester {
         return bestDist <= allowed ? best : null;
     }
 
-    /** Returns true if the first token matches (or is close to) a known verb. */
-    public static boolean firstTokenLooksLikeCommand(String message) {
-        if (message == null) return false;
-        String trimmed = message.trim();
-        if (trimmed.isEmpty()) return false;
-        int sp = 0;
-        while (sp < trimmed.length() && !Character.isWhitespace(trimmed.charAt(sp))) sp++;
-        String token = trimmed.substring(0, sp).toLowerCase();
-        if (token.isEmpty()) return false;
-        if (KNOWN_VERBS.contains(token)) return true;
-        if (token.length() < MIN_LEN) return false;
-        return suggest(message) != null;
-    }
-
     /** Bounded Levenshtein. Returns ceiling+1 if known to exceed bound (early exit). */
     static int levenshtein(String a, String b, int bound) {
         int n = a.length(), m = b.length();

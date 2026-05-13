@@ -601,7 +601,17 @@ public class BotChatManager {
         entry.ownerAfkPos = owner != null ? new Point(owner.getPosition()) : null;
     }
 
+    // Set true on entry; cleared to false only if we fall off the natural end of handleChat
+    // (no command pattern matched). Every match path returns early, leaving this true. Caller
+    // (BotManager) reads via wasLastChatHandled() to gate the LLM fallback.
+    private static final ThreadLocal<Boolean> LAST_CHAT_HANDLED = ThreadLocal.withInitial(() -> Boolean.FALSE);
+
+    public static boolean wasLastChatHandled() {
+        return LAST_CHAT_HANDLED.get();
+    }
+
     static void handleChat(BotEntry entry, String message) {
+        LAST_CHAT_HANDLED.set(true);
         markOwnerActive(entry);
         // Logout / relog — two-step confirmation
         if (entry.pendingAction == null && matchesWholeCommand(RELOG_PATTERN, message)) {
@@ -1041,6 +1051,7 @@ public class BotChatManager {
                 BotManager.after(BotManager.randMs(900, 1100), () -> BotStarterKitManager.advanceJob(entry.bot, entry.owner, advJob));
             }
         }
+        LAST_CHAT_HANDLED.set(false);
     }
 
     private static void promptOwnerAway(BotEntry entry) {

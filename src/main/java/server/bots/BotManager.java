@@ -942,8 +942,8 @@ public class BotManager {
                 }
             }
             BotChatManager.handleChat(targetedBot.entry(), cmd);
-            if (server.bots.llm.BotLlmConfig.enabled
-                    && !server.bots.llm.CommandTypoSuggester.firstTokenLooksLikeCommand(cmd)) {
+            // Fall through to LLM only if no command pattern matched.
+            if (server.bots.llm.BotLlmConfig.enabled && !BotChatManager.wasLastChatHandled()) {
                 server.bots.llm.BotLlmReplyManager.maybeRespond(targetedBot.entry(), owner, cmd);
             }
             return;

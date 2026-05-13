@@ -3,9 +3,7 @@ package server.bots.llm;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CommandTypoSuggesterTest {
 
@@ -35,20 +33,6 @@ class CommandTypoSuggesterTest {
     void unrelatedWordsDoNotTriggerSuggestion() {
         assertNull(CommandTypoSuggester.suggest("hello there"));
         assertNull(CommandTypoSuggester.suggest("zzzzz"));
-    }
-
-    @Test
-    void firstTokenLooksLikeCommandRecognizesVerbs() {
-        assertTrue(CommandTypoSuggester.firstTokenLooksLikeCommand("farm here"));
-        assertTrue(CommandTypoSuggester.firstTokenLooksLikeCommand("follow"));
-        assertTrue(CommandTypoSuggester.firstTokenLooksLikeCommand("farn here")); // typo close to farm
-    }
-
-    @Test
-    void firstTokenLooksLikeCommandRejectsChat() {
-        assertFalse(CommandTypoSuggester.firstTokenLooksLikeCommand("hello"));
-        assertFalse(CommandTypoSuggester.firstTokenLooksLikeCommand("how are you"));
-        assertFalse(CommandTypoSuggester.firstTokenLooksLikeCommand("what is your favorite map"));
     }
 
     @Test
