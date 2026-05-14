@@ -785,7 +785,7 @@ class BotManagerTest {
     }
 
     @Test
-    void shouldUseFarmHereAnchorAsPrimaryTargetWithoutEnteringGrindMode() {
+    void shouldUseFarmHereAnchorAsPrimaryTargetAndEnterGrindMode() {
         MapleMap map = createEmptyTestMap(910000031);
         Character owner = mockMovingBot(new Point(50, 100), map);
         Character bot = mockMovingBot(new Point(100, 100), map);
@@ -798,7 +798,7 @@ class BotManagerTest {
         assertEquals(new Point(300, 100), entry.moveTarget);
         assertTrue(entry.moveTargetPrecise);
         assertFalse(entry.following);
-        assertFalse(entry.grinding);
+        assertTrue(entry.grinding);
 
         BotManager.TargetSnapshot snapshot = BotManager.getInstance().captureTargetSnapshot(entry);
         assertEquals(new Point(300, 100), snapshot.primaryTargetPos());

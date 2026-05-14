@@ -1860,6 +1860,7 @@ public class BotManager {
         clearFarmAnchorOnMapChange(entry, bot);
         clearPatrolOnMapChange(entry, bot);
         Point targetPos = targetSnapshot.primaryTargetPos();
+        boolean perf = BotPerformanceMonitor.enabled();
         clearFollowActionMoveWindowIfSettled(entry, botPos, targetSnapshot);
 
         // These run in all modes (idle, follow, grind)
@@ -1871,15 +1872,24 @@ public class BotManager {
         // do not issue any movement input — no follow, grind, attack, teleport, or shop visit.
         // Prevents the bot from wandering away or auto-equipping while the player is mid-trade.
         if (bot.getTrade() != null) {
-            long tTrade = BotPerformanceMonitor.start();
-            try { tickTradePhysicsOnly(entry, bot); }
-            finally { BotPerformanceMonitor.recordSince("tick-trade-physics", tTrade); }
+            if (!perf) {
+                tickTradePhysicsOnly(entry, bot);
+            } else {
+                long tTrade = System.nanoTime();
+                try { tickTradePhysicsOnly(entry, bot); }
+                finally { BotPerformanceMonitor.record("tick-trade-physics", System.nanoTime() - tTrade); }
+            }
             return;
         }
 
-        long tIdle = BotPerformanceMonitor.start();
-        boolean idleConsumed = tickIdleEntry(entry, bot);
-        BotPerformanceMonitor.recordSince("tick-idle", tIdle);
+        boolean idleConsumed;
+        if (!perf) {
+            idleConsumed = tickIdleEntry(entry, bot);
+        } else {
+            long tIdle = System.nanoTime();
+            idleConsumed = tickIdleEntry(entry, bot);
+            BotPerformanceMonitor.record("tick-idle", System.nanoTime() - tIdle);
+        }
         if (idleConsumed) {
             return;
         }
@@ -1901,8 +1911,7 @@ public class BotManager {
         // On any map change (e.g. NPC-triggered portal): rebuild footholds, reset physics,
         // and snap to ground so the bot doesn't carry over airborne state from the previous map.
         if (entry.lastMapId != bot.getMapId()) {
-            long tMapChange = BotPerformanceMonitor.start();
-            try {
+            if (!perf) {
                 entry.fhIndex  = BotMovementManager.buildFhIndex(bot.getMap());
                 entry.lastMapId = bot.getMapId();
                 Point cur = bot.getPosition();
@@ -1916,8 +1925,25 @@ public class BotManager {
                 else { entry.kpq.stage5Claimed = false; } // left KPQ — reset for next run
                 BotShopManager.onMapChange(entry, bot);
                 BotChatManager.checkBotStatus(entry, bot);
-            } finally {
-                BotPerformanceMonitor.recordSince("tick-map-change", tMapChange);
+            } else {
+                long tMapChange = System.nanoTime();
+                try {
+                    entry.fhIndex  = BotMovementManager.buildFhIndex(bot.getMap());
+                    entry.lastMapId = bot.getMapId();
+                    Point cur = bot.getPosition();
+                    Point ground = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(cur.x, cur.y - 1));
+                    BotPhysicsEngine.teleportTo(entry, bot, ground != null ? ground : cur);
+                    BotMovementManager.resetEntryStateAfterTeleport(entry);
+                    BotNavigationGraphProvider.warmGraphAsync(bot.getMap(), entry.movementProfile);
+                    BotMovementManager.broadcastMovement(entry);
+                    if (BotPqHooks.requiresGrind(entry, bot)) { issueGrind(entry); }
+                    else if (BotPqHooks.requiresFollow(entry, bot)) { issueFollowOwner(entry); }
+                    else { entry.kpq.stage5Claimed = false; } // left KPQ — reset for next run
+                    BotShopManager.onMapChange(entry, bot);
+                    BotChatManager.checkBotStatus(entry, bot);
+                } finally {
+                    BotPerformanceMonitor.record("tick-map-change", System.nanoTime() - tMapChange);
+                }
             }
             return;
         }
@@ -1926,9 +1952,14 @@ public class BotManager {
         // Keep this ahead of follow/combat/grind logic so resupply movement is not
         // coupled to owner proximity.
         if (entry.shopVisitPending) {
-            long tShop = BotPerformanceMonitor.start();
-            boolean consumed = BotShopManager.tickShopVisit(entry, bot);
-            BotPerformanceMonitor.recordSince("tick-shop-visit", tShop);
+            boolean consumed;
+            if (!perf) {
+                consumed = BotShopManager.tickShopVisit(entry, bot);
+            } else {
+                long tShop = System.nanoTime();
+                consumed = BotShopManager.tickShopVisit(entry, bot);
+                BotPerformanceMonitor.record("tick-shop-visit", System.nanoTime() - tShop);
+            }
             targetPos = entry.shopTargetPos != null ? entry.shopTargetPos : entry.shopNpcPos;
             if (!consumed && entry.shopApproachDelayMs > 0) {
                 return;
@@ -1944,10 +1975,16 @@ public class BotManager {
                 && followAnchor != null
                 && bot.getMapId() == followAnchor.getMapId()
                 && Math.abs(botPos.x - followAnchor.getPosition().x) <= BotMovementManager.cfg.FOLLOW_DIST * 5) {
-            long tOpp = BotPerformanceMonitor.start();
-            LocalOpportunityAttackResult result = tryLocalOpportunityAttack(
-                    entry, bot, botPos, targetPos, targetSnapshot.followTargetPos(), true, true);
-            BotPerformanceMonitor.recordSince("opportunity-attack", tOpp);
+            LocalOpportunityAttackResult result;
+            if (!perf) {
+                result = tryLocalOpportunityAttack(
+                        entry, bot, botPos, targetPos, targetSnapshot.followTargetPos(), true, true);
+            } else {
+                long tOpp = System.nanoTime();
+                result = tryLocalOpportunityAttack(
+                        entry, bot, botPos, targetPos, targetSnapshot.followTargetPos(), true, true);
+                BotPerformanceMonitor.record("opportunity-attack", System.nanoTime() - tOpp);
+            }
             targetPos = result.targetPos();
             if (result.consumedTick()) {
                 return;
@@ -1960,31 +1997,44 @@ public class BotManager {
 
         if (runAiTick && shouldUseScriptedMoveLocalCombat(entry, targetPos)) {
             clearActionMoveWindowIfSettled(entry, botPos, targetPos);
-            long tOppS = BotPerformanceMonitor.start();
-            LocalOpportunityAttackResult result = tryLocalOpportunityAttack(
-                    entry, bot, botPos, targetPos, targetPos, true, true);
-            BotPerformanceMonitor.recordSince("opportunity-attack", tOppS);
+            LocalOpportunityAttackResult result;
+            if (!perf) {
+                result = tryLocalOpportunityAttack(
+                        entry, bot, botPos, targetPos, targetPos, true, true);
+            } else {
+                long tOppS = System.nanoTime();
+                result = tryLocalOpportunityAttack(
+                        entry, bot, botPos, targetPos, targetPos, true, true);
+                BotPerformanceMonitor.record("opportunity-attack", System.nanoTime() - tOppS);
+            }
             if (result.consumedTick()) {
                 return;
             }
             targetPos = result.targetPos();
-            long tStep = BotPerformanceMonitor.start();
-            try { stepMovementCore(entry, targetPos, runAiTick); }
-            finally { BotPerformanceMonitor.recordSince("step-movement-core", tStep); }
+            if (!perf) {
+                stepMovementCore(entry, targetPos, runAiTick);
+            } else {
+                long tStep = System.nanoTime();
+                try { stepMovementCore(entry, targetPos, runAiTick); }
+                finally { BotPerformanceMonitor.record("step-movement-core", System.nanoTime() - tStep); }
+            }
             return;
         }
 
         if (entry.farmAnchor != null) {
-            long tFarm = BotPerformanceMonitor.start();
-            try { tickAnchoredFarm(entry, bot, botPos, runAiTick); }
-            finally { BotPerformanceMonitor.recordSince("tick-anchored-farm", tFarm); }
+            if (!perf) {
+                tickAnchoredFarm(entry, bot, botPos, runAiTick);
+            } else {
+                long tFarm = System.nanoTime();
+                try { tickAnchoredFarm(entry, bot, botPos, runAiTick); }
+                finally { BotPerformanceMonitor.record("tick-anchored-farm", System.nanoTime() - tFarm); }
+            }
             return;
         }
 
         // Grind mode: navigate toward nearest monster, attack when in range
         if (entry.grinding) {
-            long tGrindDispatch = BotPerformanceMonitor.start();
-            try {
+            if (!perf) {
             double seekRangeSq = (double) BotCombatManager.cfg.GRIND_SEEK_RANGE * BotCombatManager.cfg.GRIND_SEEK_RANGE;
             Monster target = entry.grindTarget;
             if (target == null || !target.isAlive()
@@ -2144,14 +2194,150 @@ public class BotManager {
                 Point lootPos = convenientLootTarget(entry, botPos, tp);
                 if (lootPos != null) targetPos = lootPos;
             }
-            } finally {
-                BotPerformanceMonitor.recordSince("tick-grind-dispatch", tGrindDispatch);
+            } else {
+                long tGrindDispatch = System.nanoTime();
+                try {
+                double seekRangeSq = (double) BotCombatManager.cfg.GRIND_SEEK_RANGE * BotCombatManager.cfg.GRIND_SEEK_RANGE;
+                Monster target = entry.grindTarget;
+                if (target == null || !target.isAlive()
+                        || target.getMap() != bot.getMap()
+                        || target.getPosition().distanceSq(botPos) > seekRangeSq) {
+                    target = null;
+                }
+                long now = System.currentTimeMillis();
+                BotCombatManager.AttackPlan attackPlan = target == null
+                        ? null
+                        : BotCombatManager.planAttack(entry, bot, target);
+                if (entry.grindLootTarget != null) {
+                    MapItem loot = entry.grindLootTarget;
+                    if (loot.isPickedUp() || bot.getMap().getMapObject(loot.getObjectId()) != loot) {
+                        entry.grindLootTarget = null;
+                    }
+                }
+                if (runAiTick && shouldSearchForGrindTarget(entry, bot, target, attackPlan, now)) {
+                    Monster searchedTarget = entry.patrolRegionId >= 0
+                            ? BotCombatManager.findPatrolTarget(entry, bot)
+                            : BotCombatManager.findGrindTarget(entry, bot);
+                    if (searchedTarget != null || target == null) {
+                        target = searchedTarget;
+                        attackPlan = null;
+                    }
+                    entry.nextGrindTargetSearchAtMs = now + BotCombatManager.cfg.GRIND_RETARGET_INTERVAL_MS;
+                }
+                if (runAiTick && entry.patrolRegionId < 0) {
+                    entry.grindLootTarget = BotInventoryManager.findNearestGrindLootTarget(entry, bot);
+                }
+                if (target == null) {
+                    entry.grindTarget = null;
+                    if (isSwimMap(entry) && entry.inAir) {
+                        BotMovementManager.tickSwimming(entry, targetPos);
+                        return;
+                    } else if (entry.inAir) {
+                        BotMovementManager.tickAirborne(entry, targetPos);
+                        return;
+                    } else {
+                        if (entry.wanderDirection == 0) {
+                            entry.wanderDirection = java.util.concurrent.ThreadLocalRandom.current().nextBoolean() ? 1 : -1;
+                        }
+                        targetPos = new Point(botPos.x + entry.wanderDirection * 200, botPos.y);
+                    }
+                }
+                if (target == null) {
+                    targetPos = entry.patrolRegionId >= 0
+                            ? resolvePatrolWanderTarget(entry, botPos, bot.getMap())
+                            : resolveNoGrindTargetPosition(entry, botPos);
+                    stepMovementCore(entry, targetPos, runAiTick);
+                    return;
+                }
+                entry.grindTarget = target;
+                entry.wanderDirection = 0;
+                entry.patrolWanderTarget = null;
+                Point tp = target.getPosition();
+                Monster rangedPriorityTarget = selectPriorityRangedAttackTarget(entry, bot, botPos, target);
+                if (rangedPriorityTarget != null && rangedPriorityTarget != target) {
+                    target = rangedPriorityTarget;
+                    entry.grindTarget = rangedPriorityTarget;
+                    tp = target.getPosition();
+                    attackPlan = null;
+                }
+                server.life.Monster closerThreat = rangedPriorityTarget == null
+                        ? BotAttackExecutionProvider.findCloserThreatMob(bot, botPos, tp)
+                        : null;
+                if (closerThreat != null && closerThreat != target) {
+                    target = closerThreat;
+                    entry.grindTarget = closerThreat;
+                    tp = target.getPosition();
+                    attackPlan = null;
+                }
+                if (attackPlan == null) {
+                    attackPlan = BotCombatManager.planAttack(entry, bot, target);
+                }
+                WeaponType grindWeaponType = BotAttackExecutionProvider.getEquippedWeaponType(bot);
+                boolean targetInDegenerateBand = BotAttackExecutionProvider.shouldDegenerateRangedAttack(grindWeaponType, botPos, tp);
+                boolean allowOneDegenerateAttack = targetInDegenerateBand && !entry.degenAttackDone && rangedPriorityTarget == null;
+                boolean shouldRetreatForRangedSpacing = entry.degenAttackDone
+                        || (BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(grindWeaponType, botPos, tp)
+                        && !allowOneDegenerateAttack);
+                boolean canFireWithoutDegen = grindWeaponType == null
+                        || !BotAttackExecutionProvider.shouldDegenerateRangedAttack(grindWeaponType, botPos, tp);
+                boolean attackGateOpen = !shouldRetreatForRangedSpacing || canFireWithoutDegen || allowOneDegenerateAttack;
+                Point crossRegionRetreatPos = shouldRetreatForRangedSpacing
+                        ? selectCrossRegionRetreatTarget(entry, botPos, tp)
+                        : null;
+
+                boolean attackAttemptedInRange = false;
+                if (!entry.climbing) {
+                    if (attackGateOpen && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)
+                            && BotCombatManager.canUseAttackPlanNow(entry, grindWeaponType, attackPlan)) {
+                        attackAttemptedInRange = true;
+                        int prevCooldown = entry.attackCooldownMs;
+                        BotCombatManager.attackMonster(entry, bot, attackPlan);
+                        boolean attacked = entry.attackCooldownMs != prevCooldown;
+                        if (attacked && attackPlan.isCloseRangeRoute()
+                                && BotCombatManager.isRangedAmmoWeapon(grindWeaponType)) {
+                            entry.degenAttackDone = true;
+                        }
+                        if (attacked && !entry.inAir && crossRegionRetreatPos == null) return;
+                    } else if (!entry.inAir
+                            && BotCombatManager.isTargetJumpable(entry.movementProfile, attackPlan.isCloseRangeRoute(), botPos, tp)
+                            && grindWeaponType != WeaponType.BOW && grindWeaponType != WeaponType.CROSSBOW
+                            && grindWeaponType != WeaponType.WAND && grindWeaponType != WeaponType.STAFF) {
+                        BotMovementManager.initiateJump(entry, bot, tp.x - botPos.x);
+                        return;
+                    }
+                }
+                if (target != null && !entry.inAir && !entry.climbing
+                        && !shouldRetreatForRangedSpacing && crossRegionRetreatPos == null
+                        && !attackAttemptedInRange
+                        && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)) {
+                    BotPhysicsEngine.idleOnGround(entry, bot);
+                    BotMovementManager.broadcastMovement(entry);
+                    return;
+                }
+                targetPos = crossRegionRetreatPos != null
+                        ? crossRegionRetreatPos
+                        : selectGrindNavigationTarget(entry, botPos, tp, shouldRetreatForRangedSpacing);
+                if (entry.degenAttackDone
+                        && !BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(grindWeaponType, botPos, tp)) {
+                    entry.degenAttackDone = false;
+                }
+                if (crossRegionRetreatPos == null && !shouldRetreatForRangedSpacing && entry.patrolRegionId < 0) {
+                    Point lootPos = convenientLootTarget(entry, botPos, tp);
+                    if (lootPos != null) targetPos = lootPos;
+                }
+                } finally {
+                    BotPerformanceMonitor.record("tick-grind-dispatch", System.nanoTime() - tGrindDispatch);
+                }
             }
         }
 
-        long tStepTail = BotPerformanceMonitor.start();
-        try { stepMovementCore(entry, targetPos, runAiTick); }
-        finally { BotPerformanceMonitor.recordSince("step-movement-core", tStepTail); }
+        if (!perf) {
+            stepMovementCore(entry, targetPos, runAiTick);
+        } else {
+            long tStepTail = System.nanoTime();
+            try { stepMovementCore(entry, targetPos, runAiTick); }
+            finally { BotPerformanceMonitor.record("step-movement-core", System.nanoTime() - tStepTail); }
+        }
     }
 
     private void handleBotTickFailure(BotEntry entry, int ownerCharId, int botCharId, Throwable t) {
@@ -3091,76 +3277,109 @@ public class BotManager {
     }
 
     private boolean runCommonTickSystems(BotEntry entry, Character bot, Character owner, boolean runAiTick) {
+        if (!BotPerformanceMonitor.enabled()) {
+            BotCombatManager.tickMobDamage(entry, bot);
+            if (bot.getHp() <= 0) {
+                if (entry.deadUntil == 0) {
+                    BotCombatManager.enterDeadState(entry, bot, false);
+                }
+                return true;
+            }
+            tickReleaseMonsterControl(bot);
+            if (bot.getTrade() == null) {
+                BotInventoryManager.tickPassiveLoot(entry, bot);
+            }
+            BotPotionManager.tickPotionCheck(entry, bot);
+            BotPotionManager.tickPassiveRecovery(entry, bot);
+            BotBuildManager.checkLevelUp(entry, bot);
+            BotChatManager.tickAfkCheck(entry, owner);
+            BotInventoryManager.tickTrade(entry, bot);
+            BotInventoryManager.tickManualTrade(entry, bot);
+            BotPqHooks.tick(entry, bot, owner);
+            tickScriptTasks(entry);
+            if (BotPqHooks.isNpcLocked(entry)) {
+                return true;
+            }
+            BotCombatManager.tickActionLock(entry);
+            if (runAiTick) {
+                BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+                BotCombatManager.tickSupportHealing(entry, bot);
+                BotCombatManager.tickBuffs(entry, bot);
+                BotBuffManager.tick(entry, bot);
+            }
+            return tickActionLocked(entry);
+        }
+
         long t;
-        t = BotPerformanceMonitor.start();
+        t = System.nanoTime();
         BotCombatManager.tickMobDamage(entry, bot);
-        BotPerformanceMonitor.recordSince("common-mob-damage", t);
+        BotPerformanceMonitor.record("common-mob-damage", System.nanoTime() - t);
         if (bot.getHp() <= 0) {
             if (entry.deadUntil == 0) {
                 BotCombatManager.enterDeadState(entry, bot, false);
             }
             return true;
         }
-        t = BotPerformanceMonitor.start();
+        t = System.nanoTime();
         tickReleaseMonsterControl(bot);
-        BotPerformanceMonitor.recordSince("common-release-mob", t);
+        BotPerformanceMonitor.record("common-release-mob", System.nanoTime() - t);
         // While a trade window is open, suppress passive loot pickup. pickupItem() runs on
         // this scheduler thread and races Trade.completeTrade()'s addFromDrop on the packet
         // thread: fitsInInventory() can pass, then this fills the last slot before addFromDrop
         // runs, and the silently-ignored false return loses the partner's item.
         // See memory/kb_bot_trade_dupe_loss_audit.md.
         if (bot.getTrade() == null) {
-            t = BotPerformanceMonitor.start();
+            t = System.nanoTime();
             BotInventoryManager.tickPassiveLoot(entry, bot);
-            BotPerformanceMonitor.recordSince("common-passive-loot", t);
+            BotPerformanceMonitor.record("common-passive-loot", System.nanoTime() - t);
         }
-        t = BotPerformanceMonitor.start();
+        t = System.nanoTime();
         BotPotionManager.tickPotionCheck(entry, bot);
-        BotPerformanceMonitor.recordSince("common-potion-check", t);
-        t = BotPerformanceMonitor.start();
+        BotPerformanceMonitor.record("common-potion-check", System.nanoTime() - t);
+        t = System.nanoTime();
         BotPotionManager.tickPassiveRecovery(entry, bot);
-        BotPerformanceMonitor.recordSince("common-passive-recovery", t);
-        t = BotPerformanceMonitor.start();
+        BotPerformanceMonitor.record("common-passive-recovery", System.nanoTime() - t);
+        t = System.nanoTime();
         BotBuildManager.checkLevelUp(entry, bot);
-        BotPerformanceMonitor.recordSince("common-build-levelup", t);
-        t = BotPerformanceMonitor.start();
+        BotPerformanceMonitor.record("common-build-levelup", System.nanoTime() - t);
+        t = System.nanoTime();
         BotChatManager.tickAfkCheck(entry, owner);
-        BotPerformanceMonitor.recordSince("common-afk-check", t);
-        t = BotPerformanceMonitor.start();
+        BotPerformanceMonitor.record("common-afk-check", System.nanoTime() - t);
+        t = System.nanoTime();
         BotInventoryManager.tickTrade(entry, bot);
-        BotPerformanceMonitor.recordSince("common-trade", t);
-        t = BotPerformanceMonitor.start();
+        BotPerformanceMonitor.record("common-trade", System.nanoTime() - t);
+        t = System.nanoTime();
         BotInventoryManager.tickManualTrade(entry, bot);
-        BotPerformanceMonitor.recordSince("common-manual-trade", t);
-        t = BotPerformanceMonitor.start();
+        BotPerformanceMonitor.record("common-manual-trade", System.nanoTime() - t);
+        t = System.nanoTime();
         BotPqHooks.tick(entry, bot, owner);
-        BotPerformanceMonitor.recordSince("common-pq-hooks", t);
-        t = BotPerformanceMonitor.start();
+        BotPerformanceMonitor.record("common-pq-hooks", System.nanoTime() - t);
+        t = System.nanoTime();
         tickScriptTasks(entry);
-        BotPerformanceMonitor.recordSince("common-script-tasks", t);
+        BotPerformanceMonitor.record("common-script-tasks", System.nanoTime() - t);
         if (BotPqHooks.isNpcLocked(entry)) {
             return true;
         }
-        t = BotPerformanceMonitor.start();
+        t = System.nanoTime();
         BotCombatManager.tickActionLock(entry);
-        BotPerformanceMonitor.recordSince("common-action-lock", t);
+        BotPerformanceMonitor.record("common-action-lock", System.nanoTime() - t);
         if (runAiTick) {
-            t = BotPerformanceMonitor.start();
+            t = System.nanoTime();
             BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
-            BotPerformanceMonitor.recordSince("common-skill-cache", t);
+            BotPerformanceMonitor.record("common-skill-cache", System.nanoTime() - t);
             // Support healing is top priority — runs before buffs so that a bot below the heal
             // threshold casts Heal before a rebuff uses up this tick's action window. If it fires,
             // entry.attackCooldownMs is set to the heal animation lock and tickActionLocked() will
             // return true, causing the caller to skip attack logic this tick.
-            t = BotPerformanceMonitor.start();
+            t = System.nanoTime();
             BotCombatManager.tickSupportHealing(entry, bot);
-            BotPerformanceMonitor.recordSince("common-support-heal", t);
-            t = BotPerformanceMonitor.start();
+            BotPerformanceMonitor.record("common-support-heal", System.nanoTime() - t);
+            t = System.nanoTime();
             BotCombatManager.tickBuffs(entry, bot);
-            BotPerformanceMonitor.recordSince("common-combat-buffs", t);
-            t = BotPerformanceMonitor.start();
+            BotPerformanceMonitor.record("common-combat-buffs", System.nanoTime() - t);
+            t = System.nanoTime();
             BotBuffManager.tick(entry, bot);
-            BotPerformanceMonitor.recordSince("common-buff-pots", t);
+            BotPerformanceMonitor.record("common-buff-pots", System.nanoTime() - t);
         }
         return tickActionLocked(entry);
     }
@@ -3507,7 +3726,44 @@ public class BotManager {
     }
 
     private static void tickStuckDetection(BotEntry entry) {
-        long startedAt = BotPerformanceMonitor.start();
+        if (!BotPerformanceMonitor.enabled()) {
+            entry.unstuckCooldownMs = BotMovementManager.tickDown(entry.unstuckCooldownMs);
+
+            // Only detect/act while actively navigating — idling near owner is not stuck.
+            if (entry.inAir || entry.climbing
+                    || entry.graphWarmupFallback
+                    || (entry.navEdge == null && entry.moveTarget == null)) {
+                entry.stuckMs = 0;
+                entry.stuckCheckX = Integer.MIN_VALUE;
+                return;
+            }
+
+            Point botPos = entry.bot.getPosition();
+            if (entry.stuckCheckX == Integer.MIN_VALUE) {
+                entry.stuckCheckX = botPos.x;
+                entry.stuckCheckY = botPos.y;
+                return;
+            }
+
+            boolean moved = Math.abs(botPos.x - entry.stuckCheckX) > 8
+                    || Math.abs(botPos.y - entry.stuckCheckY) > 8;
+            if (moved) {
+                entry.stuckMs = 0;
+                entry.stuckCheckX = botPos.x;
+                entry.stuckCheckY = botPos.y;
+            } else {
+                entry.stuckMs += BotPhysicsEngine.cfg.TICK_MS;
+            }
+
+            if (cfg.ENABLE_UNSTUCK && entry.stuckMs >= 500 && entry.unstuckCooldownMs == 0) {
+                entry.stuckMs = 0;
+                entry.stuckCheckX = Integer.MIN_VALUE;
+                BotMovementManager.tickUnstuck(entry);
+            }
+            return;
+        }
+
+        long startedAt = System.nanoTime();
         try {
             entry.unstuckCooldownMs = BotMovementManager.tickDown(entry.unstuckCooldownMs);
 
@@ -3543,7 +3799,7 @@ public class BotManager {
                 BotMovementManager.tickUnstuck(entry);
             }
         } finally {
-            BotPerformanceMonitor.recordSince("stuck-detect", startedAt);
+            BotPerformanceMonitor.record("stuck-detect", System.nanoTime() - startedAt);
         }
     }
 

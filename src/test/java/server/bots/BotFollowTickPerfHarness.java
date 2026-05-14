@@ -77,15 +77,21 @@ public class BotFollowTickPerfHarness {
     }
 
     private static void runScenario(Scenario scenario, int warmupTicks, int measureTicks, int workers) {
-        // Warmup
-        scenario.runTicks(warmupTicks, workers);
-        BotPerformanceMonitor.reset();
+        boolean previousPerfState = BotPerformanceMonitor.enabled();
+        BotPerformanceMonitor.setEnabled(true);
+        try {
+            // Warmup
+            scenario.runTicks(warmupTicks, workers);
+            BotPerformanceMonitor.reset();
 
-        long wallStartNs = System.nanoTime();
-        scenario.runTicks(measureTicks, workers);
-        long wallElapsedNs = System.nanoTime() - wallStartNs;
+            long wallStartNs = System.nanoTime();
+            scenario.runTicks(measureTicks, workers);
+            long wallElapsedNs = System.nanoTime() - wallStartNs;
 
-        printReport(scenario, measureTicks, workers, wallElapsedNs);
+            printReport(scenario, measureTicks, workers, wallElapsedNs);
+        } finally {
+            BotPerformanceMonitor.setEnabled(previousPerfState);
+        }
     }
 
     // -----------------------------------------------------------------------

@@ -10,9 +10,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-final class BotPerformanceMonitor {
+public final class BotPerformanceMonitor {
     static final class Config {
-        public boolean ENABLED = true;
+        public boolean ENABLED = false;
         public int LOG_INTERVAL_MS = 15000;
         public double SLOW_SAMPLE_MS = 50.0;
         public double REPORT_MAX_MS = 250.0;
@@ -48,6 +48,7 @@ final class BotPerformanceMonitor {
     private static final Object LOCK = new Object();
     private static final int MAX_LOGGED_SECTIONS = 12;
     static Config cfg = new Config();
+    private static volatile boolean enabled = cfg.ENABLED;
 
     private static long lastLogAtMs = System.currentTimeMillis();
     private static long nextLogAtMs = lastLogAtMs + cfg.LOG_INTERVAL_MS;
@@ -102,13 +103,25 @@ final class BotPerformanceMonitor {
     private BotPerformanceMonitor() {
     }
 
-    static boolean enabled() {
-        return cfg.ENABLED;
+    public static boolean enabled() {
+        return enabled;
+    }
+
+    public static void setEnabled(boolean enabledValue) {
+        cfg.ENABLED = enabledValue;
+        enabled = enabledValue;
+        reset();
+    }
+
+    public static boolean toggleEnabled() {
+        boolean next = !enabled;
+        setEnabled(next);
+        return next;
     }
 
     /** Returns a start timestamp suitable for {@link #recordSince}, or 0 if monitoring is disabled. */
     static long start() {
-        return cfg.ENABLED ? System.nanoTime() : 0L;
+        return enabled ? System.nanoTime() : 0L;
     }
 
     /** Records elapsed time since the matching {@link #start} call. No-op when start returned 0. */
@@ -119,7 +132,7 @@ final class BotPerformanceMonitor {
     }
 
     static void record(String section, long elapsedNs) {
-        if (!cfg.ENABLED || elapsedNs < 0) {
+        if (!enabled || elapsedNs < 0) {
             return;
         }
 

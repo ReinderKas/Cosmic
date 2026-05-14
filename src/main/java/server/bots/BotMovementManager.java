@@ -874,7 +874,35 @@ class BotMovementManager {
     }
 
     static void broadcastMovement(BotEntry entry) {
-        long startedAt = BotPerformanceMonitor.start();
+        if (!BotPerformanceMonitor.enabled()) {
+            Character bot = entry.bot;
+            int x = bot.getPosition().x;
+            int y = bot.getPosition().y;
+            BotPhysicsEngine.MovementSnapshot snapshot = BotPhysicsEngine.movementSnapshot(entry);
+            int fhId = resolveBroadcastFhId(entry, bot);
+
+            if (entry.movementBroadcastValid
+                    && entry.lastBroadcastX == x
+                    && entry.lastBroadcastY == y
+                    && entry.lastBroadcastVelX == snapshot.velX()
+                    && entry.lastBroadcastVelY == snapshot.velY()
+                    && entry.lastBroadcastStance == snapshot.stance()
+                    && entry.lastBroadcastFh == fhId) {
+                return;
+            }
+
+            entry.movementBroadcastValid = true;
+            entry.lastBroadcastX = x;
+            entry.lastBroadcastY = y;
+            entry.lastBroadcastVelX = snapshot.velX();
+            entry.lastBroadcastVelY = snapshot.velY();
+            entry.lastBroadcastStance = snapshot.stance();
+            entry.lastBroadcastFh = fhId;
+            sendMovementPacket(bot, snapshot, fhId);
+            return;
+        }
+
+        long startedAt = System.nanoTime();
         try {
             Character bot = entry.bot;
             int x = bot.getPosition().x;
@@ -901,7 +929,7 @@ class BotMovementManager {
             entry.lastBroadcastFh = fhId;
             sendMovementPacket(bot, snapshot, fhId);
         } finally {
-            BotPerformanceMonitor.recordSince("broadcast-move", startedAt);
+            BotPerformanceMonitor.record("broadcast-move", System.nanoTime() - startedAt);
         }
     }
 
