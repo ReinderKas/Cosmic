@@ -4,6 +4,7 @@ import server.maps.Foothold;
 import server.maps.MapleMap;
 
 import java.awt.*;
+import java.io.Serial;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -13,6 +14,12 @@ import java.util.Map;
 import java.util.Set;
 
 final class BotNavigationGraph implements Serializable {
+    // Cached nav graphs are serialized to disk. Keep explicit serialVersionUIDs so
+    // harmless method-only edits do not break cache loading; use GRAPH_VERSION for
+    // intentional cache invalidation when the serialized data shape changes.
+    @Serial
+    private static final long serialVersionUID = 1L;
+
     enum EdgeType {
         WALK,
         JUMP,
@@ -22,6 +29,10 @@ final class BotNavigationGraph implements Serializable {
     }
 
     static final class Segment implements Serializable {
+        // Part of the on-disk BotNavigationGraph cache schema; do not remove.
+        @Serial
+        private static final long serialVersionUID = 1L;
+
         final int footholdId;
         final int x1;
         final int y1;
@@ -75,6 +86,10 @@ final class BotNavigationGraph implements Serializable {
     }
 
     static final class Region implements Serializable {
+        // Part of the on-disk BotNavigationGraph cache schema; do not remove.
+        @Serial
+        private static final long serialVersionUID = 1L;
+
         final int id;
         final List<Segment> segments;
         final int minX;
@@ -183,6 +198,10 @@ final class BotNavigationGraph implements Serializable {
     }
 
     static final class Edge implements Serializable {
+        // Part of the on-disk BotNavigationGraph cache schema; do not remove.
+        @Serial
+        private static final long serialVersionUID = 1L;
+
         final int fromRegionId;
         final int toRegionId;
         final EdgeType type;

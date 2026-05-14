@@ -4,9 +4,15 @@ import client.Character;
 import server.maps.FieldLimit;
 import server.maps.MapleMap;
 
+import java.io.Serial;
 import java.io.Serializable;
 
 record BotMovementProfile(int totalSpeedStat, int totalJumpStat) implements Serializable {
+    // Serialized inside cached BotNavigationGraph instances; keep explicit so
+    // cache compatibility is controlled by GRAPH_VERSION instead of compiler-generated UIDs.
+    @Serial
+    private static final long serialVersionUID = 1L;
+
     static final int BASE_TOTAL_STAT = 100;
     static final int STAT_BUCKET_SIZE = 5;
     static final int MAX_EFFECTIVE_SPEED_STAT = 200;
