@@ -493,8 +493,10 @@ class BotEquipManager {
             List<Equip> pool = bySlot.computeIfAbsent(key, k -> new ArrayList<>());
             if (!pool.contains(e)) pool.add(e);
         }
+        Job botJob = bot.getJob();
+        boolean[] reqRel = scanReqRelevantDims(bySlot, ii);
         for (Map.Entry<Short, List<Equip>> e : bySlot.entrySet()) {
-            e.setValue(pruneDominatedWithReqs(ii, e.getValue()));
+            e.setValue(pruneDominatedWithReqs(ii, e.getValue(), botJob, reqRel));
         }
         return bySlot;
     }
@@ -549,8 +551,10 @@ class BotEquipManager {
             if (!pool.contains(ex)) pool.add(ex);
         }
         // Re-prune so newly-added extras can knock out dominated incumbents (and vice versa).
+        Job receiverJob = bot.getJob();
+        boolean[] reqRel = scanReqRelevantDims(bySlot, ii);
         for (Map.Entry<Short, List<Equip>> e : bySlot.entrySet()) {
-            e.setValue(pruneDominatedWithReqs(ii, e.getValue()));
+            e.setValue(pruneDominatedWithReqs(ii, e.getValue(), receiverJob, reqRel));
         }
 
         Map<Short, Equip> currentBySlot = new HashMap<>();
@@ -787,22 +791,29 @@ class BotEquipManager {
     private static List<DpNode> paretoPruneNodes(List<DpNode> nodes, boolean[] capHitOut,
                                                    OptimizerHooks hooks, List<Short> dpSlots) {
         if (nodes.size() <= 1) return nodes;
-        List<int[]> vecs = new ArrayList<>(nodes.size());
-        for (DpNode n : nodes) vecs.add(nodeVec(n));
+        final int N = nodes.size();
+        // Cache vec + per-node feasibility once. allPicksMeetReqs depends only on b, not a,
+        // but was previously recomputed for every (i,j) dominance check — O(N^2 * slots * WZ)
+        // for what's actually O(N * slots * WZ) of work.
+        int[][] vecs = new int[N][];
+        boolean[] picksOk = new boolean[N];
+        for (int k = 0; k < N; k++) {
+            DpNode n = nodes.get(k);
+            vecs[k] = nodeVec(n);
+            picksOk[k] = allPicksMeetReqs(n, hooks, dpSlots);
+        }
         List<DpNode> kept = new ArrayList<>();
-        for (int i = 0; i < nodes.size(); i++) {
-            int[] a = vecs.get(i);
+        for (int i = 0; i < N; i++) {
+            int[] a = vecs[i];
             boolean dominated = false;
-            for (int j = 0; j < nodes.size(); j++) {
+            for (int j = 0; j < N; j++) {
                 if (i == j) continue;
-                DpNode b = nodes.get(j);
                 // Only allow b to prune a if b's picks already meet their stat requirements
                 // against b's partial snapshot. A speculative node whose items are stat-gated
                 // (e.g. dex70 glove when dex=50) must not eliminate the fallback that would
                 // otherwise be chosen after relaxToFeasible drops the infeasible pick.
-                if (vecDominates(vecs.get(j), a) && allPicksMeetReqs(b, hooks, dpSlots)) {
-                    dominated = true; break;
-                }
+                if (!picksOk[j]) continue;
+                if (vecDominates(vecs[j], a)) { dominated = true; break; }
             }
             if (!dominated) kept.add(nodes.get(i));
         }
@@ -822,9 +833,17 @@ class BotEquipManager {
     }
 
     private static int[] nodeVec(DpNode n) {
+        // Dims capture both lex levels of EquipScore = (damage, statSum). Damage formula
+        // reads str/dex/int/luk + watk/magic + acc-via-hitchance, so those preserve lex-1
+        // under vec dominance. statSum is the lex-2 tiebreaker — including it tightens
+        // dominance: when two nodes tie on damage-input stats, the higher-statSum one
+        // dominates and the other is pruned, instead of both surviving the frontier.
+        // hp/mp dropped — already folded into statSum at ×0.1 weight, and irrelevant to
+        // the damage formula. Defense is no longer a score dim (wdef/mdef are inert in
+        // this game) so we don't need to keep it incomparable in the vec.
         StatSnapshot s = n.snap;
-        return new int[]{s.str(), s.dex(), s.int_(), s.luk(), s.watk(), s.magic(),
-                          s.totalAcc(), n.hp, n.mp, n.statSum};
+        return new int[]{s.str(), s.dex(), s.int_(), s.luk(),
+                          s.watk(), s.magic(), s.totalAcc(), n.statSum};
     }
 
     private static boolean vecDominates(int[] b, int[] a) {
@@ -2051,19 +2070,163 @@ class BotEquipManager {
      * Prune for lookahead pools where reqs differ across items. {@code b} dominates {@code a}
      * only if b's stats ≥ a's AND b's reqs ≤ a's — otherwise a weaker but easier-to-wear
      * item is meaningful and must be retained.
+     *
+     * <p>Job-aware variant: dim selection focuses on the bot's job-primary stat + watk/magic
+     * + job-conditional eff_acc + req-relevant str/dex/int/luk dims. Stats that don't matter
+     * to the bot's damage formula and don't gate any candidate's reqs collapse into a
+     * combat-effectiveness tiebreaker score. Much tighter than the legacy 14-dim raw vec —
+     * shrinks per-slot pools so the DP step downstream sees fewer candidates.
      */
-    private static List<Equip> pruneDominatedWithReqs(ItemInformationProvider ii, List<Equip> items) {
+    private static List<Equip> pruneDominatedWithReqs(ItemInformationProvider ii, List<Equip> items,
+                                                       Job job, boolean[] reqRel) {
         if (items == null || items.size() <= 1) return items;
-        List<Equip> kept = new ArrayList<>(items.size());
-        for (Equip a : items) {
+        int[] priority = jobStatPriority(job);
+        boolean isMage = isMageJob(job);
+        boolean accRel = isAccRelevantJob(job);
+        // Precompute vec + tiebreak per item; the dominance scan is O(N^2) but the per-item
+        // computation is O(N).
+        final int n = items.size();
+        int[][] vecs = new int[n][];
+        int[] tiebreak = new int[n];
+        for (int i = 0; i < n; i++) {
+            vecs[i] = dedupStatVec(items.get(i), priority, reqRel, isMage, accRel);
+            tiebreak[i] = dedupTiebreak(items.get(i), priority);
+        }
+        List<Equip> kept = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            Equip a = items.get(i);
             boolean dominated = false;
-            for (Equip b : items) {
-                if (a == b) continue;
-                if (dominates(b, a) && reqsAtLeastAsEasy(ii, b, a)) { dominated = true; break; }
+            for (int j = 0; j < n; j++) {
+                if (i == j) continue;
+                Equip b = items.get(j);
+                if (!dedupDominatesPre(vecs[j], vecs[i], tiebreak[j], tiebreak[i])) continue;
+                if (!reqsAtLeastAsEasy(ii, b, a)) continue;
+                dominated = true; break;
             }
             if (!dominated) kept.add(a);
         }
         return kept.isEmpty() ? items : kept;
+    }
+
+    /**
+     * Per-job stat priority for the dedup vec / tiebreaker. Index 0 is the primary damage
+     * stat; remaining indices are secondaries (added at 0.25 weight into eff_primary).
+     * Stat indices: 0=str, 1=dex, 2=int, 3=luk.
+     */
+    private static int[] jobStatPriority(Job job) {
+        if (job == null) return new int[]{0, 1};
+        if (isMageJob(job)) return new int[]{2};
+        int id = job.getId();
+        int niche = (id / 100) % 10;
+        return switch (niche) {
+            case 1 -> new int[]{0, 1};       // warrior (str primary, dex secondary)
+            case 3 -> new int[]{1, 0};       // bowman (dex primary, str secondary)
+            case 4 -> new int[]{3, 1, 0};    // thief (luk primary, dex+str secondary)
+            case 5 -> (id / 10 == 51 || id / 10 == 151)
+                    ? new int[]{0, 1}        // brawler line: str primary
+                    : new int[]{1, 0};       // gunslinger line: dex primary
+            default -> new int[]{0, 1};
+        };
+    }
+
+    /** Acc-contribution stats only earn a vec dim for jobs that actually need acc to hit. */
+    private static boolean isAccRelevantJob(Job job) {
+        if (job == null) return false;
+        int id = job.getId();
+        int niche = (id / 100) % 10;
+        if (niche == 1) return true;             // warrior
+        if (niche == 5) {
+            int sub = id / 10;
+            return sub == 51 || sub == 151;      // brawler / thunderbreaker
+        }
+        return false;
+    }
+
+    /**
+     * Scans every candidate pool to detect which stat reqs (str/dex/int/luk) appear on any
+     * item. Returned mask drives whether that stat survives as a raw dim in {@code dedupStatVec}
+     * — preserves req-unlocking potential while still allowing aggressive dedup on
+     * never-req-gated stats.
+     */
+    private static boolean[] scanReqRelevantDims(Map<Short, List<Equip>> bySlot,
+                                                  ItemInformationProvider ii) {
+        boolean[] mask = new boolean[4];
+        for (List<Equip> pool : bySlot.values()) {
+            if (pool == null) continue;
+            for (Equip e : pool) {
+                Map<String, Integer> s = ii.getEquipStats(e.getItemId());
+                if (s == null) continue;
+                if (s.getOrDefault("reqSTR", 0) > 0) mask[0] = true;
+                if (s.getOrDefault("reqDEX", 0) > 0) mask[1] = true;
+                if (s.getOrDefault("reqINT", 0) > 0) mask[2] = true;
+                if (s.getOrDefault("reqLUK", 0) > 0) mask[3] = true;
+                if (mask[0] && mask[1] && mask[2] && mask[3]) return mask;
+            }
+        }
+        return mask;
+    }
+
+    /**
+     * Dims (in this order): job-primary stat (always); watk for non-mage / magic for mage;
+     * eff_acc = acc + dex + luk*0.5 (warrior/brawler only); each of str/dex/int/luk where
+     * reqRel[stat] is true (and not already emitted as primary).
+     */
+    private static int[] dedupStatVec(Equip e, int[] priority, boolean[] reqRel,
+                                       boolean isMage, boolean accRelevant) {
+        int primaryIdx = priority.length > 0 ? priority[0] : -1;
+        boolean[] reqDim = new boolean[4];
+        for (int i = 0; i < 4; i++) {
+            reqDim[i] = reqRel != null && reqRel[i] && i != primaryIdx;
+        }
+        int count = (primaryIdx >= 0 ? 1 : 0) + 1 /* watk or magic */
+                + (accRelevant ? 1 : 0);
+        for (boolean b : reqDim) if (b) count++;
+        int[] v = new int[count];
+        int k = 0;
+        if (primaryIdx >= 0) v[k++] = statByIdx(e, primaryIdx);
+        v[k++] = isMage ? e.getMatk() : e.getWatk();
+        if (accRelevant) {
+            v[k++] = e.getAcc() + e.getDex() + (int) Math.round(e.getLuk() * 0.5);
+        }
+        for (int i = 0; i < 4; i++) {
+            if (reqDim[i]) v[k++] = statByIdx(e, i);
+        }
+        return v;
+    }
+
+    /**
+     * Tiebreaker score used when {@link #dedupStatVec} ties — captures combat-relevant
+     * contributions that didn't survive into the vec. eff_primary = primary + secondaries*0.25
+     * picks up secondary stats that aren't already raw dims (e.g. str for a thief when no
+     * candidate has reqSTR). watk added at ×4 keeps damage signal dominant.
+     */
+    private static int dedupTiebreak(Equip e, int[] priority) {
+        if (priority == null || priority.length == 0) return 0;
+        int main = statByIdx(e, priority[0]);
+        int secSum = 0;
+        for (int i = 1; i < priority.length; i++) secSum += statByIdx(e, priority[i]);
+        int effPrimary = main + (int) Math.round(secSum * 0.25);
+        return effPrimary + e.getWatk() * 4;
+    }
+
+    private static int statByIdx(Equip e, int idx) {
+        return switch (idx) {
+            case 0 -> e.getStr();
+            case 1 -> e.getDex();
+            case 2 -> e.getInt();
+            case 3 -> e.getLuk();
+            default -> 0;
+        };
+    }
+
+    private static boolean dedupDominatesPre(int[] bs, int[] as, int bTie, int aTie) {
+        boolean strict = false;
+        for (int i = 0; i < bs.length; i++) {
+            if (bs[i] < as[i]) return false;
+            if (bs[i] > as[i]) strict = true;
+        }
+        if (strict) return true;
+        return bTie > aTie;
     }
 
     private static boolean reqsAtLeastAsEasy(ItemInformationProvider ii, Equip b, Equip a) {
