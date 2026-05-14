@@ -16,7 +16,7 @@
 ## Bot Maintenance Guide
 
 1. Give them mesos, take them shopping to resupply pots/ammo - can also manually give a bot some excess and they will auto distribute among themselves.
-2. use `inv?` command to check inventory spaces, `trade <equip/use/etc/...>` or `trade trash` to get those items(no auto sell for now)
+2. use `inv?` command to check inventory spaces, `trade <equip/use/etc/...>` or `trade trash` to get those items, or `sell trash` if you like to live dangerously (bot might sell something expensive)
 3. use `brb` or `logout` command to send bot to town safely or despawn
 
 ## Creating a Bot
@@ -74,6 +74,27 @@ jason stop - only jason will stop
 | `patrol` / `roam` / `wander`| Prioritize farming at specified platform and nearby platforms only |
 | `sentry` / `camp` / `guard mode` / `post up` / `anchor here` / `farm here` / `grind here` /  | Stand at exact position, never chase, only attacking anything in range |
 | `fidget` | Trigger a small idle/social fidget |
+
+### Movement Formation
+
+Follow mode behavior
+
+| Say | Effect |
+|---|---|
+| `formation` / `form` | Prints formation help/available options, default 60 px |
+| `form split` / `form stagger` | Default alternating left/right follow formation (you stand in the center) |
+| `form spread` | Like split, but first bot stand directly on your position(first bot in center) |
+| `form stack` | All bots stand directly on your position |
+| `form random` | Randomizes each bot's horizontal follow offset |
+| `form left` | Lines every bot up to the left side |
+| `form right` | Lines every bot up to the right side |
+| `form tight` | Shortcut for stagger formation with tight spacing (`30px`) |
+| `form loose` | Shortcut for stagger formation with loose spacing (`120px`) |
+| `form <mode> <px>` / `form <mode> <px>` | set both mode and spacing ex `form split 60`, `form left tight` |
+| `form snap` | Vertical snap setting, default on |
+| `form snap on` | Bots find suitable platform to keep formation |
+| `form snap off` | Bots alway stay on owner's platform |
+| `form snap <px>` | Sets vertical snap range in pixels, default 200 px |
 
 ### Info
 
