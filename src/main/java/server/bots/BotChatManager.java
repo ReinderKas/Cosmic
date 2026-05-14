@@ -874,7 +874,7 @@ public class BotChatManager {
         }
         if (AUTOEQUIP_PATTERN.matcher(message).find()) {
             BotManager.after(BotManager.randMs(400, 600), () -> {
-                BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem);
+                BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem, true);
                 BotManager.getInstance().botReply(entry, "ok, gear optimized");
             });
             return;

@@ -18,9 +18,12 @@ import server.life.MonsterStats;
 
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -790,6 +793,113 @@ class BotEquipManagerTest {
                 "immediate optimizer must skip gear blocked by current level/job/fame");
     }
 
+    @Test
+    void autoEquipTriggerIsThrottledPerBotUnlessForced() {
+        Character bot = mock(Character.class);
+        when(bot.getId()).thenReturn(9_876_543);
+
+        assertTrue(BotEquipManager.shouldRunAutoEquip(bot, 1_000L, false));
+        assertFalse(BotEquipManager.shouldRunAutoEquip(bot, 5_000L, false),
+                "duplicate mode-command triggers should not rerun the optimizer");
+        assertTrue(BotEquipManager.shouldRunAutoEquip(bot, 6_000L, true),
+                "explicit autoequip command should bypass the throttle");
+        assertFalse(BotEquipManager.shouldRunAutoEquip(bot, 7_000L, false),
+                "forced runs still refresh the normal throttle window");
+        assertTrue(BotEquipManager.shouldRunAutoEquip(bot, 36_001L, false));
+    }
+
+    @Test
+    void clawerFullEquipLogDoesNotHitParetoCap() {
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.ASSASSIN);
+
+        LogEquipFixture f = new LogEquipFixture();
+        Map<Short, List<Equip>> bySlot = new LinkedHashMap<>();
+
+        Equip mapleKandayo = f.equip(1472032, -11, "Wp", 0, 0, 0, 0, 34, 0, 0, 0, 0, 25, 82, 84, 43, 8, 0, 0, 0, 0, 0);
+        Equip blueAvenger = f.equip(1051025, -5, "MaPn", 0, 10, 0, 0, 0, 0, 45, 0, 0, 0, 62, 65, 35, 8, 0, 0, 0, 0, 0);
+        Equip squishyShoes = f.equip(1072005, -7, "So", 0, 6, 4, 4, 0, 0, 12, 9, 0, 0, 52, 57, 30, 0, 0, 0, 0, 0, 0);
+        Equip purpleWorkGloves = f.equip(1082007, -8, "Gv", 0, 1, 0, 4, 0, 0, 1, 0, 2, 0, 48, 43, 10, 0, 0, 0, 0, 0, 0);
+        Equip brownBambooHat = f.equip(1002021, -1, "Cp", 0, 0, 0, 3, 0, 0, 17, 0, 0, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0);
+        Equip oldRaggedyCape = f.equip(1102000, -9, "Sr", 0, 0, 0, 0, 0, 0, 0, 0, 0, 12, 41, 45, 25, 0, 0, 0, 0, 0, 0);
+        Equip sapphireEarrings = f.equip(1032015, -4, "Ae", 0, 0, 0, 0, 0, 0, 0, 19, 0, 0, 59, 37, 35, 0, 0, 0, 0, 0, 0);
+        Equip medal = f.equip(1142000, -49, "Me", 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 38, 35, 0, 0, 0, 0, 0, 0, 0);
+
+        add(bySlot, (short) -11, f.equip(1472052, 18, "Wp", 0, 0, 0, 7, 27, 0, 0, 0, 0, 8, 76, 87, 50, 8, 0, 90, 0, 140, 0));
+        add(bySlot, (short) -11, f.equip(1472029, 7, "Wp", 0, 2, 0, 0, 19, 0, 2, 0, 0, 0, 0, 0, 40, 8, 0, 80, 0, 120, 0));
+        add(bySlot, (short) -11, f.equip(1472030, 8, "Wp", 0, 1, 0, 0, 24, 0, 4, 0, 0, 0, 0, 0, 40, 8, 0, 80, 0, 120, 0));
+        add(bySlot, (short) -11, f.equip(1472031, 10, "Wp", 0, 0, 0, 8, 23, 0, 8, 0, 0, 0, 68, 62, 40, 8, 0, 80, 0, 120, 0));
+        add(bySlot, (short) -11, f.equip(1472017, 33, "Wp", 0, 0, 0, 2, 20, 0, 3, 0, 0, 0, 0, 0, 30, 8, 0, 60, 0, 80, 0));
+        add(bySlot, (short) -11, f.equip(1472022, 39, "Wp", 0, 0, 0, 2, 21, 0, 2, 0, 0, 0, 0, 0, 35, 8, 0, 70, 0, 95, 0));
+        add(bySlot, (short) -11, f.equip(1472018, 19, "Wp", 0, 0, 0, 3, 19, 0, 1, 0, 0, 0, 0, 0, 30, 8, 0, 60, 0, 80, 0));
+        add(bySlot, (short) -11, f.equip(1472019, 30, "Wp", 0, 0, 0, 5, 17, 0, 8, 0, 0, 0, 44, 59, 30, 8, 0, 60, 0, 80, 0));
+        add(bySlot, (short) -11, f.equip(1472053, 2, "Wp", 0, 0, 0, 4, 28, 0, 0, 0, 0, 5, 82, 56, 50, 8, 0, 90, 0, 140, 0));
+        add(bySlot, (short) -11, mapleKandayo);
+
+        add(bySlot, (short) -5, f.equip(1040105, 15, "Ma", 0, 1, 0, 6, 0, 0, 27, 0, 0, 0, 36, 51, 30, 8, 0, 60, 0, 80, 0));
+        add(bySlot, (short) -5, f.equip(1040108, 25, "Ma", 0, 3, 0, 6, 0, 0, 46, 0, 0, 0, 62, 83, 50, 8, 0, 90, 0, 140, 0));
+        add(bySlot, (short) -5, f.equip(1040106, 20, "Ma", 0, 7, 0, 0, 0, 0, 27, 0, 0, 0, 45, 41, 30, 8, 0, 60, 0, 80, 0));
+        add(bySlot, (short) -5, f.equip(1051026, 13, "MaPn", 0, 0, 0, 9, 0, 0, 49, 0, 0, 0, 66, 74, 35, 8, 0, 70, 0, 95, 0));
+        add(bySlot, (short) -5, blueAvenger);
+
+        add(bySlot, (short) -8, f.equip(1082074, 17, "Gv", 0, 0, 0, 7, 0, 0, 14, 0, 0, 0, 53, 49, 35, 8, 0, 70, 0, 95, 0));
+        add(bySlot, (short) -8, f.equip(1082068, 9, "Gv", 0, 1, 0, 7, 0, 0, 20, 0, 0, 0, 79, 51, 50, 8, 0, 90, 0, 140, 0));
+        add(bySlot, (short) -8, f.equip(1082069, 21, "Gv", 0, 4, 0, 6, 0, 0, 19, 0, 0, 0, 70, 61, 50, 8, 0, 90, 0, 140, 0));
+        add(bySlot, (short) -8, purpleWorkGloves);
+
+        add(bySlot, (short) -7, f.equip(1072136, 37, "So", 0, 3, 0, 7, 0, 0, 35, 0, 0, 0, 53, 85, 50, 8, 0, 90, 0, 140, 0));
+        add(bySlot, (short) -7, f.equip(1072039, 3, "So", 0, 0, 0, 5, 0, 0, 18, 0, 0, 0, 47, 41, 30, 8, 0, 60, 0, 80, 0));
+        add(bySlot, (short) -7, f.equip(1072125, 27, "So", 0, 5, 0, 6, 0, 0, 25, 0, 0, 0, 49, 60, 40, 8, 0, 80, 0, 110, 0));
+        add(bySlot, (short) -7, squishyShoes);
+
+        add(bySlot, (short) -6, f.equip(1060094, 1, "Pn", 0, 0, 0, 2, 0, 0, 24, 0, 0, 0, 0, 11, 40, 8, 0, 80, 0, 110, 0));
+        add(bySlot, (short) -6, f.equip(1060095, 11, "Pn", 0, 6, 0, 0, 0, 0, 31, 0, 0, 0, 74, 61, 40, 8, 0, 80, 0, 110, 0));
+        add(bySlot, (short) -6, f.equip(1060107, 38, "Pn", 0, 0, 0, 5, 0, 0, 29, 0, 3, 0, 78, 70, 50, 8, 0, 90, 0, 140, 0));
+
+        add(bySlot, (short) -1, f.equip(1002155, 4, "Cp", 0, 0, 0, 5, 0, 0, 32, 0, 0, 0, 47, 50, 40, 8, 0, 80, 0, 110, 0));
+        add(bySlot, (short) -1, f.equip(1002156, 6, "Cp", 0, 6, 0, 0, 0, 0, 30, 0, 0, 0, 38, 59, 35, 8, 0, 70, 0, 95, 0));
+        add(bySlot, (short) -1, f.equip(1002157, 14, "Cp", 0, 6, 0, 0, 0, 0, 27, 0, 0, 0, 54, 52, 35, 8, 0, 70, 0, 95, 0));
+        add(bySlot, (short) -1, brownBambooHat);
+
+        add(bySlot, (short) -9, oldRaggedyCape);
+        add(bySlot, (short) -4, sapphireEarrings);
+        add(bySlot, (short) -49, medal);
+
+        List<Short> dpSlots = List.of((short) -1, (short) -4, (short) -5, (short) -6,
+                (short) -7, (short) -8, (short) -9, (short) -49);
+        Map<Short, Equip> currentBySlot = Map.of(
+                (short) -11, mapleKandayo,
+                (short) -5, blueAvenger,
+                (short) -7, squishyShoes,
+                (short) -8, purpleWorkGloves,
+                (short) -1, brownBambooHat,
+                (short) -9, oldRaggedyCape,
+                (short) -4, sapphireEarrings,
+                (short) -49, medal);
+        BotEquipManager.StatSnapshot naked = new BotEquipManager.StatSnapshot(
+                4, 35, 4, 227, 21, 24, 25, 50, 2, Job.ASSASSIN);
+        BotEquipManager.MapDamageProfile mob = new BotEquipManager.MapDamageProfile(120, 16, 41);
+
+        long startedAt = System.nanoTime();
+        boolean anyCap = false;
+        BotEquipManager.DpResult best = null;
+        for (Equip weapon : bySlot.get((short) -11)) {
+            BotEquipManager.DpResult result = BotEquipManager.solveForWeapon(
+                    bot, f.hooks(), naked, weapon, dpSlots, currentBySlot, bySlot, mob);
+            if (result == null) continue;
+            anyCap |= result.paretoCapHit();
+            if (best == null || result.score().damage() > best.score().damage()) {
+                best = result;
+            }
+        }
+        long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
+        System.out.println("clawer full equip optimizer benchmark: " + elapsedMs
+                + " ms, capHit=" + anyCap
+                + ", bestDamage=" + (best != null ? best.score().damage() : -1));
+
+        assertFalse(anyCap, "full Clawer log should optimize without hitting the Pareto cap");
+    }
+
     private static Equip mageOverall(int int_, int luk) {
         Equip e = mock(Equip.class);
         when(e.getStr()).thenReturn((short) 0);
@@ -833,6 +943,79 @@ class BotEquipManagerTest {
         when(e.getMatk()).thenReturn((short) 0);
         when(e.getAcc()).thenReturn((short) acc);
         return e;
+    }
+
+    private static void add(Map<Short, List<Equip>> bySlot, short slot, Equip equip) {
+        bySlot.computeIfAbsent(slot, ignored -> new ArrayList<>()).add(equip);
+    }
+
+    private static final class LogEquipFixture {
+        private final Map<Integer, String> slots = new HashMap<>();
+        private final Map<Integer, WeaponType> weaponTypes = new HashMap<>();
+        private final Set<Integer> overalls = new HashSet<>();
+        private final Map<Integer, Map<String, Integer>> reqs = new HashMap<>();
+
+        Equip equip(int itemId, int pos, String slot, int str, int dex, int int_, int luk,
+                   int watk, int matk, int wdef, int mdef, int acc, int avoid, int hp, int mp,
+                   int reqLevel, int reqJob, int reqStr, int reqDex, int reqInt, int reqLuk, int reqPop) {
+            Equip e = mock(Equip.class);
+            when(e.getItemId()).thenReturn(itemId);
+            when(e.getPosition()).thenReturn((short) pos);
+            when(e.getStr()).thenReturn((short) str);
+            when(e.getDex()).thenReturn((short) dex);
+            when(e.getInt()).thenReturn((short) int_);
+            when(e.getLuk()).thenReturn((short) luk);
+            when(e.getWatk()).thenReturn((short) watk);
+            when(e.getMatk()).thenReturn((short) matk);
+            when(e.getWdef()).thenReturn((short) wdef);
+            when(e.getMdef()).thenReturn((short) mdef);
+            when(e.getAcc()).thenReturn((short) acc);
+            when(e.getAvoid()).thenReturn((short) avoid);
+            when(e.getHp()).thenReturn((short) hp);
+            when(e.getMp()).thenReturn((short) mp);
+            slots.put(itemId, slot);
+            weaponTypes.put(itemId, "Wp".equals(slot) ? WeaponType.CLAW : WeaponType.NOT_A_WEAPON);
+            if ("MaPn".equals(slot)) {
+                overalls.add(itemId);
+            }
+            reqs.put(itemId, Map.of(
+                    "reqLevel", reqLevel,
+                    "reqJob", reqJob,
+                    "reqSTR", reqStr,
+                    "reqDEX", reqDex,
+                    "reqINT", reqInt,
+                    "reqLUK", reqLuk,
+                    "reqPOP", reqPop));
+            return e;
+        }
+
+        BotEquipManager.OptimizerHooks hooks() {
+            return new BotEquipManager.OptimizerHooks() {
+                @Override public boolean isTwoHanded(int itemId) { return false; }
+                @Override public WeaponType getWeaponType(int itemId) { return weaponTypes.getOrDefault(itemId, WeaponType.NOT_A_WEAPON); }
+                @Override public boolean isOverall(int itemId) { return overalls.contains(itemId); }
+                @Override public boolean meetsReqs(Equip equip, Job job, int level, int str, int dex,
+                                                   int int_, int luk, int fame) {
+                    Map<String, Integer> r = reqs.get(equip.getItemId());
+                    if (r == null) return true;
+                    return level >= r.getOrDefault("reqLevel", 0)
+                            && reqJobMatches(job, r.getOrDefault("reqJob", 0))
+                            && str >= r.getOrDefault("reqSTR", 0)
+                            && dex >= r.getOrDefault("reqDEX", 0)
+                            && int_ >= r.getOrDefault("reqINT", 0)
+                            && luk >= r.getOrDefault("reqLUK", 0)
+                            && fame >= r.getOrDefault("reqPOP", 0);
+                }
+                @Override public Map<String, Integer> getEquipStats(int itemId) {
+                    return reqs.getOrDefault(itemId, Map.of());
+                }
+            };
+        }
+
+        private static boolean reqJobMatches(Job job, int reqJob) {
+            if (reqJob == 0) return true;
+            return job != null && (reqJob & 0x8) != 0 && job.isA(Job.THIEF);
+        }
     }
 
     private static void stubReserveItem(BotEquipManager.SelfReserveHooks hooks, Job job, Equip equip, String slot,
