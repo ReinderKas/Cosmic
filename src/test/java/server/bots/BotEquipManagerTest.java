@@ -339,6 +339,31 @@ class BotEquipManagerTest {
     }
 
     @Test
+    void selectItemsBeatingBaselineUsesConservativeWatkMainStatEquivalence() {
+        EnumSet<BotEquipManager.RelevantStat> assassin = BotEquipManager.relevantStatsFor(Job.ASSASSIN);
+        Equip tenAtkTwoLuk = glove(/*luk*/ 2, 0, /*watk*/ 10);
+        Equip nineAtkFourLuk = glove(/*luk*/ 4, 0, /*watk*/ 9);
+        Equip nineAtkTenLuk = glove(/*luk*/ 10, 0, /*watk*/ 9);
+        Equip elevenAtkZeroLuk = glove(/*luk*/ 0, 0, /*watk*/ 11);
+        Equip tenAtkOneLuk = glove(/*luk*/ 1, 0, /*watk*/ 10);
+
+        Set<Equip> first = BotEquipManager.selectItemsBeatingBaseline(
+                assassin, List.of(nineAtkFourLuk), List.of(tenAtkTwoLuk));
+        assertFalse(first.contains(nineAtkFourLuk),
+                "10 atk + 2 main should dominate 9 atk + 4 main under conservative equivalence");
+
+        Set<Equip> second = BotEquipManager.selectItemsBeatingBaseline(
+                assassin, List.of(elevenAtkZeroLuk), List.of(nineAtkTenLuk));
+        assertFalse(second.contains(elevenAtkZeroLuk),
+                "9 atk + 10 main should dominate 11 atk + 0 main under conservative equivalence");
+
+        Set<Equip> nearMiss = BotEquipManager.selectItemsBeatingBaseline(
+                assassin, List.of(nineAtkFourLuk), List.of(tenAtkOneLuk));
+        assertTrue(nearMiss.contains(nineAtkFourLuk),
+                "equivalence must stay conservative: 10 atk + 1 main should not dominate 9 atk + 4 main");
+    }
+
+    @Test
     void relevantStatsForJobMatchesClassRoles() {
         assertEquals(EnumSet.of(BotEquipManager.RelevantStat.LUK, BotEquipManager.RelevantStat.DEX,
                                 BotEquipManager.RelevantStat.WATK),
@@ -439,10 +464,10 @@ class BotEquipManagerTest {
         when(hooks.getEquipmentSlot(1072132)).thenReturn("So");
         when(hooks.meetsReqs(wornBoots, Job.HUNTER, Short.MAX_VALUE,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 0)).thenReturn(true);
         when(hooks.meetsReqs(redPierre, Job.HUNTER, Short.MAX_VALUE,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 0)).thenReturn(true);
         assertTrue(BotEquipManager.shouldReserveOwnedItem(bot, hooks, redPierre),
                 "John's +8 STR Red Pierre Shoes should stay reserved for self ahead of owner/sibling offers");
     }
@@ -491,10 +516,10 @@ class BotEquipManagerTest {
         when(hooks.getWeaponType(1300002)).thenReturn(WeaponType.SWORD1H);
         when(hooks.meetsReqs(equippedAxe, Job.FIGHTER, Short.MAX_VALUE,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 0)).thenReturn(true);
         when(hooks.meetsReqs(candidateSword, Job.FIGHTER, Short.MAX_VALUE,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 0)).thenReturn(true);
 
         assertTrue(BotEquipManager.shouldReserveOwnedItem(bot, hooks, candidateSword),
                 "equipped axe should not block a sword-spec fighter from reserving a sword");
@@ -524,10 +549,10 @@ class BotEquipManagerTest {
         when(hooks.getWeaponType(1300001)).thenReturn(WeaponType.GENERAL1H_SWING);
         when(hooks.meetsReqs(equippedSword, Job.FIGHTER, Short.MAX_VALUE,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 0)).thenReturn(true);
         when(hooks.meetsReqs(candidateAxe, Job.FIGHTER, Short.MAX_VALUE,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 0)).thenReturn(true);
 
         assertTrue(BotEquipManager.shouldReserveOwnedItem(bot, hooks, equippedSword),
                 "dual-mastery fighter should keep sword family");
@@ -794,6 +819,52 @@ class BotEquipManagerTest {
     }
 
     @Test
+    void selfReserveRejectsGearBlockedByCurrentLevelOrFame() {
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.ASSASSIN);
+        when(bot.getLevel()).thenReturn(43);
+        when(bot.getFame()).thenReturn(1);
+        when(bot.getSkillLevel(Assassin.CLAW_MASTERY)).thenReturn(1);
+        when(bot.getSkillLevel(Assassin.CLAW_BOOSTER)).thenReturn(0);
+
+        Equip wearable = clawWithStats(1472022, 2, 21, 0);
+        Equip levelBlocked = clawWithStats(1472052, 7, 27, 0);
+        Equip fameBlocked = clawWithStats(1472053, 4, 28, 0);
+
+        BotEquipManager.SelfReserveHooks hooks = mock(BotEquipManager.SelfReserveHooks.class);
+        stubReserveItem(hooks, Job.ASSASSIN, wearable, "Wp", 35, 8, 0, 70, 0, 95, 0);
+        stubReserveItem(hooks, Job.ASSASSIN, levelBlocked, "Wp", 50, 8, 0, 90, 0, 140, 0);
+        stubReserveItem(hooks, Job.ASSASSIN, fameBlocked, "Wp", 50, 8, 0, 90, 0, 140, 20);
+        when(hooks.getWeaponType(1472022)).thenReturn(WeaponType.CLAW);
+        when(hooks.getWeaponType(1472052)).thenReturn(WeaponType.CLAW);
+        when(hooks.getWeaponType(1472053)).thenReturn(WeaponType.CLAW);
+        when(hooks.meetsReqs(wearable, Job.ASSASSIN, 43,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 1)).thenReturn(true);
+        when(hooks.meetsReqs(levelBlocked, Job.ASSASSIN, 43,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 1)).thenReturn(false);
+        when(hooks.meetsReqs(fameBlocked, Job.ASSASSIN, 43,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 1)).thenReturn(false);
+        when(hooks.meetsReqs(levelBlocked, Job.ASSASSIN, Short.MAX_VALUE,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+        when(hooks.meetsReqs(fameBlocked, Job.ASSASSIN, Short.MAX_VALUE,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+
+        Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks,
+                List.of(wearable, levelBlocked, fameBlocked));
+
+        assertTrue(keep.contains(wearable));
+        assertFalse(keep.contains(levelBlocked),
+                "self-reserve must not keep gear blocked by current level");
+        assertFalse(keep.contains(fameBlocked),
+                "self-reserve must not keep gear blocked by current fame");
+    }
+
+    @Test
     void autoEquipTriggerIsThrottledPerBotUnlessForced() {
         Character bot = mock(Character.class);
         when(bot.getId()).thenReturn(9_876_543);
@@ -1027,6 +1098,9 @@ class BotEquipManagerTest {
         when(hooks.meetsReqs(equip, job, Short.MAX_VALUE,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+        when(hooks.meetsReqs(equip, job, Short.MAX_VALUE,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 0)).thenReturn(true);
         when(hooks.getEquipLevelReq(itemId)).thenReturn(reqLevel);
         when(hooks.getEquipStats(itemId)).thenReturn(java.util.Map.of(
                 "reqJob", reqJob,

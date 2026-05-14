@@ -652,6 +652,7 @@ class BotEquipManager {
 
         static OptimizerHooks futureFrom(ItemInformationProvider ii, Character bot) {
             final Job botJob = bot != null ? bot.getJob() : null;
+            final int level = bot != null && bot.getLevel() > 0 ? bot.getLevel() : Short.MAX_VALUE;
             final int fame = bot != null ? bot.getFame() : 0;
             final int max = Integer.MAX_VALUE / 4;
             return new OptimizerHooks() {
@@ -661,7 +662,7 @@ class BotEquipManager {
                     return "MaPn".equals(ii.getEquipmentSlot(itemId));
                 }
                 @Override public boolean meetsReqs(Equip e, Job job, int lvl, int s, int d, int i, int l, int f) {
-                    return ii.meetsEquipRequirements(e, botJob, max, max, max, max, max, fame);
+                    return ii.meetsEquipRequirements(e, botJob, level, max, max, max, max, fame);
                 }
                 @Override public Map<String, Integer> getEquipStats(int itemId) { return ii.getEquipStats(itemId); }
             };
@@ -1132,18 +1133,18 @@ class BotEquipManager {
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, bot.getFame());
     }
 
-    /** Job-only wearability gate: level/stat/fame reqs treated as satisfied. */
+    /** Current level/fame wearability gate: only stat reqs are treated as satisfiable by gear. */
     static boolean isOwnClassEquip(Character bot, ItemInformationProvider ii, Equip equip) {
-        return ii.meetsEquipRequirements(equip, bot.getJob(), Short.MAX_VALUE,
+        return ii.meetsEquipRequirements(equip, bot.getJob(), bot.getLevel(),
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE);
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, bot.getFame());
     }
 
     static boolean futureOnlyBlocked(Character bot, ItemInformationProvider ii, Equip equip) {
-        // Pass huge level/stat values: if it still fails, job or fame is blocking, skip.
-        return ii.meetsEquipRequirements(equip, bot.getJob(), Integer.MAX_VALUE / 4,
+        // Pass huge stat values only: if it still fails, job/level/fame is blocking, skip.
+        return ii.meetsEquipRequirements(equip, bot.getJob(), bot.getLevel(),
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE);
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, bot.getFame());
     }
 
     private static boolean isRecommendationCandidate(Character bot, ItemInformationProvider ii, Equip equip,
@@ -1409,9 +1410,10 @@ class BotEquipManager {
     }
 
     private static boolean paretoDominates(EnumSet<RelevantStat> relevant, Equip a, Equip b) {
+        RelevantStat primary = primaryStatFor(relevant);
         boolean strictlyGreater = false;
         for (RelevantStat s : relevant) {
-            int va = effectiveStatValue(s, a), vb = effectiveStatValue(s, b);
+            int va = effectiveStatValue(s, primary, a), vb = effectiveStatValue(s, primary, b);
             if (va < vb) return false;
             if (va > vb) strictlyGreater = true;
         }
@@ -1422,9 +1424,24 @@ class BotEquipManager {
     // in-game accuracy via stat scaling. The client uses ~0.8 acc per DEX, but DEX is more
     // generally useful, so for dominance we weight DEX 1:1 with ACC — a DEX-heavy item can
     // outclass a low-ACC item even with zero raw ACC.
-    private static int effectiveStatValue(RelevantStat s, Equip e) {
+    private static int effectiveStatValue(RelevantStat s, RelevantStat primary, Equip e) {
         if (s == RelevantStat.ACC) return e.getAcc() + e.getDex();
+        if (primary != null && s == RelevantStat.WATK) {
+            return e.getWatk() + primary.of(e) / 5;
+        }
+        if (s == primary) {
+            return s.of(e) + e.getWatk() * 2;
+        }
         return s.of(e);
+    }
+
+    private static RelevantStat primaryStatFor(EnumSet<RelevantStat> relevant) {
+        if (relevant == null || !relevant.contains(RelevantStat.WATK)) return null;
+        if (relevant.contains(RelevantStat.LUK)) return RelevantStat.LUK;
+        if (relevant.contains(RelevantStat.STR) && relevant.contains(RelevantStat.ACC)) return RelevantStat.STR;
+        if (relevant.contains(RelevantStat.DEX)) return RelevantStat.DEX;
+        if (relevant.contains(RelevantStat.STR)) return RelevantStat.STR;
+        return null;
     }
 
     static boolean isEquipUsefulToBot(Character recipient, EquipUsefulnessHooks hooks, Equip item) {
@@ -1580,9 +1597,10 @@ class BotEquipManager {
     }
 
     private static boolean isOwnClassEquip(Character bot, EquipUsefulnessHooks hooks, Equip equip) {
-        return hooks.meetsReqs(equip, bot.getJob(), Short.MAX_VALUE,
+        int level = bot.getLevel() > 0 ? bot.getLevel() : Short.MAX_VALUE;
+        return hooks.meetsReqs(equip, bot.getJob(), level,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE);
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, bot.getFame());
     }
 
     private static String textSlotKey(EquipUsefulnessHooks hooks, Equip equip) {
@@ -2334,8 +2352,9 @@ class BotEquipManager {
         for (boolean b : reqDim) if (b) count++;
         int[] v = new int[count];
         int k = 0;
-        if (primaryIdx >= 0) v[k++] = statByIdx(e, primaryIdx);
-        v[k++] = isMage ? e.getMatk() : e.getWatk();
+        int primary = primaryIdx >= 0 ? statByIdx(e, primaryIdx) : 0;
+        if (primaryIdx >= 0) v[k++] = isMage ? primary : primary + e.getWatk() * 2;
+        v[k++] = isMage ? e.getMatk() : e.getWatk() + primary / 5;
         if (accRelevant) {
             v[k++] = e.getAcc() + e.getDex() + (int) Math.round(e.getLuk() * 0.5);
         }
