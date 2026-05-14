@@ -133,6 +133,7 @@ public class BotEntry {
     boolean shopSequenceActive = false;
     long shopVisitStartedAtMs = 0L;
     long shopSequenceStartedAtMs = 0L;
+    boolean shopSellTrashPending = false;
 
     // Damage taken
     long deadUntil = 0;

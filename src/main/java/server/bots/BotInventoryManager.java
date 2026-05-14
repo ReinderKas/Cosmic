@@ -1368,6 +1368,22 @@ class BotInventoryManager {
         return collectEquipsGroup(EquipsGroup.NORMAL, entry, bot);
     }
 
+    static List<Item> collectSellTrashEquips(BotEntry entry, Character bot) {
+        List<Item> trash = collectTrashEquips(entry, bot);
+        if (trash.isEmpty()) {
+            return trash;
+        }
+
+        ItemInformationProvider ii = ItemInformationProvider.getInstance();
+        List<Item> result = new ArrayList<>(trash.size());
+        for (Item item : trash) {
+            if (item instanceof Equip equip && !shouldKeepForSellTrash(ii, equip)) {
+                result.add(item);
+            }
+        }
+        return result;
+    }
+
     private static EquipTradeGroups classifyEquipTradeGroups(BotEntry entry, Character bot) {
         long startedAt = profileTradeCategory("equips") ? System.nanoTime() : 0L;
         long bagScanStartedAt = startedAt != 0L ? System.nanoTime() : 0L;
@@ -1438,6 +1454,61 @@ class BotInventoryManager {
 
     private static boolean isOwnClassEquip(Character bot, ItemInformationProvider ii, Equip equip) {
         return BotEquipManager.isOwnClassEquip(bot, ii, equip);
+    }
+
+    static boolean shouldKeepForSellTrash(ItemInformationProvider ii, Equip equip) {
+        if (equip.getLevel() > 0) {
+            return true;
+        }
+        Map<String, Integer> stats = ii != null ? ii.getEquipStats(equip.getItemId()) : null;
+        if (ItemConstants.isWeapon(equip.getItemId())) {
+            Equip baseEquip = ii != null ? (Equip) ii.getEquipById(equip.getItemId()) : null;
+            if (hasProtectedSellTrashWeaponStat(stats, equip, baseEquip)) {
+                return true;
+            }
+        } else if (equip.getWatk() > 0) {
+            return true;
+        }
+        return hasProtectedSellTrashStat(stats, equip, 6);
+    }
+
+    static boolean hasProtectedSellTrashStat(Map<String, Integer> stats, Equip equip, int threshold) {
+        if (stats == null || equip == null) {
+            return false;
+        }
+
+        int reqJob = stats.getOrDefault("reqJob", 0);
+        if (reqJob == 0) {
+            return equip.getStr() >= threshold
+                    || equip.getDex() >= threshold
+                    || equip.getInt() >= threshold
+                    || equip.getLuk() >= threshold;
+        }
+
+        return ((reqJob & 0x1) != 0 && (equip.getStr() >= threshold || equip.getDex() >= threshold))
+                || ((reqJob & 0x2) != 0 && (equip.getInt() >= threshold || equip.getLuk() >= threshold))
+                || ((reqJob & 0x4) != 0 && (equip.getDex() >= threshold || equip.getStr() >= threshold))
+                || ((reqJob & 0x8) != 0 && (equip.getLuk() >= threshold || equip.getDex() >= threshold))
+                || ((reqJob & 0x10) != 0 && (equip.getStr() >= threshold || equip.getDex() >= threshold));
+    }
+
+    static boolean hasProtectedSellTrashWeaponStat(Map<String, Integer> stats, Equip equip, Equip baseEquip) {
+        if (equip == null || baseEquip == null) {
+            return false;
+        }
+        boolean mageWeapon = isMageWeapon(stats);
+        if (mageWeapon) {
+            return equip.getMatk() - baseEquip.getMatk() >= 4;
+        }
+        return equip.getWatk() - baseEquip.getWatk() >= 4;
+    }
+
+    private static boolean isMageWeapon(Map<String, Integer> stats) {
+        if (stats == null) {
+            return false;
+        }
+        int reqJob = stats.getOrDefault("reqJob", 0);
+        return reqJob == 0 ? false : (reqJob & 0x2) != 0 && (reqJob & ~0x2) == 0;
     }
 
     /** Score used to order own-class equips worst-to-best: 4*watk + matk + main + sec. */

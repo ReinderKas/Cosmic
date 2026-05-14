@@ -1,6 +1,7 @@
 package server.bots;
 
 import client.Character;
+import client.inventory.Equip;
 import client.inventory.Item;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
@@ -9,7 +10,9 @@ import server.Trade;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -86,6 +89,49 @@ class BotInventoryManagerTest {
             assertNull(entry.manualTradeRef);
             assertTrue(entry.manualTradeTimeoutMs == 0);
         }
+    }
+
+    @Test
+    void shouldFilterProtectedEquipsOutOfSellTrashOnly() {
+        Equip sellable = mock(Equip.class);
+        Equip highIntAllJob = mock(Equip.class);
+        Equip highDexWarrior = mock(Equip.class);
+        Equip nonWeaponWatk = mock(Equip.class);
+        Equip scrolled = mock(Equip.class);
+        Equip pirateDex = mock(Equip.class);
+        Equip currentWarriorWeapon = mock(Equip.class);
+        Equip baseWarriorWeapon = mock(Equip.class);
+        Equip currentMageWeapon = mock(Equip.class);
+        Equip baseMageWeapon = mock(Equip.class);
+
+        when(sellable.getItemId()).thenReturn(1000001);
+        when(highIntAllJob.getItemId()).thenReturn(1082001);
+        when(highDexWarrior.getItemId()).thenReturn(1000002);
+        when(nonWeaponWatk.getItemId()).thenReturn(1072001);
+        when(scrolled.getItemId()).thenReturn(1040001);
+        when(pirateDex.getItemId()).thenReturn(1050001);
+        when(currentWarriorWeapon.getItemId()).thenReturn(1302000);
+        when(currentMageWeapon.getItemId()).thenReturn(1372000);
+
+        when(sellable.getStr()).thenReturn((short) 3);
+        when(highIntAllJob.getInt()).thenReturn((short) 6);
+        when(highDexWarrior.getDex()).thenReturn((short) 6);
+        when(nonWeaponWatk.getWatk()).thenReturn((short) 1);
+        when(scrolled.getLevel()).thenReturn((byte) 1);
+        when(pirateDex.getDex()).thenReturn((short) 6);
+        when(currentWarriorWeapon.getWatk()).thenReturn((short) 24);
+        when(baseWarriorWeapon.getWatk()).thenReturn((short) 20);
+        when(currentMageWeapon.getMatk()).thenReturn((short) 29);
+        when(baseMageWeapon.getMatk()).thenReturn((short) 25);
+
+        assertTrue(!BotInventoryManager.hasProtectedSellTrashStat(Map.of("reqJob", 1), sellable, 6));
+        assertTrue(BotInventoryManager.hasProtectedSellTrashStat(Map.of("reqJob", 0), highIntAllJob, 6));
+        assertTrue(BotInventoryManager.hasProtectedSellTrashStat(Map.of("reqJob", 1), highDexWarrior, 6));
+        assertTrue(BotInventoryManager.shouldKeepForSellTrash(null, nonWeaponWatk));
+        assertTrue(BotInventoryManager.shouldKeepForSellTrash(null, scrolled));
+        assertTrue(BotInventoryManager.hasProtectedSellTrashStat(Map.of("reqJob", 16), pirateDex, 6));
+        assertTrue(BotInventoryManager.hasProtectedSellTrashWeaponStat(Map.of("reqJob", 1), currentWarriorWeapon, baseWarriorWeapon));
+        assertTrue(BotInventoryManager.hasProtectedSellTrashWeaponStat(Map.of("reqJob", 2), currentMageWeapon, baseMageWeapon));
     }
 
     @SuppressWarnings("unchecked")

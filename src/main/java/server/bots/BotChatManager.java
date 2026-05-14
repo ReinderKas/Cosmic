@@ -428,6 +428,9 @@ public class BotChatManager {
     private static final Pattern TRADE_POTS_COMMAND_PATTERN = Pattern.compile(
             "\\b" + TRADE_CMD_VERB + "\\s+" + TRANSFER_RECIPIENT + TRANSFER_OWNER + POTION_WORDS + "\\b",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern SELL_TRASH_COMMAND_PATTERN = Pattern.compile(
+            "^\\s*(?:sell|vendor)\\s+(?:(?:my|ur|your)\\s+)?(?:trash|junk)\\s*[?!.,]*\\s*$",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern TRADE_USE_COMMAND_PATTERN = Pattern.compile(
             "\\b" + TRADE_CMD_VERB + "\\s+" + TRANSFER_RECIPIENT + TRANSFER_OWNER + USE_WORDS + "\\b",
             Pattern.CASE_INSENSITIVE);
@@ -981,6 +984,12 @@ public class BotChatManager {
                     });
                 });
             }
+            return;
+        }
+
+        if (SELL_TRASH_COMMAND_PATTERN.matcher(message).matches()) {
+            BotManager.after(BotManager.randMs(500, 700), () ->
+                    BotShopManager.requestSellTrashVisit(entry, entry.bot));
             return;
         }
 
