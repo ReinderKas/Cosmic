@@ -1059,7 +1059,7 @@ public class BotChatManager {
                         "sure, going " + jobName,
                         "ok changing to " + jobName + "...");
                 BotManager.getInstance().botReply(entry, BotManager.randomReply(replies));
-                BotManager.after(BotManager.randMs(900, 1100), () -> BotStarterKitManager.advanceJob(entry.bot, entry.owner, advJob));
+                BotManager.after(BotManager.randMs(900, 1100), () -> BotStarterKitManager.advanceJob(entry, advJob));
             }
         }
         LAST_CHAT_HANDLED.set(false);

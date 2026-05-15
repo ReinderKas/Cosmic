@@ -44,11 +44,15 @@ final class BotStarterKitManager {
             )
     );
 
-    static void advanceJob(Character bot, Character owner, Job newJob) {
+    static void advanceJob(BotEntry entry, Job newJob) {
+        Character bot = entry.bot;
+        Character owner = entry.owner;
         Job oldJob = bot.getJob();
         bot.changeJob(newJob);
+        BotBuildManager.handleJobAdvance(entry, bot, oldJob, newJob);
         grantStarterKitIfEligible(bot, oldJob, newJob);
         BotEquipManager.autoEquip(bot, owner, null);
+        BotChatManager.checkBotStatus(entry, bot);
     }
 
     static List<ItemGrant> starterKitFor(Job job) {

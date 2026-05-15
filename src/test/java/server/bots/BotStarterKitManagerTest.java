@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
 import java.util.List;
+import java.util.concurrent.ScheduledFuture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -50,14 +51,19 @@ class BotStarterKitManagerTest {
     void advanceJobAlwaysReevaluatesAutoEquip() {
         Character bot = mock(Character.class);
         Character owner = mock(Character.class);
+        BotEntry entry = new BotEntry(bot, owner, mock(ScheduledFuture.class));
 
         when(bot.getJob()).thenReturn(Job.BOWMAN);
 
-        try (MockedStatic<BotEquipManager> equipManager = mockStatic(BotEquipManager.class)) {
-            BotStarterKitManager.advanceJob(bot, owner, Job.HUNTER);
+        try (MockedStatic<BotBuildManager> buildManager = mockStatic(BotBuildManager.class);
+             MockedStatic<BotChatManager> chatManager = mockStatic(BotChatManager.class);
+             MockedStatic<BotEquipManager> equipManager = mockStatic(BotEquipManager.class)) {
+            BotStarterKitManager.advanceJob(entry, Job.HUNTER);
 
             verify(bot).changeJob(Job.HUNTER);
+            buildManager.verify(() -> BotBuildManager.handleJobAdvance(entry, bot, Job.BOWMAN, Job.HUNTER));
             equipManager.verify(() -> BotEquipManager.autoEquip(bot, owner, null));
+            chatManager.verify(() -> BotChatManager.checkBotStatus(entry, bot));
         }
     }
 }
