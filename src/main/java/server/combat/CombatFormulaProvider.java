@@ -219,6 +219,13 @@ public final class CombatFormulaProvider {
         return resolveDamageProfile(bot, skillId, skillLevel, magicAttack, DEFAULT_HEAL_TARGET_COUNT);
     }
 
+    public DamageProfile resolveDamageProfile(Character bot, int skillId, int skillLevel,
+                                              boolean magicAttack, WeaponType physicalWeaponTypeOverride) {
+        Skill skill = skillId != 0 ? SkillFactory.getSkill(skillId) : null;
+        StatEffect effect = skill != null && skillLevel > 0 ? skill.getEffect(skillLevel) : null;
+        return resolveDamageProfile(bot, skillId, effect, magicAttack, DEFAULT_HEAL_TARGET_COUNT, physicalWeaponTypeOverride);
+    }
+
     /**
      * Variant used by Heal path: the client's damage-vs-undead formula includes a target multiplier
      * of {@code 1.5 + 5 / N} where N is the number of targets including the caster. Callers that
@@ -231,7 +238,7 @@ public final class CombatFormulaProvider {
                                               boolean magicAttack, int healTargetCount) {
         Skill skill = skillId != 0 ? SkillFactory.getSkill(skillId) : null;
         StatEffect effect = skill != null && skillLevel > 0 ? skill.getEffect(skillLevel) : null;
-        return resolveDamageProfile(bot, skillId, effect, magicAttack, healTargetCount);
+        return resolveDamageProfile(bot, skillId, effect, magicAttack, healTargetCount, null);
     }
 
     public DamageProfile resolveDamageProfile(Character bot, int skillId, StatEffect effect, boolean magicAttack) {
@@ -239,7 +246,18 @@ public final class CombatFormulaProvider {
     }
 
     public DamageProfile resolveDamageProfile(Character bot, int skillId, StatEffect effect,
+                                              boolean magicAttack, WeaponType physicalWeaponTypeOverride) {
+        return resolveDamageProfile(bot, skillId, effect, magicAttack, DEFAULT_HEAL_TARGET_COUNT, physicalWeaponTypeOverride);
+    }
+
+    public DamageProfile resolveDamageProfile(Character bot, int skillId, StatEffect effect,
                                               boolean magicAttack, int healTargetCount) {
+        return resolveDamageProfile(bot, skillId, effect, magicAttack, healTargetCount, null);
+    }
+
+    private DamageProfile resolveDamageProfile(Character bot, int skillId, StatEffect effect,
+                                               boolean magicAttack, int healTargetCount,
+                                               WeaponType physicalWeaponTypeOverride) {
         if (effect != null && effect.getFixDamage() > 0) {
             int fixedDamage = Math.max(1, effect.getFixDamage());
             return new DamageProfile(fixedDamage, fixedDamage, magicAttack, true);
@@ -247,7 +265,7 @@ public final class CombatFormulaProvider {
 
         return magicAttack
                 ? resolveMagicDamageProfile(bot, skillId, effect, healTargetCount)
-                : resolvePhysicalDamageProfile(bot, skillId, effect);
+                : resolvePhysicalDamageProfile(bot, skillId, effect, physicalWeaponTypeOverride);
     }
 
     public AbstractDealDamageHandler.AttackTarget makeTarget(Character bot, Monster monster, int hits,
@@ -614,7 +632,8 @@ public final class CombatFormulaProvider {
         return new CritDamageResult(damageLines, critIndices);
     }
 
-    private DamageProfile resolvePhysicalDamageProfile(Character bot, int skillId, StatEffect effect) {
+    private DamageProfile resolvePhysicalDamageProfile(Character bot, int skillId, StatEffect effect,
+                                                       WeaponType physicalWeaponTypeOverride) {
         int watk = Math.max(0, bot.getTotalWatk());
         long maxDamage;
         long minDamage;
@@ -629,8 +648,9 @@ public final class CombatFormulaProvider {
             maxDamage = (long) Math.ceil(bot.getTotalLuk() * 5L * watk / 100.0d);
             minDamage = Math.max(1L, Math.round(maxDamage * 0.5d));
         } else if (skillId == DragonKnight.DRAGON_ROAR) {
-            maxDamage = (long) Math.ceil(bot.getTotalStr() * 4L + bot.getTotalDex() *  watk / 100.0d);
-            minDamage = Math.max(1L, Math.round(maxDamage * 0.8d));
+            double mastery = resolvePhysicalMastery(bot);
+            maxDamage = (long) Math.ceil((bot.getTotalStr() * 4.0d + bot.getTotalDex()) * watk / 100.0d);
+            minDamage = Math.max(1L, Math.round((bot.getTotalStr() * 4.0d * mastery * 0.9d + bot.getTotalDex()) * watk / 100.0d));
         } else if (skillId == NightLord.VENOMOUS_STAR || skillId == Shadower.VENOMOUS_STAB) {
             maxDamage = (long) Math.ceil((18.5d * (bot.getTotalStr() + bot.getTotalLuk()) + bot.getTotalDex() * 2.0d)
                     / 100.0d * bot.calculateMaxBaseDamage(watk));
@@ -639,8 +659,17 @@ public final class CombatFormulaProvider {
             maxDamage = (long) Math.floor(effect.getMoneyCon() * 10.0d * 1.5d);
             minDamage = maxDamage;
         } else {
-            maxDamage = bot.calculateMaxBaseDamage(watk);
-            minDamage = bot.calculateMinBaseDamage(watk, resolvePhysicalMastery(bot));
+            WeaponType forcedWeaponType = physicalWeaponTypeOverride != null
+                    ? physicalWeaponTypeOverride
+                    : forcedWeaponTypeForSkill(skillId);
+            if (forcedWeaponType != null) {
+                double mastery = resolvePhysicalMastery(bot);
+                maxDamage = physicalMaxBaseDamage(bot, watk, forcedWeaponType);
+                minDamage = physicalMinBaseDamage(bot, watk, forcedWeaponType, mastery);
+            } else {
+                maxDamage = bot.calculateMaxBaseDamage(watk);
+                minDamage = bot.calculateMinBaseDamage(watk, resolvePhysicalMastery(bot));
+            }
         }
 
         if (skillId != 0 && effect != null && skillId != Hermit.SHADOW_MESO) {
@@ -652,6 +681,25 @@ public final class CombatFormulaProvider {
         }
 
         return normalizeDamageProfile(minDamage, maxDamage, false, false);
+    }
+
+    private WeaponType forcedWeaponTypeForSkill(int skillId) {
+        return switch (skillId) {
+            case DragonKnight.SPEAR_CRUSHER -> WeaponType.SPEAR_STAB;
+            case DragonKnight.POLE_ARM_CRUSHER -> WeaponType.POLE_ARM_STAB;
+            case DragonKnight.SPEAR_DRAGON_FURY -> WeaponType.SPEAR_SWING;
+            case DragonKnight.POLE_ARM_DRAGON_FURY -> WeaponType.POLE_ARM_SWING;
+            default -> null;
+        };
+    }
+
+    private long physicalMaxBaseDamage(Character bot, int watk, WeaponType weaponType) {
+        return (long) Math.ceil((weaponType.getMaxDamageMultiplier() * bot.getTotalStr() + bot.getTotalDex()) * watk / 100.0d);
+    }
+
+    private long physicalMinBaseDamage(Character bot, int watk, WeaponType weaponType, double mastery) {
+        return Math.max(1L, Math.round((weaponType.getMaxDamageMultiplier() * bot.getTotalStr() * mastery * 0.9d
+                + bot.getTotalDex()) * watk / 100.0d));
     }
 
     private DamageProfile resolveMagicDamageProfile(Character bot, int skillId, StatEffect effect, int healTargetCount) {

@@ -107,6 +107,8 @@ public class BotEntry {
     // Skill cache
     int cachedSkillJob = -1;
     int cachedSkillLevel = -1;
+    int cachedSkillSignature = 0;
+    final List<Integer> attackSkillIds = new ArrayList<>();
     int attackSkillId = 0;
     int aoeSkillId = 0;
     int aoeSkillMobs = 1;

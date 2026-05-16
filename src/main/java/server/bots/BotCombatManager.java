@@ -17,7 +17,9 @@ import constants.skills.Bowmaster;
 import constants.skills.Buccaneer;
 import constants.skills.Cleric;
 import constants.skills.Corsair;
+import constants.skills.Crusader;
 import constants.skills.DawnWarrior;
+import constants.skills.DragonKnight;
 import constants.skills.Fighter;
 import constants.skills.GM;
 import constants.skills.Hunter;
@@ -28,6 +30,7 @@ import constants.skills.Rogue;
 import constants.skills.Spearman;
 import constants.skills.SuperGM;
 import constants.skills.ThunderBreaker;
+import constants.skills.WhiteKnight;
 import constants.skills.WindArcher;
 import io.netty.buffer.Unpooled;
 import net.PacketHandler;
@@ -72,6 +75,12 @@ class BotCombatManager {
             Rogue.DARK_SIGHT,
             NightWalker.DARK_SIGHT
     );
+    private static final Set<Integer> NON_DAMAGE_ACTIVE_SKILL_IDS = Set.of(
+            Crusader.ARMOR_CRASH,
+            WhiteKnight.MAGIC_CRASH,
+            DragonKnight.POWER_CRASH
+    );
+    private static final int DRAGON_ROAR_MIN_TARGETS_WITHOUT_HEALER = 10;
 
     enum AttackRoute {
         CLOSE,
@@ -93,10 +102,11 @@ class BotCombatManager {
         final int speed;
         final int hitDelayMs;
         final int cooldownMs;
+        final WeaponType damageWeaponType;
 
         AttackPlan(int skillId, int skillLevel, int numDamage, Rectangle hitBox, List<Monster> targets,
                    AttackRoute route, int display, int direction, int rangedDirection, int stance, int speed,
-                   int hitDelayMs, int cooldownMs) {
+                   int hitDelayMs, int cooldownMs, WeaponType damageWeaponType) {
             this.skillId = skillId;
             this.skillLevel = skillLevel;
             this.numDamage = numDamage;
@@ -110,6 +120,7 @@ class BotCombatManager {
             this.speed = speed;
             this.hitDelayMs = hitDelayMs;
             this.cooldownMs = cooldownMs;
+            this.damageWeaponType = damageWeaponType;
         }
 
         boolean hasHitBox() {
@@ -415,16 +426,20 @@ class BotCombatManager {
     }
 
     static void rebuildSkillCacheIfNeeded(BotEntry entry, Character bot) {
+        int skillSignature = skillCacheSignature(bot);
         if (entry.cachedSkillJob == bot.getJob().getId()
-                && entry.cachedSkillLevel == bot.getLevel()) {
+                && entry.cachedSkillLevel == bot.getLevel()
+                && entry.cachedSkillSignature == skillSignature) {
             return;
         }
 
         entry.cachedSkillJob = bot.getJob().getId();
         entry.cachedSkillLevel = bot.getLevel();
+        entry.cachedSkillSignature = skillSignature;
         entry.attackSkillId = 0;
         entry.aoeSkillId = 0;
         entry.aoeSkillMobs = 1;
+        entry.attackSkillIds.clear();
         entry.healSkillId = 0;
         entry.buffSkillIds.clear();
 
@@ -449,6 +464,7 @@ class BotCombatManager {
             }
 
             if (isActiveAttackSkill(skill, fx)) {
+                entry.attackSkillIds.add(skill.getId());
                 if (mobs >= 2) {
                     long score = (long) Math.max(0, fx.getDamage()) * Math.max(1, atk) * Math.max(1, mobs);
                     if (score > bestAoeScore) {
@@ -471,6 +487,19 @@ class BotCombatManager {
             entry.buffSkillIds.add(skill.getId());
             entry.nextBuffAt.putIfAbsent(skill.getId(), 0L);
         }
+    }
+
+    private static int skillCacheSignature(Character bot) {
+        int result = 1;
+        for (Map.Entry<Skill, Character.SkillEntry> learned : bot.getSkills().entrySet()) {
+            Skill skill = learned.getKey();
+            if (skill == null) {
+                continue;
+            }
+            result = 31 * result + skill.getId();
+            result = 31 * result + bot.getSkillLevel(skill);
+        }
+        return result;
     }
 
     static void tickBuffs(BotEntry entry, Character bot) {
@@ -499,6 +528,9 @@ class BotCombatManager {
             if (lvl <= 0) continue;
 
             StatEffect fx = skill.getEffect(lvl);
+            if (!isActiveSupportSkill(skill, fx) || BUFF_BLACKLIST.contains(skill.getId())) {
+                continue;
+            }
             if (castSupportSkill(entry, bot, skill, fx, now)) {
                 return;
             }
@@ -842,21 +874,33 @@ class BotCombatManager {
         try {
             List<AttackPlan> candidates = new ArrayList<>(3);
 
-            AttackPlan aoeAttack = planAoeAttack(entry, bot, target);
-            if (aoeAttack != null) {
-                candidates.add(aoeAttack);
-            }
-
-            AttackPlan skillAttack = planSingleTargetSkill(entry, bot, target);
-            if (skillAttack != null) {
-                candidates.add(skillAttack);
+            for (int skillId : cachedAttackSkillIds(entry)) {
+                AttackPlan skillAttack = planSkillAttack(entry, bot, target, skillId);
+                if (skillAttack != null) {
+                    candidates.add(skillAttack);
+                }
             }
 
             candidates.add(planBasicAttack(bot, target));
-            return selectHighestDamagePlan(bot, candidates);
+            return selectBestAttackPlan(bot, candidates);
         } finally {
             BotPerformanceMonitor.record("combat-plan", System.nanoTime() - startedAt);
         }
+    }
+
+    private static List<Integer> cachedAttackSkillIds(BotEntry entry) {
+        if (!entry.attackSkillIds.isEmpty()) {
+            return entry.attackSkillIds;
+        }
+
+        List<Integer> skillIds = new ArrayList<>(2);
+        if (entry.attackSkillId != 0) {
+            skillIds.add(entry.attackSkillId);
+        }
+        if (entry.aoeSkillId != 0 && entry.aoeSkillId != entry.attackSkillId) {
+            skillIds.add(entry.aoeSkillId);
+        }
+        return skillIds;
     }
 
     private static AttackPlan planBasicAttack(Character bot, Monster target) {
@@ -867,10 +911,11 @@ class BotCombatManager {
         }
         return new AttackPlan(0, 0, 1, basicAttackData.hitBox(), List.of(effective), basicAttackData.route(),
                 basicAttackData.display(), basicAttackData.direction(), basicAttackData.rangedDirection(), basicAttackData.stance(),
-                basicAttackData.speed(), basicAttackData.hitDelayMs(), basicAttackData.cooldownMs());
+                basicAttackData.speed(), basicAttackData.hitDelayMs(), basicAttackData.cooldownMs(),
+                damageWeaponTypeForAction(0, BotAttackExecutionProvider.getEquippedWeaponType(bot), basicAttackData.action()));
     }
 
-    private static AttackPlan selectHighestDamagePlan(Character bot, List<AttackPlan> candidates) {
+    private static AttackPlan selectBestAttackPlan(Character bot, List<AttackPlan> candidates) {
         AttackPlan best = null;
         double bestDamage = Double.NEGATIVE_INFINITY;
         for (AttackPlan candidate : candidates) {
@@ -895,7 +940,7 @@ class BotCombatManager {
     private static double estimatePlanDamage(Character bot, AttackPlan attackPlan) {
         CombatFormulaProvider.DamageProfile damageProfile = CombatFormulaProvider.getInstance().resolveDamageProfile(
                 bot, attackPlan.skillId, attackPlan.skillLevel,
-                attackPlan.route == AttackRoute.MAGIC);
+                attackPlan.route == AttackRoute.MAGIC, attackPlan.damageWeaponType);
         double total = 0.0d;
         for (Monster target : attackPlan.targets) {
             double expectedDamage = CombatFormulaProvider.getInstance().estimateExpectedDamage(bot, target, attackPlan.numDamage,
@@ -982,7 +1027,7 @@ class BotCombatManager {
         attack.ranged = attackPlan.route == AttackRoute.RANGED;
         CombatFormulaProvider.DamageProfile damageProfile = CombatFormulaProvider.getInstance().resolveDamageProfile(
                 bot, attackPlan.skillId, attackPlan.skillLevel,
-                attackPlan.route == AttackRoute.MAGIC);
+                attackPlan.route == AttackRoute.MAGIC, attackPlan.damageWeaponType);
         attack.magic = damageProfile.magicAttack();
         attack.targets = new HashMap<>();
 
@@ -1036,12 +1081,15 @@ class BotCombatManager {
         });
     }
 
-    private static AttackPlan planAoeAttack(BotEntry entry, Character bot, Monster primaryTarget) {
-        if (entry.aoeSkillId == 0 || bot.skillIsCooling(entry.aoeSkillId)) {
+    private static AttackPlan planSkillAttack(BotEntry entry, Character bot, Monster primaryTarget, int skillId) {
+        if (skillId == 0 || bot.skillIsCooling(skillId)) {
             return null;
         }
 
-        Skill skill = SkillFactory.getSkill(entry.aoeSkillId);
+        Skill skill = SkillFactory.getSkill(skillId);
+        if (skill == null) {
+            return null;
+        }
         int skillLevel = bot.getSkillLevel(skill);
         if (skillLevel <= 0) {
             return null;
@@ -1051,94 +1099,32 @@ class BotCombatManager {
         if (!effect.canPaySkillCost(bot)) {
             return null;
         }
-        AttackRoute route = BotAttackExecutionProvider.determineSkillRoute(bot, entry.aoeSkillId);
-        if (isStrikePointAnchoredAoeSkill(entry.aoeSkillId)) {
+        WeaponType weaponType = BotAttackExecutionProvider.getEquippedWeaponType(bot);
+        if (!canUseAttackSkillWithWeapon(skillId, weaponType)) {
+            return null;
+        }
+        AttackRoute route = BotAttackExecutionProvider.determineSkillRoute(bot, skillId);
+        if (isStrikePointAnchoredAoeSkill(skillId)) {
             primaryTarget = resolveStrikePointPrimaryByBasicWeapon(bot, primaryTarget, route);
         }
-        Rectangle hitBox = calculateSkillHitBox(effect, bot, primaryTarget, route, entry.aoeSkillId);
+        Rectangle hitBox = calculateSkillHitBox(effect, bot, primaryTarget, route, skillId);
         if (hitBox == null) {
             return null;
         }
 
-        // Strike-point-anchored skills have their hitBox centered on the target. The AoE radius
-        // does not prove the bot can actually reach the strike point — gate separately on the
-        // bot's basic weapon range.
-        if (isStrikePointAnchoredAoeSkill(entry.aoeSkillId)
+        if (isStrikePointAnchoredAoeSkill(skillId)
                 && !isPrimaryReachableByBasicWeapon(bot, primaryTarget, route)) {
             return null;
         }
 
-        // Strike-point-anchored skills already resolved the projectile's first-hit mob before
-        // building the explosion box; non-anchored skills still use their own skill hitBox.
-        if (!isStrikePointAnchoredAoeSkill(entry.aoeSkillId)) {
+        if (!isStrikePointAnchoredAoeSkill(skillId)) {
             primaryTarget = resolveEffectivePrimary(bot, primaryTarget, hitBox);
         }
-        List<Monster> targets = collectTargetsInHitBox(bot, primaryTarget, hitBox, Math.max(1, effect.getMobCount()));
-        if (targets.size() < BotCombatManager.cfg.AOE_MOB_THRESHOLD) {
-            return null;
-        }
-
-        int attackCount = Math.max(1, effect.getAttackCount());
-        WeaponType weaponType = BotAttackExecutionProvider.getEquippedWeaponType(bot);
-        if (!BotAttackExecutionProvider.canUseRangedAttackRoute(route, weaponType, bot.getPosition(), primaryTarget.getPosition())) {
-            return null;
-        }
-        boolean facingLeft = primaryTarget.getPosition().x < bot.getPosition().x;
-        BotAttackExecutionProvider.BasicAttackData fallbackAttackData = buildBasicAttackData(bot, primaryTarget);
-        BotAttackDataProvider.AttackAnimationSpec attackSpec = BotAttackDataProvider.getInstance().getBasicAttackSpec(weaponType);
-        String action = BotAttackExecutionProvider.resolveSkillAttackAction(bot, skill, skillLevel, weaponType);
-        String fallbackAction = attackSpec.primaryAction();
-        BotAttackExecutionProvider.CloseRangePacketFields closeRangePacketFields = route == AttackRoute.CLOSE
-                ? BotAttackExecutionProvider.mimicCloseRangePacketFields(action, fallbackAction, facingLeft)
-                : null;
-        int direction = route == AttackRoute.CLOSE
-                ? closeRangePacketFields.bodyActionId()
-                : BotAttackExecutionProvider.bodyActionId(action, fallbackAction, weaponType);
-        BotAttackExecutionProvider.SkillAttackTiming skillTiming =
-                BotAttackExecutionProvider.resolveSkillAttackTiming(skill, action, bot, fallbackAttackData);
-        return new AttackPlan(entry.aoeSkillId, skillLevel, attackCount, hitBox, targets,
-                route, route == AttackRoute.CLOSE ? closeRangePacketFields.display() : 0,
-                direction, direction,
-                BotAttackExecutionProvider.attackPacketStance(facingLeft),
-                fallbackAttackData.speed(), skillTiming.hitDelayMs(), skillTiming.cooldownMs());
-    }
-
-    private static AttackPlan planSingleTargetSkill(BotEntry entry, Character bot, Monster primaryTarget) {
-        if (entry.attackSkillId == 0 || bot.skillIsCooling(entry.attackSkillId)) {
-            return null;
-        }
-
-        Skill skill = SkillFactory.getSkill(entry.attackSkillId);
-        int skillLevel = bot.getSkillLevel(skill);
-        if (skillLevel <= 0) {
-            return null;
-        }
-
-        StatEffect effect = skill.getEffect(skillLevel);
-        if (!effect.canPaySkillCost(bot)) {
-            return null;
-        }
-        AttackRoute route = BotAttackExecutionProvider.determineSkillRoute(bot, entry.attackSkillId);
-        Rectangle hitBox = calculateSkillHitBox(effect, bot, primaryTarget, route, entry.attackSkillId);
-        if (hitBox == null) {
-            return null;
-        }
-
-        // Strike-point-anchored skills have their hitBox centered on the target, so the
-        // subsequent intersect check passes trivially. Verify the bot can actually reach the
-        // target with its basic weapon range before letting the skill fire.
-        if (isStrikePointAnchoredAoeSkill(entry.attackSkillId)
-                && !isPrimaryReachableByBasicWeapon(bot, primaryTarget, route)) {
-            return null;
-        }
-
-        primaryTarget = resolveEffectivePrimary(bot, primaryTarget, hitBox);
         if (!doesHitBoxIntersectMonster(hitBox, primaryTarget)) {
             return null;
         }
 
         int attackCount = effectiveHitCount(effect);
-        WeaponType weaponType = BotAttackExecutionProvider.getEquippedWeaponType(bot);
         if (!BotAttackExecutionProvider.canUseRangedAttackRoute(route, weaponType, bot.getPosition(), primaryTarget.getPosition())) {
             return null;
         }
@@ -1155,11 +1141,76 @@ class BotCombatManager {
                 : BotAttackExecutionProvider.bodyActionId(action, fallbackAction, weaponType);
         BotAttackExecutionProvider.SkillAttackTiming skillTiming =
                 BotAttackExecutionProvider.resolveSkillAttackTiming(skill, action, bot, fallbackAttackData);
-        return new AttackPlan(entry.attackSkillId, skillLevel, attackCount, hitBox, List.of(primaryTarget),
+        List<Monster> targets = collectTargetsInHitBox(bot, primaryTarget, hitBox, Math.max(1, effect.getMobCount()));
+        if (skillId == DragonKnight.DRAGON_ROAR && !canUseDragonRoarPlan(bot, targets.size())) {
+            return null;
+        }
+        return new AttackPlan(skillId, skillLevel, attackCount, hitBox, targets,
                 route, route == AttackRoute.CLOSE ? closeRangePacketFields.display() : 0,
                 direction, direction,
                 BotAttackExecutionProvider.attackPacketStance(facingLeft),
-                fallbackAttackData.speed(), skillTiming.hitDelayMs(), skillTiming.cooldownMs());
+                fallbackAttackData.speed(), skillTiming.hitDelayMs(), skillTiming.cooldownMs(),
+                damageWeaponTypeForAction(skillId, weaponType, action));
+    }
+
+    private static boolean canUseDragonRoarPlan(Character bot, int targetCount) {
+        int maxHp = bot.getCurrentMaxHp();
+        if (maxHp <= 0 || bot.getHp() * 2 <= maxHp) {
+            return false;
+        }
+        return targetCount >= DRAGON_ROAR_MIN_TARGETS_WITHOUT_HEALER || hasNearbyHealSkillAlly(bot);
+    }
+
+    private static boolean hasNearbyHealSkillAlly(Character bot) {
+        for (Character member : getNearbyPartyMembers(bot)) {
+            if (member.getSkillLevel(Cleric.HEAL) > 0 || member.getSkillLevel(SuperGM.HEAL_PLUS_DISPEL) > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static WeaponType damageWeaponTypeForAction(int skillId, WeaponType equippedWeaponType, String action) {
+        WeaponType skillForcedWeaponType = switch (skillId) {
+            case DragonKnight.SPEAR_CRUSHER -> WeaponType.SPEAR_STAB;
+            case DragonKnight.POLE_ARM_CRUSHER -> WeaponType.POLE_ARM_STAB;
+            case DragonKnight.SPEAR_DRAGON_FURY -> WeaponType.SPEAR_SWING;
+            case DragonKnight.POLE_ARM_DRAGON_FURY -> WeaponType.POLE_ARM_SWING;
+            default -> null;
+        };
+        if (skillForcedWeaponType != null || action == null || equippedWeaponType == null) {
+            return skillForcedWeaponType;
+        }
+
+        boolean stab = action.startsWith("stab");
+        boolean swing = action.startsWith("swing");
+        if (!stab && !swing) {
+            return null;
+        }
+
+        return switch (equippedWeaponType) {
+            case SPEAR_STAB, SPEAR_SWING -> stab ? WeaponType.SPEAR_STAB : WeaponType.SPEAR_SWING;
+            case POLE_ARM_SWING, POLE_ARM_STAB -> stab ? WeaponType.POLE_ARM_STAB : WeaponType.POLE_ARM_SWING;
+            case GENERAL1H_SWING, GENERAL1H_STAB -> stab ? WeaponType.GENERAL1H_STAB : WeaponType.GENERAL1H_SWING;
+            case GENERAL2H_SWING, GENERAL2H_STAB -> stab ? WeaponType.GENERAL2H_STAB : WeaponType.GENERAL2H_SWING;
+            default -> null;
+        };
+    }
+
+    static boolean canUseAttackSkillWithWeapon(int skillId, WeaponType weaponType) {
+        return switch (skillId) {
+            case DragonKnight.SPEAR_CRUSHER, DragonKnight.SPEAR_DRAGON_FURY -> isSpearWeapon(weaponType);
+            case DragonKnight.POLE_ARM_CRUSHER, DragonKnight.POLE_ARM_DRAGON_FURY -> isPolearmWeapon(weaponType);
+            default -> true;
+        };
+    }
+
+    private static boolean isSpearWeapon(WeaponType weaponType) {
+        return weaponType == WeaponType.SPEAR_STAB || weaponType == WeaponType.SPEAR_SWING;
+    }
+
+    private static boolean isPolearmWeapon(WeaponType weaponType) {
+        return weaponType == WeaponType.POLE_ARM_SWING || weaponType == WeaponType.POLE_ARM_STAB;
     }
 
     private static Rectangle calculateSkillHitBox(StatEffect effect, Character bot, Monster primaryTarget, AttackRoute route, int skillId) {
@@ -2203,6 +2254,9 @@ class BotCombatManager {
         if (skill == null || effect == null) {
             return false;
         }
+        if (NON_DAMAGE_ACTIVE_SKILL_IDS.contains(skill.getId())) {
+            return false;
+        }
         if (effect.isOverTime() || effect.getDamage() <= 0) {
             return false;
         }
@@ -2216,6 +2270,9 @@ class BotCombatManager {
 
     private static boolean isActiveSupportSkill(Skill skill, StatEffect effect) {
         if (skill == null || effect == null || !effect.isOverTime()) {
+            return false;
+        }
+        if (NON_DAMAGE_ACTIVE_SKILL_IDS.contains(skill.getId())) {
             return false;
         }
         return skill.getAction() || skill.getSkillType() == 2;

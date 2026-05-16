@@ -376,7 +376,7 @@ class BotManagerTest {
         BotCombatManager.AttackPlan rangedPlan = new BotCombatManager.AttackPlan(
                 0, 0, 1, new Rectangle(105, 50, 395, 100),
                 List.of(rangedMob), BotCombatManager.AttackRoute.RANGED,
-                0, 11, 11, 11, 4, 300, 600);
+                0, 11, 11, 11, 4, 300, 600, null);
 
         when(bot.getMap()).thenReturn(map);
         when(map.getAllMonsters()).thenReturn(List.of(closeMob, rangedMob));
@@ -408,7 +408,7 @@ class BotManagerTest {
         BotCombatManager.AttackPlan rangedPlan = new BotCombatManager.AttackPlan(
                 0, 0, 1, new Rectangle(-200, 50, 300, 100),
                 List.of(target), BotCombatManager.AttackRoute.RANGED,
-                0, 11, 11, 11, 4, 300, 600);
+                0, 11, 11, 11, 4, 300, 600, null);
 
         try (MockedStatic<BotAttackExecutionProvider> attacks =
                      mockStatic(BotAttackExecutionProvider.class, org.mockito.Mockito.CALLS_REAL_METHODS);
@@ -1109,7 +1109,7 @@ class BotManagerTest {
     private static BotCombatManager.AttackPlan basicClosePlan(Monster target) {
         return new BotCombatManager.AttackPlan(
                 0, 0, 1, null, List.of(target), BotCombatManager.AttackRoute.CLOSE,
-                0, 0, 0, 0, 0, 0, 0);
+                0, 0, 0, 0, 0, 0, 0, null);
     }
 
     private static MapleMap createEmptyTestMap(int mapId) {

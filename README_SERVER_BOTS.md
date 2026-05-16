@@ -59,6 +59,8 @@ jason stop - only jason will stop
 |---|---|
 | `transfer <botName> to <newOwner>` | Hand bot ownership to another player
 | `!takebotowner <botName> [newOwner]` | GM force-reassign bot ownership
+| `dismiss <botName>` | Leave bot idle AND ignore commands (make it afk)
+| `recruit <botName>` | Get dismissed bot back to follow you
 
 ## Commands Available (chat with the bot)
 
