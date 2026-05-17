@@ -71,6 +71,17 @@ public final class BotPerformanceMonitor {
         notes.put("common-release-mob", "tickReleaseMonsterControl (release stale controlled mobs)");
         notes.put("common-passive-loot", "BotInventoryManager.tickPassiveLoot (scan drops + pickup + autoEquip)");
         notes.put("common-potion-check", "BotPotionManager.tickPotionCheck (HP/MP potion request)");
+        notes.put("potion-autopot", "BotPotionManager.setupAutopotForBot (scan USE bag + choose HP/MP autopot bindings)");
+        notes.put("potion-ammo-check", "BotCombatManager.tickAmmoCheck invoked from potion check");
+        notes.put("potion-ammo-share", "BotAmmoManager.tickAmmoShareCheck invoked from potion check");
+        notes.put("potion-count", "BotPotionManager.countPotions for the active bot");
+        notes.put("potion-recovery-scan", "BotPotionManager.recoveryPotions (USE inventory scan + recovery classification)");
+        notes.put("potion-recovery-count", "BotPotionManager.countPotions second pass over recovery items");
+        notes.put("potion-share-hp", "HP low-pot branch including donor search / scheduling");
+        notes.put("potion-share-mp", "MP low-pot branch including donor search / scheduling");
+        notes.put("potion-grind-stop", "low-pot grind-stop branch (follow owner + emote)");
+        notes.put("potion-request", "BotPotionManager.requestPotShare total");
+        notes.put("potion-donor-select", "BotPotionManager.selectPotDonor sibling scan");
         notes.put("common-passive-recovery", "BotPotionManager.tickPassiveRecovery (regen / mana recovery)");
         notes.put("common-build-levelup", "BotBuildManager.checkLevelUp (skill point allocation)");
         notes.put("common-afk-check", "BotChatManager.tickAfkCheck (owner-AFK detection)");

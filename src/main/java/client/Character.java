@@ -9190,6 +9190,8 @@ public class Character extends AbstractCharacterObject {
                     Item autohpItem = this.getInventory(InventoryType.USE).findById(autohpItemid);
                     if (autohpItem != null) {
                         runAutopotAction(autohpItem.getPosition(), autohpItemid);
+                    } else if (this.client instanceof BotClient) {
+                        BotManager.getInstance().requestBotPotionCheckSoon(this);
                     }
                 }
             }
@@ -9205,6 +9207,8 @@ public class Character extends AbstractCharacterObject {
                     if (autompItem != null) {
                         this.setAutopotMpAlert(0.9f * autompAlert); // autoMP would stick to using pots at every depletion in some cases... thanks Rohenn
                         runAutopotAction(autompItem.getPosition(), autompItemid);
+                    } else if (this.client instanceof BotClient) {
+                        BotManager.getInstance().requestBotPotionCheckSoon(this);
                     }
                 }
             }

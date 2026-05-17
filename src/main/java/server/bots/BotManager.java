@@ -61,7 +61,8 @@ public class BotManager {
         // Potion management
         public int   POT_LOW_WARN          = 100;   // warn on grind start below this count
         public int   POT_STOP              = 10;    // stop grinding below this HP pot count
-        public int   POT_CHECK_INTERVAL_MS = 2_000;
+        public int   POT_CHECK_INTERVAL_MS = 45_000;
+        public int   POT_CHECK_RETRY_SOON_MS = 250;
         public int   MP_RECOVERY_INTERVAL_MS = 10_000;
         public int   BASE_HP_RECOVERY = 10;
         public int   BASE_MP_RECOVERY = 3;
@@ -638,6 +639,24 @@ public class BotManager {
             }
         }
         return null;
+    }
+
+    public void requestBotPotionCheckSoon(Character bot) {
+        if (bot == null || !(bot.getClient() instanceof BotClient)) {
+            return;
+        }
+        Character owner = getActiveOwnerByBotCharId(bot.getId());
+        if (owner == null) {
+            return;
+        }
+        BotEntry entry = getBotEntry(owner.getId(), bot.getId());
+        if (entry == null) {
+            return;
+        }
+        int soonDelayMs = Math.max(0, cfg.POT_CHECK_RETRY_SOON_MS);
+        if (entry.potCheckTimerMs <= 0 || entry.potCheckTimerMs > soonDelayMs) {
+            entry.potCheckTimerMs = soonDelayMs;
+        }
     }
 
     /** Finds a bot-client character with the given name that is not currently owned by anyone. */

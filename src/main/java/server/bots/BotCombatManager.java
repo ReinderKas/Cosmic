@@ -2141,10 +2141,25 @@ class BotCombatManager {
         }
 
         if (mage) {
-            int[] pots = BotPotionManager.countPotions(bot);
-            int mpPots = pots[1];
-            if (mpPots > 0) {
+            int mpPotionCount = 0;
+            for (Item item : bot.getInventory(InventoryType.USE).list()) {
+                if (item.getQuantity() <= 0) {
+                    continue;
+                }
+                StatEffect effect = BotInventoryManager.itemEffect(item.getItemId());
+                if (effect == null || !effect.getStatups().isEmpty()) {
+                    continue;
+                }
+                if (effect.getMp() > 0 || effect.getMpRate() > 0) {
+                    mpPotionCount += item.getQuantity();
+                    if (mpPotionCount >= BotManager.cfg.POT_LOW_WARN) {
+                        break;
+                    }
+                }
+            }
+            if (mpPotionCount > 0) {
                 entry.noAmmo = false;
+                entry.ammoWarnSent = false;
                 return;
             }
             if (!entry.noAmmo) {
