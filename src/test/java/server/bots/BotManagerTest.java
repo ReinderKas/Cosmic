@@ -11,6 +11,7 @@ import constants.game.CharacterStance;
 import org.mockito.MockedStatic;
 import org.junit.jupiter.api.Test;
 import server.StatEffect;
+import server.TimerManager;
 import server.life.Monster;
 import server.maps.Foothold;
 import server.maps.FootholdTree;
@@ -37,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -114,7 +116,15 @@ class BotManagerTest {
         Map<Integer, List<BotEntry>> bots = (Map<Integer, List<BotEntry>>) field(BotManager.class, "bots").get(manager);
         bots.put(owner.getId(), List.of(observerEntry));
 
-        try (MockedStatic<BotOfferManager> offers = mockStatic(BotOfferManager.class)) {
+        TimerManager inlineTimer = mock(TimerManager.class);
+        when(inlineTimer.schedule(any(Runnable.class), anyLong())).thenAnswer(inv -> {
+            ((Runnable) inv.getArgument(0)).run();
+            return null;
+        });
+        try (MockedStatic<BotOfferManager> offers = mockStatic(BotOfferManager.class);
+             MockedStatic<TimerManager> timer = mockStatic(TimerManager.class)) {
+            timer.when(TimerManager::getInstance).thenReturn(inlineTimer);
+
             manager.notifyOwnerGainedTradeItem(owner, tradedEquip, sourcePlayer);
 
             offers.verify(() -> BotOfferManager.notifyOwnerGainedEquip(observerEntry, observerBot, tradedEquip));
@@ -366,7 +376,7 @@ class BotManagerTest {
         BotCombatManager.AttackPlan rangedPlan = new BotCombatManager.AttackPlan(
                 0, 0, 1, new Rectangle(105, 50, 395, 100),
                 List.of(rangedMob), BotCombatManager.AttackRoute.RANGED,
-                0, 11, 11, 11, 4, 300, 600);
+                0, 11, 11, 11, 4, 300, 600, null);
 
         when(bot.getMap()).thenReturn(map);
         when(map.getAllMonsters()).thenReturn(List.of(closeMob, rangedMob));
@@ -398,7 +408,7 @@ class BotManagerTest {
         BotCombatManager.AttackPlan rangedPlan = new BotCombatManager.AttackPlan(
                 0, 0, 1, new Rectangle(-200, 50, 300, 100),
                 List.of(target), BotCombatManager.AttackRoute.RANGED,
-                0, 11, 11, 11, 4, 300, 600);
+                0, 11, 11, 11, 4, 300, 600, null);
 
         try (MockedStatic<BotAttackExecutionProvider> attacks =
                      mockStatic(BotAttackExecutionProvider.class, org.mockito.Mockito.CALLS_REAL_METHODS);
@@ -775,7 +785,7 @@ class BotManagerTest {
     }
 
     @Test
-    void shouldUseFarmHereAnchorAsPrimaryTargetWithoutEnteringGrindMode() {
+    void shouldUseFarmHereAnchorAsPrimaryTargetAndEnterGrindMode() {
         MapleMap map = createEmptyTestMap(910000031);
         Character owner = mockMovingBot(new Point(50, 100), map);
         Character bot = mockMovingBot(new Point(100, 100), map);
@@ -788,7 +798,7 @@ class BotManagerTest {
         assertEquals(new Point(300, 100), entry.moveTarget);
         assertTrue(entry.moveTargetPrecise);
         assertFalse(entry.following);
-        assertFalse(entry.grinding);
+        assertTrue(entry.grinding);
 
         BotManager.TargetSnapshot snapshot = BotManager.getInstance().captureTargetSnapshot(entry);
         assertEquals(new Point(300, 100), snapshot.primaryTargetPos());
@@ -1059,6 +1069,24 @@ class BotManagerTest {
     }
 
     @Test
+    void shouldPrioritizeEtcTradeItemsRecipientAlreadyHasBeforeItemIdOrder() {
+        Character recipient = mock(Character.class);
+        Inventory etcInventory = new Inventory(recipient, InventoryType.ETC, (byte) 24);
+
+        etcInventory.addItem(new Item(4000001, (short) 1, (short) 20));
+        when(recipient.getInventory(InventoryType.ETC)).thenReturn(etcInventory);
+
+        Item item4000002 = new Item(4000002, (short) 3, (short) 10);
+        Item item4000000 = new Item(4000000, (short) 1, (short) 10);
+        Item item4000001 = new Item(4000001, (short) 2, (short) 10);
+
+        List<Item> ordered = BotInventoryManager.prioritizeEtcTradeItems(
+                List.of(item4000002, item4000000, item4000001), recipient);
+
+        assertEquals(List.of(item4000001, item4000000, item4000002), ordered);
+    }
+
+    @Test
     void shouldMatchNaturalSupplyRequestPhrases() {
         assertTrue(BotChatManager.isNeedPotCommand("nned pot"));
         assertTrue(BotChatManager.isNeedPotCommand("need some pots"));
@@ -1078,10 +1106,31 @@ class BotManagerTest {
         assertEquals("warrior potion", BotChatManager.matchItemQuery("anybody got warrior potions?"));
     }
 
+    @Test
+    void shouldPrioritizeRecipientDuplicatesWithinUseTradeBuckets() {
+        Character owner = mock(Character.class);
+        Inventory ownerUse = new Inventory(owner, InventoryType.USE, (byte) 24);
+        ownerUse.addItem(Items.itemWithQuantity(2030000, 1));
+        ownerUse.addItem(Items.itemWithQuantity(2040000, 1));
+        when(owner.getInventory(InventoryType.USE)).thenReturn(ownerUse);
+
+        List<Item> ordered = BotInventoryManager.prioritizeTradeUseItems(
+                List.of(
+                        Items.itemWithQuantity(2030001, 1),
+                        Items.itemWithQuantity(2030000, 1)),
+                List.of(
+                        Items.itemWithQuantity(2060000, 1),
+                        Items.itemWithQuantity(2040000, 1)),
+                owner);
+
+        assertEquals(List.of(2030000, 2030001, 2040000, 2060000),
+                ordered.stream().map(Item::getItemId).toList());
+    }
+
     private static BotCombatManager.AttackPlan basicClosePlan(Monster target) {
         return new BotCombatManager.AttackPlan(
                 0, 0, 1, null, List.of(target), BotCombatManager.AttackRoute.CLOSE,
-                0, 0, 0, 0, 0, 0, 0);
+                0, 0, 0, 0, 0, 0, 0, null);
     }
 
     private static MapleMap createEmptyTestMap(int mapId) {

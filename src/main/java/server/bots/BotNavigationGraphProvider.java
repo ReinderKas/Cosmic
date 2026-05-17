@@ -28,13 +28,14 @@ import java.util.concurrent.Executors;
 final class BotNavigationGraphProvider {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationGraphProvider.class);
 
-    private static final int GRAPH_VERSION = 41;
+    private static final int GRAPH_VERSION = 45;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
     private static final int DOWN_JUMP_PRELAUNCH_WINDOW_PX = 20;
     private static final int SAME_SOLID_NEST_GAP_PX = 8;
     private static final int ROPE_ANCHOR_INTERVAL_PX = 30;
     private static final int JUMP_POST_LANDING_STABILITY_TICKS = 3;
     private static final int MAX_PROFILED_JUMP_REGIONS = 5;
+    private static final int FAST_WARMUP_MAX_FOOTHOLDS = 200;
     private static final Path CACHE_DIR = Path.of("cache", "bot-nav", "v" + GRAPH_VERSION);
     private static final Map<GraphCacheKey, BotNavigationGraph> GRAPHS = new ConcurrentHashMap<>();
     private static final Map<GraphCacheKey, CompletableFuture<BotNavigationGraph>> PENDING_GRAPHS = new ConcurrentHashMap<>();
@@ -44,6 +45,11 @@ final class BotNavigationGraphProvider {
     private static final ThreadLocal<BuildProfileBuilder> ACTIVE_BUILD_PROFILE = new ThreadLocal<>();
     private static final ExecutorService GRAPH_WARMUP_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "bot-nav-graph-warmup");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private static final ExecutorService FAST_GRAPH_WARMUP_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "bot-nav-graph-warmup-fast");
         thread.setDaemon(true);
         return thread;
     });
@@ -414,11 +420,22 @@ final class BotNavigationGraphProvider {
         };
 
         if (async) {
-            GRAPH_WARMUP_EXECUTOR.execute(task);
+            selectWarmupExecutor(map).execute(task);
         } else {
             task.run();
         }
         return future;
+    }
+
+    private static ExecutorService selectWarmupExecutor(MapleMap map) {
+        return isFastWarmupCandidate(map) ? FAST_GRAPH_WARMUP_EXECUTOR : GRAPH_WARMUP_EXECUTOR;
+    }
+
+    private static boolean isFastWarmupCandidate(MapleMap map) {
+        if (map == null || map.getFootholds() == null) {
+            return false;
+        }
+        return map.getFootholds().getAllFootholds().size() <= FAST_WARMUP_MAX_FOOTHOLDS;
     }
 
     private static BotNavigationGraph loadOrBuildGraph(MapleMap map,

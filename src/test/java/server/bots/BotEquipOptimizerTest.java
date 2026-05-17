@@ -243,6 +243,70 @@ class BotEquipOptimizerTest {
                 "Stat-gated Arbion must not prune feasible PWG fallback; got itemId=" + pick.getItemId());
     }
 
+    @Test
+    void itemReqMustBeMetWithoutItsOwnStatContribution() {
+        // Reproduces Preston-2026-05-10 bug: Cleric bot ends up with no hat equipped
+        // because the DP picks Brown Guiltian (req luk43, +luk2) over Brown Matty
+        // (req luk38, +luk3) when bot's pre-hat luk is 42. Old validateReqs counted
+        // Guiltian's own +luk2 toward its own req (state luk = 44 >= 43, "passes"),
+        // but at equip time luk is 42 < 43 -- own contribution doesn't satisfy own req.
+        // Correct behavior: DP must reject Guiltian and pick Matty (req 38 met by 42).
+        final int GUILTIAN_ID = 1002000;
+        final int MATTY_ID = 1002001;
+
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.CLERIC);
+        when(bot.getLevel()).thenReturn(46);
+        when(bot.getFame()).thenReturn(0);
+
+        Equip guiltian = mock(Equip.class);
+        when(guiltian.getItemId()).thenReturn(GUILTIAN_ID);
+        when(guiltian.getInt()).thenReturn((short) 7);
+        when(guiltian.getLuk()).thenReturn((short) 2);
+        when(guiltian.getPosition()).thenReturn((short) 1);
+
+        Equip matty = mock(Equip.class);
+        when(matty.getItemId()).thenReturn(MATTY_ID);
+        when(matty.getInt()).thenReturn((short) 4);
+        when(matty.getLuk()).thenReturn((short) 3);
+        when(matty.getPosition()).thenReturn((short) 2);
+
+        Map<Integer, Integer> reqLukByItem = new HashMap<>();
+        reqLukByItem.put(GUILTIAN_ID, 43);
+        reqLukByItem.put(MATTY_ID, 38);
+
+        BotEquipManager.OptimizerHooks hooks = new BotEquipManager.OptimizerHooks() {
+            @Override public boolean isTwoHanded(int itemId) { return false; }
+            @Override public WeaponType getWeaponType(int itemId) { return null; }
+            @Override public boolean isOverall(int itemId) { return false; }
+            @Override public boolean meetsReqs(Equip e, Job job, int lvl, int s, int d, int i, int l, int f) {
+                return l >= reqLukByItem.getOrDefault(e.getItemId(), 0);
+            }
+        };
+
+        Map<Short, Equip> currentBySlot = new HashMap<>();
+        Map<Short, List<Equip>> bySlot = new LinkedHashMap<>();
+        bySlot.put(S_HAT, List.of(guiltian, matty));
+
+        BotEquipManager.StatSnapshot naked = new BotEquipManager.StatSnapshot(
+                /*str*/ 4, /*dex*/ 4, /*int_*/ 200, /*luk*/ 42,
+                /*watk*/ 0, /*magic*/ 200, /*flatAcc*/ 0,
+                /*level*/ 46, /*fame*/ 0, Job.CLERIC);
+        BotEquipManager.MapDamageProfile mob =
+                new BotEquipManager.MapDamageProfile(/*wdef*/ 0, /*avoid*/ 0, /*level*/ 50);
+
+        BotEquipManager.DpResult result = BotEquipManager.solveForWeapon(
+                bot, hooks, naked, /*weapon*/ null, List.of(S_HAT), currentBySlot, bySlot, mob);
+
+        assertNotNull(result, "expected a feasible plan");
+        Equip pick = result.picks().get(S_HAT);
+        assertNotNull(pick, "expected a hat pick (Matty is feasible)");
+        assertEquals(MATTY_ID, pick.getItemId(),
+                "Guiltian (req luk43, +luk2) must NOT be picked when bot pre-hat luk=42 "
+                + "(item's own +luk2 cannot satisfy its own req); expected Matty (req 38). "
+                + "Got itemId=" + pick.getItemId());
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static List<Short> asList(short[] arr) {

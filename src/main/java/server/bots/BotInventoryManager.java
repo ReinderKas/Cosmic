@@ -37,6 +37,7 @@ import java.util.function.Predicate;
 class BotInventoryManager {
     private static final Logger log = LoggerFactory.getLogger(BotInventoryManager.class);
     private static final long TRADE_COMMAND_PROFILE_WARN_NS = 50_000_000L;
+    private static final int MANUAL_TRADE_TIMEOUT_MS = 60_000;
     private record PreparedTradeItems(List<Item> items, String errorMessage) {}
     private record EquipTradeGroups(List<Item> normal,
                                     List<Item> reservedForOther,
@@ -49,40 +50,36 @@ class BotInventoryManager {
             };
         }
     }
+    private record UseTradeGroups(List<Item> uncategorized, List<Item> categorized) {}
+    private record AmmoTradeGroups(List<Item> nonOwn, List<Item> own) {
+        List<Item> itemsFor(AmmoGroup group) {
+            return switch (group) {
+                case NON_OWN -> nonOwn;
+                case OWN -> own;
+            };
+        }
+    }
 
     private static final Set<Integer> manualTradeGreetingSent = ConcurrentHashMap.newKeySet();
     private static final List<String> TRADE_INVITATION_MSGS = List.of(
             "k", "ok", "kk", "sure", "k, I inv", "k i inv",
-            "omw", "inv u", "one sec", "coming",
-            "inv me", "trade me", "aight inv", "ok inv me",
+            "omw", "inv u", "one sec", "coming", "1sec", "1 sec",
+            "kkk", "aight", "aight inv", "alright", "alright inv",
             "pull up", "slide trade", "ill trade u", "opening trade",
             "trade time", "sending trade", "im here", "ready when u are");
     private static final List<String> TRADE_THANKS_MSGS = List.of(
             "ty!", "thanks!", "thank you!", "tyty", "appreciate it!", "tysm!",
-            "nice ty", "ooh ty!", "thx!!", "much appreciated",
+            "nice ty", "ooh ty!", "thx!!", "much appreciated", "thx", "wow thx", "I owe you one",
             "sweet ty", "ay ty", "perfect ty", "huge ty", "sick ty", "legend");
     private static final List<String> TRADE_FREEBIE_QUIPS = List.of(
-            "i better get paid for that eventually lol",
-            "you really should be paying me for that",
-            "free delivery, where's my tip",
-            "don't say i never gave you anything",
-            "i'm basically your personal shopper at this point",
-            "doing this for free smh",
-            "enjoy",
-            "hope u like it",
-            ":)",
-            "there u go",
-            "have fun",
-            "that should help",
-            "use it well",
-            "all yours",
-            "take good care of it",
-            "its in there",
-            "delivered",
-            "enjoy the loot",
-            "hope that helps",
-            "treat it nicely",
-            "consider that a gift");
+            "i better get paid for that eventually lol", "you really should be paying me for that :P",
+            "free delivery, where's my tip", "don't say i never gave you anything",
+            "i'm basically your personal shopper at this point", "doing this for free smh",
+            "enjoy", "hope u like it", "enjoy the loot",
+            ":)", ":D", "np", "npnp", "npnpnp", "np man enjoy",
+            "there u go", "have fun", "that should help",
+            "use it well", "all yours", "take good care of it",
+            "delivered", "hope that helps", "treat it nicely", "tell me if you find anything for me too");
     private static final List<String> NO_ITEMS_MSGS = List.of(
             "i don't have any %s",
             "no %s on me rn",
@@ -244,9 +241,7 @@ class BotInventoryManager {
 
         Set<Integer> allowed = new HashSet<>();
         allowed.add(patrolRegionId);
-        for (BotNavigationGraph.Edge edge : graph.getOutgoing(patrolRegionId)) {
-            allowed.add(edge.toRegionId);
-        }
+        allowed.addAll(graph.getMutualAdjacentRegionIds(patrolRegionId));
 
         long now = System.currentTimeMillis();
         Point botPos = bot.getPosition();
@@ -271,9 +266,26 @@ class BotInventoryManager {
 
         Trade trade = bot.getTrade();
         Character owner = entry.owner;
-        if (trade == null || owner == null) {
+        if (trade == null) {
+            clearManualTradeState(entry, bot);
+            return;
+        }
+
+        if (trade != entry.manualTradeRef) {
             manualTradeGreetingSent.remove(bot.getId());
             entry.manualTradeAcceptDelayMs = 0;
+            entry.manualTradeRef = trade;
+            entry.manualTradeTimeoutMs = MANUAL_TRADE_TIMEOUT_MS;
+        } else if (entry.manualTradeTimeoutMs > 0) {
+            entry.manualTradeTimeoutMs = BotMovementManager.tickDown(entry.manualTradeTimeoutMs);
+            if (entry.manualTradeTimeoutMs == 0) {
+                Trade.cancelTrade(bot, Trade.TradeResult.NO_RESPONSE);
+                clearManualTradeState(entry, bot);
+                return;
+            }
+        }
+
+        if (owner == null) {
             return;
         }
 
@@ -415,6 +427,11 @@ class BotInventoryManager {
             logSlowTradeCommand(category, "startTradeTransfer", entry, bot, startedAt);
             return;
         }
+        if ("ammo".equals(category)) {
+            startAmmoGroupTradeTransfer(owner, entry, bot);
+            logSlowTradeCommand(category, "startTradeTransfer", entry, bot, startedAt);
+            return;
+        }
         long prepareStartedAt = startedAt != 0L ? System.nanoTime() : 0L;
         PreparedTradeItems prepared = prepareTradeItems(category, entry, bot);
         logSlowTradeCommand(category, "prepareTradeItems", entry, bot, prepareStartedAt);
@@ -536,6 +553,7 @@ class BotInventoryManager {
             case "pots" -> "pots";
             case "buff" -> "buff pots";
             case "use" -> "use items";
+            case "ammo" -> "ammo";
             case "equips" -> "equips";
             case "trash" -> "trash equips";
             case "etc" -> "etc items";
@@ -624,6 +642,9 @@ class BotInventoryManager {
             List<Item> next = collectItems(entry.pendingTradeCategory, entry, bot);
             if (next.isEmpty()) {
                 String advanced = nextEquipsGroup(entry.pendingTradeCategory, entry, bot);
+                if (advanced == null) {
+                    advanced = nextAmmoGroup(entry.pendingTradeCategory, bot);
+                }
                 if (advanced != null) {
                     entry.pendingTradeCategory = advanced;
                     entry.pendingTradeCategoryMsg = equipsGroupMsg(advanced);
@@ -770,9 +791,17 @@ class BotInventoryManager {
         resetTradeState(entry, bot);
     }
 
+    private static void clearManualTradeState(BotEntry entry, Character bot) {
+        manualTradeGreetingSent.remove(bot.getId());
+        entry.manualTradeAcceptDelayMs = 0;
+        entry.manualTradeRef = null;
+        entry.manualTradeTimeoutMs = 0;
+    }
+
     private static void resetTradeState(BotEntry entry, Character bot) {
         boolean hadRestores = !entry.pendingTradeRestoreSlots.isEmpty();
         restoreTemporarilyUnequippedItems(entry, bot);
+        clearManualTradeState(entry, bot);
         entry.pendingTradeCategory = null;
         entry.pendingTradeCategoryMsg = null;
         entry.pendingTradeItems    = null;
@@ -884,6 +913,83 @@ class BotInventoryManager {
         }
 
         return new PreparedTradeItems(collectItems(category, entry, bot), null);
+    }
+
+    static List<Item> prioritizeEtcTradeItems(List<Item> items, Character recipient) {
+        if (items.size() <= 1) {
+            return items;
+        }
+
+        List<Item> serverSortedItems = new ArrayList<>(items);
+        serverSortedItems.sort(Comparator.comparingInt(Item::getItemId));
+        if (recipient == null) {
+            return serverSortedItems;
+        }
+
+        Inventory recipientEtc = recipient.getInventory(InventoryType.ETC);
+        if (recipientEtc == null) {
+            return serverSortedItems;
+        }
+
+        Set<Integer> recipientEtcItemIds = new HashSet<>();
+        for (Item recipientItem : recipientEtc) {
+            recipientEtcItemIds.add(recipientItem.getItemId());
+        }
+
+        List<Item> prioritized = new ArrayList<>(items.size());
+        List<Item> remainder = new ArrayList<>(items.size());
+        for (Item item : serverSortedItems) {
+            if (item.getInventoryType() == InventoryType.ETC && recipientEtcItemIds.contains(item.getItemId())) {
+                prioritized.add(item);
+            } else {
+                remainder.add(item);
+            }
+        }
+        prioritized.addAll(remainder);
+        return prioritized;
+    }
+
+    private static List<Item> prioritizeRecipientDuplicateItemIds(List<Item> items,
+                                                                  InventoryType type,
+                                                                  Character recipient) {
+        if (items.size() <= 1) {
+            return items;
+        }
+
+        List<Item> sorted = new ArrayList<>(items);
+        sorted.sort(Comparator.comparingInt(Item::getItemId));
+        if (recipient == null) {
+            return sorted;
+        }
+
+        Inventory recipientInventory = recipient.getInventory(type);
+        if (recipientInventory == null) {
+            return sorted;
+        }
+
+        Set<Integer> recipientItemIds = new HashSet<>();
+        for (Item recipientItem : recipientInventory) {
+            recipientItemIds.add(recipientItem.getItemId());
+        }
+
+        List<Item> prioritized = new ArrayList<>(items.size());
+        List<Item> remainder = new ArrayList<>(items.size());
+        for (Item item : sorted) {
+            if (recipientItemIds.contains(item.getItemId())) {
+                prioritized.add(item);
+            } else {
+                remainder.add(item);
+            }
+        }
+        prioritized.addAll(remainder);
+        return prioritized;
+    }
+
+    static List<Item> prioritizeTradeUseItems(List<Item> uncategorized, List<Item> categorized, Character recipient) {
+        List<Item> ordered = new ArrayList<>(uncategorized.size() + categorized.size());
+        ordered.addAll(prioritizeRecipientDuplicateItemIds(uncategorized, InventoryType.USE, recipient));
+        ordered.addAll(prioritizeRecipientDuplicateItemIds(categorized, InventoryType.USE, recipient));
+        return ordered;
     }
 
     private static List<Item> collectNamedItems(String fragment, Character bot) {
@@ -1026,22 +1132,36 @@ class BotInventoryManager {
                     item -> isRecoveryPotion(item.getItemId()));
             case "buff"    -> collectFromBag(bot, result, InventoryType.USE,
                     item -> isBuffConsumable(item.getItemId()));
-            case "use"     -> collectFromBag(bot, result, InventoryType.USE, item -> {
-                int id = item.getItemId();
-                return !isRecoveryPotion(id) && !isBuffConsumable(id) && !ItemConstants.isEquipScroll(id);
-            });
+            case "use"     -> {
+                UseTradeGroups groups = classifyUseTradeGroups(bot, entry.owner);
+                result.addAll(groups.uncategorized());
+                result.addAll(groups.categorized());
+            }
+            case "ammo" -> {
+                AmmoTradeGroups groups = classifyAmmoTradeGroups(bot);
+                result.addAll(groups.nonOwn());
+                result.addAll(groups.own());
+            }
             case "equips" -> {
                 EquipTradeGroups groups = classifyEquipTradeGroups(entry, bot);
                 for (EquipsGroup g : EquipsGroup.values()) result.addAll(groups.itemsFor(g));
             }
             case "trash" -> result.addAll(collectTrashEquips(entry, bot));
-            case "etc"     -> collectFromBag(bot, result, InventoryType.ETC,   item -> true);
+            case "etc" -> {
+                collectFromBag(bot, result, InventoryType.ETC, item -> true);
+                result = prioritizeEtcTradeItems(result, entry.owner);
+            }
             default -> {
                 EquipsGroup eg = EquipsGroup.fromCategory(category);
                 if (eg != null) {
                     result.addAll(classifyEquipTradeGroups(entry, bot).itemsFor(eg));
-                } else if (category.startsWith("name:")) {
-                    result.addAll(collectNamedItems(category.substring(5), bot));
+                } else {
+                    AmmoGroup ammoGroup = AmmoGroup.fromCategory(category);
+                    if (ammoGroup != null) {
+                        result.addAll(classifyAmmoTradeGroups(bot).itemsFor(ammoGroup));
+                    } else if (category.startsWith("name:")) {
+                        result.addAll(collectNamedItems(category.substring(5), bot));
+                    }
                 }
             }
         }
@@ -1275,6 +1395,24 @@ class BotInventoryManager {
         }
     }
 
+    private enum AmmoGroup {
+        NON_OWN, OWN;
+
+        String categoryString() { return "ammo:" + name().toLowerCase(); }
+
+        static AmmoGroup fromCategory(String category) {
+            if (category == null || !category.startsWith("ammo:")) return null;
+            try { return valueOf(category.substring("ammo:".length()).toUpperCase()); }
+            catch (IllegalArgumentException e) { return null; }
+        }
+
+        AmmoGroup next() {
+            AmmoGroup[] vals = values();
+            int next = ordinal() + 1;
+            return next < vals.length ? vals[next] : null;
+        }
+    }
+
     private static List<Item> collectEquipsGroup(EquipsGroup group, BotEntry entry, Character bot) {
         return classifyEquipTradeGroups(entry, bot).itemsFor(group);
     }
@@ -1299,6 +1437,16 @@ class BotInventoryManager {
         return null;
     }
 
+    private static String nextAmmoGroup(String category, Character bot) {
+        AmmoGroup current = AmmoGroup.fromCategory(category);
+        if (current == null) return null;
+        AmmoTradeGroups groups = classifyAmmoTradeGroups(bot);
+        for (AmmoGroup group = current.next(); group != null; group = group.next()) {
+            if (!groups.itemsFor(group).isEmpty()) return group.categoryString();
+        }
+        return null;
+    }
+
     private static void startEquipsGroupTradeTransfer(Character owner, BotEntry entry, Character bot) {
         EquipTradeGroups groups = classifyEquipTradeGroups(entry, bot);
         for (EquipsGroup group : EquipsGroup.values()) {
@@ -1314,8 +1462,76 @@ class BotInventoryManager {
         BotManager.getInstance().botReply(entry, noItemsReply("equips"));
     }
 
+    private static void startAmmoGroupTradeTransfer(Character owner, BotEntry entry, Character bot) {
+        AmmoTradeGroups groups = classifyAmmoTradeGroups(bot);
+        for (AmmoGroup group : AmmoGroup.values()) {
+            List<Item> items = groups.itemsFor(group);
+            if (!items.isEmpty()) {
+                startTradeSequence(group.categoryString(), owner, items, 0, false, entry, bot);
+                return;
+            }
+        }
+        BotManager.getInstance().botReply(entry, noItemsReply("ammo"));
+    }
+
+    private static UseTradeGroups classifyUseTradeGroups(Character bot, Character recipient) {
+        List<Item> uncategorized = new ArrayList<>();
+        List<Item> categorized = new ArrayList<>();
+        collectFromBag(bot, uncategorized, InventoryType.USE, item -> {
+            int id = item.getItemId();
+            if (isTradeAmmoItem(id) || ItemConstants.isEquipScroll(id) || isRecoveryPotion(id) || isBuffConsumable(id)) {
+                categorized.add(item);
+                return false;
+            }
+            return true;
+        });
+        List<Item> ordered = prioritizeTradeUseItems(uncategorized, categorized, recipient);
+        int uncategorizedCount = uncategorized.size();
+        return new UseTradeGroups(
+                new ArrayList<>(ordered.subList(0, uncategorizedCount)),
+                new ArrayList<>(ordered.subList(uncategorizedCount, ordered.size())));
+    }
+
+    private static AmmoTradeGroups classifyAmmoTradeGroups(Character bot) {
+        List<Item> nonOwn = new ArrayList<>();
+        List<Item> own = new ArrayList<>();
+        WeaponType ownAmmoWeaponType = tradeAmmoWeaponType(bot);
+        collectFromBag(bot, nonOwn, InventoryType.USE, item -> {
+            WeaponType ammoType = ammoWeaponType(item.getItemId());
+            if (ammoType == null) {
+                return false;
+            }
+            if (ammoType == ownAmmoWeaponType) {
+                own.add(item);
+                return false;
+            }
+            return true;
+        });
+        nonOwn.sort(Comparator.comparingInt(Item::getItemId));
+        own.sort(Comparator
+                .comparingInt((Item item) -> ItemInformationProvider.getInstance().getWatkForProjectile(item.getItemId()))
+                .thenComparingInt(Item::getItemId));
+        return new AmmoTradeGroups(nonOwn, own);
+    }
+
     private static List<Item> collectTrashEquips(BotEntry entry, Character bot) {
         return collectEquipsGroup(EquipsGroup.NORMAL, entry, bot);
+    }
+
+    static List<Item> collectSellTrashEquips(BotEntry entry, Character bot) {
+        List<Item> trash = collectTrashEquips(entry, bot);
+        if (trash.isEmpty()) {
+            return trash;
+        }
+
+        ItemInformationProvider ii = ItemInformationProvider.getInstance();
+        List<Item> result = new ArrayList<>(trash.size());
+        for (Item item : trash) {
+            if (item instanceof Equip equip && !shouldKeepForSellTrash(ii, equip)) {
+                result.add(item);
+            }
+        }
+        return result;
     }
 
     private static EquipTradeGroups classifyEquipTradeGroups(BotEntry entry, Character bot) {
@@ -1388,6 +1604,61 @@ class BotInventoryManager {
 
     private static boolean isOwnClassEquip(Character bot, ItemInformationProvider ii, Equip equip) {
         return BotEquipManager.isOwnClassEquip(bot, ii, equip);
+    }
+
+    static boolean shouldKeepForSellTrash(ItemInformationProvider ii, Equip equip) {
+        if (equip.getLevel() > 0) {
+            return true;
+        }
+        Map<String, Integer> stats = ii != null ? ii.getEquipStats(equip.getItemId()) : null;
+        if (ItemConstants.isWeapon(equip.getItemId())) {
+            Equip baseEquip = ii != null ? (Equip) ii.getEquipById(equip.getItemId()) : null;
+            if (hasProtectedSellTrashWeaponStat(stats, equip, baseEquip)) {
+                return true;
+            }
+        } else if (equip.getWatk() > 0) {
+            return true;
+        }
+        return hasProtectedSellTrashStat(stats, equip, 6);
+    }
+
+    static boolean hasProtectedSellTrashStat(Map<String, Integer> stats, Equip equip, int threshold) {
+        if (stats == null || equip == null) {
+            return false;
+        }
+
+        int reqJob = stats.getOrDefault("reqJob", 0);
+        if (reqJob == 0) {
+            return equip.getStr() >= threshold
+                    || equip.getDex() >= threshold
+                    || equip.getInt() >= threshold
+                    || equip.getLuk() >= threshold;
+        }
+
+        return ((reqJob & 0x1) != 0 && (equip.getStr() >= threshold || equip.getDex() >= threshold))
+                || ((reqJob & 0x2) != 0 && (equip.getInt() >= threshold || equip.getLuk() >= threshold))
+                || ((reqJob & 0x4) != 0 && (equip.getDex() >= threshold || equip.getStr() >= threshold))
+                || ((reqJob & 0x8) != 0 && (equip.getLuk() >= threshold || equip.getDex() >= threshold))
+                || ((reqJob & 0x10) != 0 && (equip.getStr() >= threshold || equip.getDex() >= threshold));
+    }
+
+    static boolean hasProtectedSellTrashWeaponStat(Map<String, Integer> stats, Equip equip, Equip baseEquip) {
+        if (equip == null || baseEquip == null) {
+            return false;
+        }
+        boolean mageWeapon = isMageWeapon(stats);
+        if (mageWeapon) {
+            return equip.getMatk() - baseEquip.getMatk() >= 4;
+        }
+        return equip.getWatk() - baseEquip.getWatk() >= 4;
+    }
+
+    private static boolean isMageWeapon(Map<String, Integer> stats) {
+        if (stats == null) {
+            return false;
+        }
+        int reqJob = stats.getOrDefault("reqJob", 0);
+        return reqJob == 0 ? false : (reqJob & 0x2) != 0 && (reqJob & ~0x2) == 0;
     }
 
     /** Score used to order own-class equips worst-to-best: 4*watk + matk + main + sec. */
@@ -1570,6 +1841,34 @@ class BotInventoryManager {
             case CLAW -> ItemConstants.isThrowingStar(itemId);
             case GUN -> ItemConstants.isBullet(itemId);
             default -> false;
+        };
+    }
+
+    private static boolean isTradeAmmoItem(int itemId) {
+        return ammoWeaponType(itemId) != null;
+    }
+
+    private static WeaponType ammoWeaponType(int itemId) {
+        if (ItemConstants.isArrowForBow(itemId)) {
+            return WeaponType.BOW;
+        }
+        if (ItemConstants.isArrowForCrossBow(itemId)) {
+            return WeaponType.CROSSBOW;
+        }
+        if (ItemConstants.isThrowingStar(itemId)) {
+            return WeaponType.CLAW;
+        }
+        if (ItemConstants.isBullet(itemId)) {
+            return WeaponType.GUN;
+        }
+        return null;
+    }
+
+    private static WeaponType tradeAmmoWeaponType(Character bot) {
+        WeaponType weaponType = BotAttackExecutionProvider.getEquippedWeaponType(bot);
+        return switch (weaponType) {
+            case BOW, CROSSBOW, CLAW, GUN -> weaponType;
+            default -> null;
         };
     }
 }

@@ -4,6 +4,8 @@ import client.Character;
 import client.Job;
 import client.Skill;
 import client.SkillFactory;
+import client.Stat;
+import client.processor.stat.AssignAPProcessor;
 import constants.game.GameConstants;
 import java.util.ArrayList;
 import java.util.List;
@@ -99,12 +101,34 @@ class BotBuildManager {
             return prompt != null ? prompt : "need your ap build first";
         }
 
-        if (!bot.assignStrDexIntLuk(4 - bot.getStr(), 4 - bot.getDex(), 4 - bot.getInt(), 4 - bot.getLuk())) {
+        if (!reallocateAp(entry, bot)) {
             return "couldnt rebuild my ap";
         }
 
-        autoAssignAp(entry, bot);
         return "ok, rebuilt my ap using the bot build";
+    }
+
+    static void handleJobAdvance(BotEntry entry, Character bot, Job oldJob, Job newJob) {
+        if (oldJob == Job.BEGINNER && oldJob != newJob && entry.apBuild != null) {
+            reallocateAp(entry, bot);
+        }
+
+        autoAssignSp(entry, bot);
+        autoAssignAp(entry, bot);
+    }
+
+    private static boolean reallocateAp(BotEntry entry, Character bot) {
+        int minStr = AssignAPProcessor.getMinStatFloor(bot.getJob(), Stat.STR);
+        int minDex = AssignAPProcessor.getMinStatFloor(bot.getJob(), Stat.DEX);
+        int minInt = AssignAPProcessor.getMinStatFloor(bot.getJob(), Stat.INT);
+        int minLuk = AssignAPProcessor.getMinStatFloor(bot.getJob(), Stat.LUK);
+
+        if (!bot.assignStrDexIntLuk(minStr - bot.getStr(), minDex - bot.getDex(), minInt - bot.getInt(), minLuk - bot.getLuk())) {
+            return false;
+        }
+
+        autoAssignAp(entry, bot);
+        return true;
     }
 
     /**

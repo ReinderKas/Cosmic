@@ -2,6 +2,7 @@ package server.bots;
 
 import client.Character;
 import client.Job;
+import client.inventory.Inventory;
 import org.junit.jupiter.api.Test;
 import server.maps.FieldLimit;
 import server.maps.MapleMap;
@@ -107,13 +108,29 @@ class BotChatManagerTest {
     }
 
     @Test
+    void shouldParseAmmoTrades() {
+        assertEquals("ammo", BotChatManager.matchTradeCategory("trade ammo"));
+        assertEquals("ammo", BotChatManager.matchTradeCategory("trade me your arrows"));
+        assertEquals("ammo", BotChatManager.matchTradeCategory("trade bullets"));
+    }
+
+    @Test
     void shouldParseTrashGearTrades() {
         assertEquals("trash", BotChatManager.matchTradeCategory("trade trash"));
         assertEquals("trash", BotChatManager.matchTradeCategory("trade my trash"));
         assertEquals("trash", BotChatManager.matchTradeCategory("trade junk"));
+        assertEquals("trash", BotChatManager.matchTradeCategory("got trash?"));
+        assertEquals("trash", BotChatManager.matchTradeCategory("have any junk?"));
+        assertNull(BotChatManager.matchItemQuery("got trash?"));
         assertEquals("trash", BotChatManager.matchTradeCategory("show me your junk"));
         assertEquals("trash", BotChatManager.matchTradeCategory("show your junk"));
         assertEquals("trash", BotChatManager.matchTradeCategory("show ur junk"));
+    }
+
+    @Test
+    void shouldNotParseSellTrashAsTradeTrash() {
+        assertNull(BotChatManager.matchTradeCategory("sell trash"));
+        assertNull(BotChatManager.matchTradeCategory("sell junk"));
     }
 
     @Test
@@ -165,6 +182,24 @@ class BotChatManagerTest {
         assertTrue(BotFidgetManager.maybeStartSocialFidget(entry));
         assertFalse(entry.fidgetMode == BotFidgetMode.NONE);
         assertEquals(BotFidgetTrigger.SOCIAL, entry.fidgetTrigger);
+    }
+
+    @Test
+    void shouldTrackPerScrollerStreaksAndDisableHundredPercentStreakChats() {
+        BotEntry entry = new BotEntry(null, null, null);
+        long start = 2_000_000L;
+        int alice = 101;
+        int bob = 202;
+
+        assertEquals(1, BotScrollReactionManager.updateReactionStreak(entry, alice, true, start));
+        assertEquals(2, BotScrollReactionManager.updateReactionStreak(entry, alice, true, start + 30_000L));
+        assertEquals(3, BotScrollReactionManager.updateReactionStreak(entry, alice, true, start + 60_000L));
+
+        assertEquals(1, BotScrollReactionManager.updateReactionStreak(entry, bob, true, start + 10_000L));
+        assertEquals(1, BotScrollReactionManager.updateReactionStreak(entry, alice, false, start + 90_000L));
+        assertEquals(2, BotScrollReactionManager.updateReactionStreak(entry, alice, false, start + 120_000L));
+        assertEquals(1, BotScrollReactionManager.updateReactionStreak(
+                entry, alice, false, start + 120_000L + BotScrollReactionManager.streakWindowMs() + 1L));
     }
 
     @Test
@@ -258,12 +293,16 @@ class BotChatManagerTest {
     @Test
     void shouldBuildPhysicalRangeReportFromEffectiveTotals() {
         Character bot = mock(Character.class);
+        Inventory equipped = mock(Inventory.class);
         when(bot.getJob()).thenReturn(Job.FIGHTER);
         when(bot.getLevel()).thenReturn(48);
         when(bot.getTotalWatk()).thenReturn(20);
         when(bot.getTotalDex()).thenReturn(100);
         when(bot.getTotalLuk()).thenReturn(40);
-        when(bot.calculateMinBaseDamage(20)).thenReturn(50);
+        when(bot.getInventory(client.inventory.InventoryType.EQUIPPED)).thenReturn(equipped);
+        when(equipped.getItem((short) -11)).thenReturn(null);
+        when(equipped.iterator()).thenReturn(List.<client.inventory.Item>of().iterator());
+        when(bot.calculateMinBaseDamage(20, 0.1d)).thenReturn(50);
         when(bot.calculateMaxBaseDamage(20)).thenReturn(99);
 
         String report = BotChatManager.buildRangeReport(bot,
@@ -291,9 +330,12 @@ class BotChatManagerTest {
     void shouldBuildOwnerLootOfferPrompt() {
         String prompt = BotOfferManager.buildLootOfferPrompt("Owner", "Blue Moon", true);
         assertTrue(Set.of(
-                "I have Blue Moon, you want?",
-                "picked up Blue Moon, want it?",
-                "I got Blue Moon for you, want?").contains(prompt));
+                "Owner, I have Blue Moon, you want?",
+                "Owner, picked up Blue Moon, want it?",
+                "Owner, I got Blue Moon if you want it",
+                "Owner, want Blue Moon?",
+                "Owner, I can trade you Blue Moon",
+                "Owner, grabbed Blue Moon for you if you want it").contains(prompt));
     }
 
     @Test
@@ -302,7 +344,10 @@ class BotChatManagerTest {
         assertTrue(Set.of(
                 "Alice, I have Blue Moon, you want?",
                 "Alice, picked up Blue Moon, want it?",
-                "Alice, I got Blue Moon if you want it").contains(prompt));
+                "Alice, I got Blue Moon if you want it",
+                "Alice, want Blue Moon?",
+                "Alice, I can trade you Blue Moon",
+                "Alice, grabbed Blue Moon for you if you want it").contains(prompt));
     }
 
     @Test

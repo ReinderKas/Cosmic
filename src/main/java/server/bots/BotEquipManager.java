@@ -1,6 +1,5 @@
 package server.bots;
 
-import config.YamlConfig;
 import client.Character;
 import client.Job;
 import client.inventory.Equip;
@@ -9,8 +8,8 @@ import client.inventory.InventoryType;
 import client.inventory.Item;
 import client.inventory.WeaponType;
 import client.inventory.manipulator.InventoryManipulator;
+import config.YamlConfig;
 import constants.inventory.EquipSlot;
-import constants.inventory.ItemConstants;
 import constants.skills.Crusader;
 import constants.skills.DragonKnight;
 import constants.skills.Fighter;
@@ -44,7 +43,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.ToIntFunction;
-import java.util.stream.Collectors;
 
 class BotEquipManager {
 
@@ -57,6 +55,8 @@ class BotEquipManager {
     private static final short[] RING_SLOTS = {-12, -13, -15, -16};
     /** Hard cap on Pareto-frontier size per DP step to bound worst-case runtime. */
     private static final int MAX_PARETO_STATES = 2000;
+    private static final long AUTOEQUIP_THROTTLE_MS = 30_000L;
+    private static final Map<Integer, Long> LAST_AUTOEQUIP_MS = new java.util.concurrent.ConcurrentHashMap<>();
 
     static final class EquipRecommendation {
         private final short targetSlot;
@@ -100,6 +100,14 @@ class BotEquipManager {
      * Called on mode change (follow / stop / grind).
      */
     static void autoEquip(Character bot, Character owner, Item pendingOffer) {
+        autoEquip(bot, owner, pendingOffer, false);
+    }
+
+    static void autoEquip(Character bot, Character owner, Item pendingOffer, boolean force) {
+        if (!shouldRunAutoEquip(bot, System.currentTimeMillis(), force)) {
+            return;
+        }
+
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
         Inventory eqpInv = bot.getInventory(InventoryType.EQUIP);
         Inventory eqdInv = bot.getInventory(InventoryType.EQUIPPED);
@@ -114,6 +122,7 @@ class BotEquipManager {
         }
 
         List<Short> dpSlots = buildDpSlots(bySlot, currentBySlot);
+        boolean[] reqRel = scanReqRelevantDims(bySlot, ii);
 
         // Outer weapon pool: currently-wearable + stat-only-blocked + currently equipped.
         List<Equip> weaponPool = new ArrayList<>(bySlot.getOrDefault((short) -11, List.of()));
@@ -128,7 +137,7 @@ class BotEquipManager {
         Equip bestWeapon = currentWeapon;
         boolean anyCapHit = false;
         for (Equip w : weaponPool) {
-            DpResult r = solveForWeapon(bot, ii, naked, w, dpSlots, currentBySlot, bySlot, mob);
+            DpResult r = solveForWeapon(bot, ii, naked, w, dpSlots, currentBySlot, bySlot, mob, reqRel);
             if (r == null) continue;
             if (r.paretoCapHit()) anyCapHit = true;
             if (bestScore == null || compareScores(r.score(), bestScore) > 0) {
@@ -139,7 +148,7 @@ class BotEquipManager {
         }
         // Every weapon failed reqs — fall back to a no-weapon plan so the armor pass still runs.
         if (bestPicks == null && !weaponPool.contains(null)) {
-            DpResult r = solveForWeapon(bot, ii, naked, null, dpSlots, currentBySlot, bySlot, mob);
+            DpResult r = solveForWeapon(bot, ii, naked, null, dpSlots, currentBySlot, bySlot, mob, reqRel);
             if (r != null) {
                 bestScore = r.score();
                 bestPicks = r.picks();
@@ -167,6 +176,25 @@ class BotEquipManager {
                 // Don't let a chat error block the equip pass.
             }
         }
+    }
+
+    static boolean shouldRunAutoEquip(Character bot, long nowMs, boolean force) {
+        if (force) {
+            if (bot != null) {
+                LAST_AUTOEQUIP_MS.put(bot.getId(), nowMs);
+            }
+            return true;
+        }
+        if (bot == null) {
+            return true;
+        }
+        int botId = bot.getId();
+        Long previous = LAST_AUTOEQUIP_MS.get(botId);
+        if (previous != null && nowMs - previous < AUTOEQUIP_THROTTLE_MS) {
+            return false;
+        }
+        LAST_AUTOEQUIP_MS.put(botId, nowMs);
+        return true;
     }
 
     /**
@@ -216,6 +244,7 @@ class BotEquipManager {
         }
 
         List<Short> dpSlots = buildDpSlots(bySlot, currentBySlot);
+        boolean[] reqRel = scanReqRelevantDims(bySlot, ii);
 
         List<Equip> weaponPool = new ArrayList<>(bySlot.getOrDefault((short) -11, List.of()));
         Equip currentWeapon = compatibleWeaponOrNull(bot, ii, (Equip) eqdInv.getItem((short) -11));
@@ -231,7 +260,7 @@ class BotEquipManager {
         List<Branch> branches = new ArrayList<>();
         boolean anyCap = false;
         for (Equip w : weaponPool) {
-            DpResult r = solveForWeapon(bot, ii, naked, w, dpSlots, currentBySlot, bySlot, mob);
+            DpResult r = solveForWeapon(bot, ii, naked, w, dpSlots, currentBySlot, bySlot, mob, reqRel);
             if (r != null) {
                 branches.add(new Branch(w, r));
                 if (r.paretoCapHit()) anyCap = true;
@@ -240,7 +269,7 @@ class BotEquipManager {
         // Last-resort fallback: every weapon's reqs failed against the bare snapshot. Try a
         // no-weapon branch so we still produce a best-effort armor plan instead of giving up.
         if (branches.isEmpty() && !weaponPool.contains(null)) {
-            DpResult r = solveForWeapon(bot, ii, naked, null, dpSlots, currentBySlot, bySlot, mob);
+            DpResult r = solveForWeapon(bot, ii, naked, null, dpSlots, currentBySlot, bySlot, mob, reqRel);
             if (r != null) branches.add(new Branch(null, r));
         }
         branches.sort((a, b) -> compareScores(b.result().score(), a.result().score()));
@@ -371,8 +400,9 @@ class BotEquipManager {
         }
         record Br(Equip w, DpResult r) {}
         List<Br> sorted = new ArrayList<>();
+        boolean[] reqRel = scanReqRelevantDims(bySlot, ii);
         for (Equip w : weaponPool) {
-            DpResult r = solveForWeapon(bot, ii, naked, w, dpSlots, currentBySlot, bySlot, mob);
+            DpResult r = solveForWeapon(bot, ii, naked, w, dpSlots, currentBySlot, bySlot, mob, reqRel);
             if (r != null) sorted.add(new Br(w, r));
         }
         sorted.sort((a, b) -> compareScores(b.r().score(), a.r().score()));
@@ -495,8 +525,10 @@ class BotEquipManager {
             List<Equip> pool = bySlot.computeIfAbsent(key, k -> new ArrayList<>());
             if (!pool.contains(e)) pool.add(e);
         }
+        Job botJob = bot.getJob();
+        boolean[] reqRel = scanReqRelevantDims(bySlot, ii);
         for (Map.Entry<Short, List<Equip>> e : bySlot.entrySet()) {
-            e.setValue(pruneDominatedWithReqs(ii, e.getValue()));
+            e.setValue(pruneDominatedWithReqs(ii, e.getValue(), botJob, reqRel));
         }
         return bySlot;
     }
@@ -551,8 +583,10 @@ class BotEquipManager {
             if (!pool.contains(ex)) pool.add(ex);
         }
         // Re-prune so newly-added extras can knock out dominated incumbents (and vice versa).
+        Job receiverJob = bot.getJob();
+        boolean[] reqRel = scanReqRelevantDims(bySlot, ii);
         for (Map.Entry<Short, List<Equip>> e : bySlot.entrySet()) {
-            e.setValue(pruneDominatedWithReqs(ii, e.getValue()));
+            e.setValue(pruneDominatedWithReqs(ii, e.getValue(), receiverJob, reqRel));
         }
 
         Map<Short, Equip> currentBySlot = new HashMap<>();
@@ -575,7 +609,7 @@ class BotEquipManager {
         EquipScore bestScore = null;
         Equip bestWeapon = null;
         for (Equip w : weaponPool) {
-            DpResult r = solveForWeapon(bot, hooks, naked, w, dpSlots, currentBySlot, bySlot, mob);
+            DpResult r = solveForWeapon(bot, hooks, naked, w, dpSlots, currentBySlot, bySlot, mob, reqRel);
             if (r == null) continue;
             if (bestScore == null || compareScores(r.score(), bestScore) > 0) {
                 bestScore = r.score();
@@ -584,7 +618,7 @@ class BotEquipManager {
             }
         }
         if (bestPicks == null && !weaponPool.contains(null)) {
-            DpResult r = solveForWeapon(bot, hooks, naked, null, dpSlots, currentBySlot, bySlot, mob);
+            DpResult r = solveForWeapon(bot, hooks, naked, null, dpSlots, currentBySlot, bySlot, mob, reqRel);
             if (r != null) { bestPicks = r.picks(); bestWeapon = null; }
         }
         return new OptimizerResult(bestWeapon, bestPicks != null ? bestPicks : Map.of());
@@ -600,6 +634,7 @@ class BotEquipManager {
         WeaponType getWeaponType(int itemId);
         boolean isOverall(int itemId);
         boolean meetsReqs(Equip equip, Job job, int level, int str, int dex, int int_, int luk, int fame);
+        default Map<String, Integer> getEquipStats(int itemId) { return Map.of(); }
 
         static OptimizerHooks from(ItemInformationProvider ii) {
             return new OptimizerHooks() {
@@ -611,11 +646,13 @@ class BotEquipManager {
                 @Override public boolean meetsReqs(Equip e, Job job, int lvl, int s, int d, int i, int l, int f) {
                     return ii.meetsEquipRequirements(e, job, lvl, s, d, i, l, f);
                 }
+                @Override public Map<String, Integer> getEquipStats(int itemId) { return ii.getEquipStats(itemId); }
             };
         }
 
         static OptimizerHooks futureFrom(ItemInformationProvider ii, Character bot) {
             final Job botJob = bot != null ? bot.getJob() : null;
+            final int level = bot != null && bot.getLevel() > 0 ? bot.getLevel() : Short.MAX_VALUE;
             final int fame = bot != null ? bot.getFame() : 0;
             final int max = Integer.MAX_VALUE / 4;
             return new OptimizerHooks() {
@@ -625,8 +662,9 @@ class BotEquipManager {
                     return "MaPn".equals(ii.getEquipmentSlot(itemId));
                 }
                 @Override public boolean meetsReqs(Equip e, Job job, int lvl, int s, int d, int i, int l, int f) {
-                    return ii.meetsEquipRequirements(e, botJob, max, max, max, max, max, fame);
+                    return ii.meetsEquipRequirements(e, botJob, level, max, max, max, max, fame);
                 }
+                @Override public Map<String, Integer> getEquipStats(int itemId) { return ii.getEquipStats(itemId); }
             };
         }
     }
@@ -681,8 +719,19 @@ class BotEquipManager {
                                             Map<Short, Equip> currentBySlot,
                                             Map<Short, List<Equip>> bySlot,
                                             MapDamageProfile mob) {
+        return solveForWeapon(bot, ii, naked, weapon, dpSlots, currentBySlot, bySlot,
+                mob, scanReqRelevantDims(bySlot, ii));
+    }
+
+    static DpResult solveForWeapon(Character bot, ItemInformationProvider ii,
+                                            StatSnapshot naked, Equip weapon,
+                                            List<Short> dpSlots,
+                                            Map<Short, Equip> currentBySlot,
+                                            Map<Short, List<Equip>> bySlot,
+                                            MapDamageProfile mob,
+                                            boolean[] reqRel) {
         return solveForWeapon(bot, OptimizerHooks.from(ii), naked, weapon, dpSlots,
-                              currentBySlot, bySlot, mob);
+                              currentBySlot, bySlot, mob, reqRel);
     }
 
     static DpResult solveForWeapon(Character bot, OptimizerHooks hooks,
@@ -691,6 +740,17 @@ class BotEquipManager {
                                             Map<Short, Equip> currentBySlot,
                                             Map<Short, List<Equip>> bySlot,
                                             MapDamageProfile mob) {
+        return solveForWeapon(bot, hooks, naked, weapon, dpSlots, currentBySlot, bySlot,
+                mob, scanReqRelevantDims(bySlot, hooks));
+    }
+
+    private static DpResult solveForWeapon(Character bot, OptimizerHooks hooks,
+                                            StatSnapshot naked, Equip weapon,
+                                            List<Short> dpSlots,
+                                            Map<Short, Equip> currentBySlot,
+                                            Map<Short, List<Equip>> bySlot,
+                                            MapDamageProfile mob,
+                                            boolean[] reqRel) {
         StatSnapshot init = weapon != null ? naked.swap(null, weapon) : naked;
         boolean is2H = weapon != null && hooks.isTwoHanded(weapon.getItemId());
         WeaponType wt = weapon != null ? hooks.getWeaponType(weapon.getItemId()) : null;
@@ -698,12 +758,15 @@ class BotEquipManager {
 
         int n = dpSlots.size();
         int overallIdx = dpSlots.indexOf((short) -5);
-        DpNode start = new DpNode(init, 0, 0, 0, new Equip[n]);
+        DpNode start = pinSafeSingletonSlots(init, hooks, dpSlots, bySlot, n);
         List<DpNode> frontier = new ArrayList<>();
         frontier.add(start);
 
         for (int i = 0; i < n; i++) {
             short slot = dpSlots.get(i);
+            if (start.picks[i] != null) {
+                continue;
+            }
             // Rings share a single pool keyed at -12; cross-slot dedupe prevents the same ring
             // instance being placed in two ring slots. The 4 ring positions are otherwise
             // interchangeable for stats, so the DP just picks up to 4 rings from the pool.
@@ -737,7 +800,7 @@ class BotEquipManager {
                     next.add(new DpNode(ns, nHp, nMp, nStat, picks));
                 }
             }
-            frontier = paretoPruneNodes(next, capHit, hooks, dpSlots);
+            frontier = paretoPruneNodes(next, capHit, hooks, dpSlots, wt, reqRel);
         }
 
         DpNode best = null;
@@ -776,6 +839,37 @@ class BotEquipManager {
         return new DpResult(picks, bestScore, capHit[0]);
     }
 
+    private static DpNode pinSafeSingletonSlots(StatSnapshot init, OptimizerHooks hooks,
+                                                List<Short> dpSlots, Map<Short, List<Equip>> bySlot,
+                                                int n) {
+        StatSnapshot snap = init;
+        int hp = 0, mp = 0, statSum = 0;
+        Equip[] picks = new Equip[n];
+        for (int i = 0; i < n; i++) {
+            short slot = dpSlots.get(i);
+            if (!canPinSingletonSlot(slot)) continue;
+            List<Equip> pool = bySlot.getOrDefault(slot, List.of());
+            if (pool.size() != 1) continue;
+            Equip cand = pool.get(0);
+            if (cand == null) continue;
+            if (!hooks.meetsReqs(cand, snap.job(), snap.level(),
+                    snap.str(), snap.dex(), snap.int_(), snap.luk(), snap.fame())) continue;
+            snap = snap.swap(null, cand);
+            hp += cand.getHp();
+            mp += cand.getMp();
+            statSum += usefulStatSum(cand, snap.job());
+            picks[i] = cand;
+        }
+        return new DpNode(snap, hp, mp, statSum, picks);
+    }
+
+    private static boolean canPinSingletonSlot(short slot) {
+        return slot != (short) -5      // top/overall can block pants
+                && slot != (short) -6  // pants can be blocked by an overall
+                && slot != (short) -10 // shield can be blocked by 2H weapons
+                && !isRingSlot(slot);
+    }
+
     private static final class DpNode {
         final StatSnapshot snap;
         final int hp, mp, statSum;
@@ -787,46 +881,102 @@ class BotEquipManager {
     }
 
     private static List<DpNode> paretoPruneNodes(List<DpNode> nodes, boolean[] capHitOut,
-                                                   OptimizerHooks hooks, List<Short> dpSlots) {
+                                                   OptimizerHooks hooks, List<Short> dpSlots,
+                                                   WeaponType wt, boolean[] reqRel) {
         if (nodes.size() <= 1) return nodes;
-        List<int[]> vecs = new ArrayList<>(nodes.size());
-        for (DpNode n : nodes) vecs.add(nodeVec(n));
+        nodes = dedupEquivalentNodes(nodes, wt, reqRel, hooks, dpSlots);
+        if (nodes.size() <= 1) return nodes;
+        final int N = nodes.size();
+        // Cache vec + per-node feasibility once. allPicksMeetReqs depends only on b, not a,
+        // but was previously recomputed for every (i,j) dominance check — O(N^2 * slots * WZ)
+        // for what's actually O(N * slots * WZ) of work.
+        int[][] vecs = new int[N][];
+        boolean[] picksOk = new boolean[N];
+        for (int k = 0; k < N; k++) {
+            DpNode n = nodes.get(k);
+            vecs[k] = nodeVec(n, wt, reqRel);
+            picksOk[k] = allPicksMeetReqs(n, hooks, dpSlots);
+        }
         List<DpNode> kept = new ArrayList<>();
-        for (int i = 0; i < nodes.size(); i++) {
-            int[] a = vecs.get(i);
+        for (int i = 0; i < N; i++) {
+            int[] a = vecs[i];
             boolean dominated = false;
-            for (int j = 0; j < nodes.size(); j++) {
+            for (int j = 0; j < N; j++) {
                 if (i == j) continue;
-                DpNode b = nodes.get(j);
                 // Only allow b to prune a if b's picks already meet their stat requirements
                 // against b's partial snapshot. A speculative node whose items are stat-gated
                 // (e.g. dex70 glove when dex=50) must not eliminate the fallback that would
                 // otherwise be chosen after relaxToFeasible drops the infeasible pick.
-                if (vecDominates(vecs.get(j), a) && allPicksMeetReqs(b, hooks, dpSlots)) {
-                    dominated = true; break;
-                }
+                if (!picksOk[j]) continue;
+                if (vecDominates(vecs[j], a)) { dominated = true; break; }
             }
             if (!dominated) kept.add(nodes.get(i));
         }
         if (kept.size() > MAX_PARETO_STATES) {
-            // Admissible bound: total of damage-relevant stats. Keeps states with the most
-            // raw firepower potential; drops Pareto-front fringe under load.
-            kept.sort((x, y) -> Integer.compare(damagePotential(y), damagePotential(x)));
+            // Best-effort overload guard: keep the highest branch damage potential and drop
+            // Pareto-front fringe under load.
+            kept.sort((x, y) -> Integer.compare(damagePotential(y, wt), damagePotential(x, wt)));
             kept = new ArrayList<>(kept.subList(0, MAX_PARETO_STATES));
             if (capHitOut != null && capHitOut.length > 0) capHitOut[0] = true;
         }
         return kept;
     }
 
-    private static int damagePotential(DpNode n) {
-        StatSnapshot s = n.snap;
-        return s.str() + s.dex() + s.int_() + s.luk() + s.watk() + s.magic();
+    private static int damagePotential(DpNode n, WeaponType wt) {
+        return isMageJob(n.snap.job()) ? magicScore(n.snap) : rawPhysicalMax(n.snap, wt);
     }
 
-    private static int[] nodeVec(DpNode n) {
+    private static List<DpNode> dedupEquivalentNodes(List<DpNode> nodes, WeaponType wt, boolean[] reqRel,
+                                                     OptimizerHooks hooks, List<Short> dpSlots) {
+        Map<DpSignature, DpNode> bestValidBySignature = new LinkedHashMap<>();
+        Map<DpSignature, DpNode> bestSpeculativeBySignature = new LinkedHashMap<>();
+        for (DpNode node : nodes) {
+            DpSignature signature = DpSignature.from(node, wt, reqRel);
+            Map<DpSignature, DpNode> bucket = allPicksMeetReqs(node, hooks, dpSlots)
+                    ? bestValidBySignature
+                    : bestSpeculativeBySignature;
+            DpNode existing = bucket.get(signature);
+            if (existing == null || node.statSum > existing.statSum) {
+                bucket.put(signature, node);
+            }
+        }
+        int keptSize = bestValidBySignature.size() + bestSpeculativeBySignature.size();
+        if (keptSize == nodes.size()) return nodes;
+        List<DpNode> kept = new ArrayList<>(keptSize);
+        kept.addAll(bestValidBySignature.values());
+        kept.addAll(bestSpeculativeBySignature.values());
+        return kept;
+    }
+
+    private record DpSignature(int damage, int acc, int str, int dex, int int_, int luk) {
+        static DpSignature from(DpNode node, WeaponType wt, boolean[] reqRel) {
+            StatSnapshot s = node.snap;
+            return new DpSignature(
+                    damagePotential(node, wt),
+                    isMageJob(s.job()) ? 0 : s.totalAcc(),
+                    reqRel != null && reqRel[0] ? s.str() : 0,
+                    reqRel != null && reqRel[1] ? s.dex() : 0,
+                    reqRel != null && reqRel[2] ? s.int_() : 0,
+                    reqRel != null && reqRel[3] ? s.luk() : 0);
+        }
+    }
+
+    private static int[] nodeVec(DpNode n, WeaponType wt, boolean[] reqRel) {
+        // Preserve score drivers plus stat gates, not every raw stat. statSum is deliberately
+        // excluded here; it only breaks ties after exact-signature dedup and final scoring.
         StatSnapshot s = n.snap;
-        return new int[]{s.str(), s.dex(), s.int_(), s.luk(), s.watk(), s.magic(),
-                          s.totalAcc(), n.hp, n.mp, n.statSum};
+        int reqCount = 0;
+        if (reqRel != null) for (boolean b : reqRel) if (b) reqCount++;
+        int[] vec = new int[2 + reqCount];
+        int k = 0;
+        vec[k++] = damagePotential(n, wt);
+        vec[k++] = isMageJob(s.job()) ? 0 : s.totalAcc();
+        if (reqRel != null) {
+            for (int i = 0; i < reqRel.length; i++) {
+                if (reqRel[i]) vec[k++] = statByIdx(s, i);
+            }
+        }
+        return vec;
     }
 
     private static boolean vecDominates(int[] b, int[] a) {
@@ -853,13 +1003,24 @@ class BotEquipManager {
     private static boolean validateReqs(OptimizerHooks hooks, DpNode node,
                                          List<Short> dpSlots, Equip weapon) {
         StatSnapshot s = node.snap;
-        if (weapon != null && !hooks.meetsReqs(weapon, s.job(), s.level(),
-                s.str(), s.dex(), s.int_(), s.luk(), s.fame())) return false;
+        // Equip-order constraint: each item's reqs must be satisfied by the stats present
+        // BEFORE that item is worn — an item's own contribution cannot count toward its own
+        // prereq. So check each pick (and the weapon) against the snapshot with that pick's
+        // stats removed. If every pick passes its without-self check, a valid wear order
+        // exists (equip the highest-margin items last).
+        if (weapon != null) {
+            StatSnapshot withoutSelf = s.swap(weapon, null);
+            if (!hooks.meetsReqs(weapon, withoutSelf.job(), withoutSelf.level(),
+                    withoutSelf.str(), withoutSelf.dex(), withoutSelf.int_(),
+                    withoutSelf.luk(), withoutSelf.fame())) return false;
+        }
         for (int i = 0; i < dpSlots.size(); i++) {
             Equip p = node.picks[i];
             if (p == null) continue;
-            if (!hooks.meetsReqs(p, s.job(), s.level(),
-                    s.str(), s.dex(), s.int_(), s.luk(), s.fame())) return false;
+            StatSnapshot withoutSelf = s.swap(p, null);
+            if (!hooks.meetsReqs(p, withoutSelf.job(), withoutSelf.level(),
+                    withoutSelf.str(), withoutSelf.dex(), withoutSelf.int_(),
+                    withoutSelf.luk(), withoutSelf.fame())) return false;
         }
         return true;
     }
@@ -880,9 +1041,13 @@ class BotEquipManager {
             for (int i = 0; i < dpSlots.size(); i++) {
                 Equip p = picks[i];
                 if (p == null) continue;
-                if (!hooks.meetsReqs(p, s.job(), s.level(),
-                        s.str(), s.dex(), s.int_(), s.luk(), s.fame())) {
-                    s = s.swap(p, null);
+                // Equip-order: check p's reqs against the snapshot with p removed (an item's
+                // own stats can't satisfy its own req).
+                StatSnapshot withoutSelf = s.swap(p, null);
+                if (!hooks.meetsReqs(p, withoutSelf.job(), withoutSelf.level(),
+                        withoutSelf.str(), withoutSelf.dex(), withoutSelf.int_(),
+                        withoutSelf.luk(), withoutSelf.fame())) {
+                    s = withoutSelf;
                     hp -= p.getHp();
                     mp -= p.getMp();
                     statSum -= usefulStatSum(p, s.job());
@@ -891,8 +1056,12 @@ class BotEquipManager {
                 }
             }
         }
-        if (weapon != null && !hooks.meetsReqs(weapon, s.job(), s.level(),
-                s.str(), s.dex(), s.int_(), s.luk(), s.fame())) return null;
+        if (weapon != null) {
+            StatSnapshot withoutWeapon = s.swap(weapon, null);
+            if (!hooks.meetsReqs(weapon, withoutWeapon.job(), withoutWeapon.level(),
+                    withoutWeapon.str(), withoutWeapon.dex(), withoutWeapon.int_(),
+                    withoutWeapon.luk(), withoutWeapon.fame())) return null;
+        }
         return new DpNode(s, hp, mp, statSum, picks);
     }
 
@@ -964,18 +1133,18 @@ class BotEquipManager {
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, bot.getFame());
     }
 
-    /** Job-only wearability gate: level/stat/fame reqs treated as satisfied. */
+    /** Current level/fame wearability gate: only stat reqs are treated as satisfiable by gear. */
     static boolean isOwnClassEquip(Character bot, ItemInformationProvider ii, Equip equip) {
-        return ii.meetsEquipRequirements(equip, bot.getJob(), Short.MAX_VALUE,
+        return ii.meetsEquipRequirements(equip, bot.getJob(), bot.getLevel(),
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE);
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, bot.getFame());
     }
 
     static boolean futureOnlyBlocked(Character bot, ItemInformationProvider ii, Equip equip) {
-        // Pass huge level/stat values: if it still fails, job or fame is blocking, skip.
-        return ii.meetsEquipRequirements(equip, bot.getJob(), Integer.MAX_VALUE / 4,
+        // Pass huge stat values only: if it still fails, job/level/fame is blocking, skip.
+        return ii.meetsEquipRequirements(equip, bot.getJob(), bot.getLevel(),
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE);
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, bot.getFame());
     }
 
     private static boolean isRecommendationCandidate(Character bot, ItemInformationProvider ii, Equip equip,
@@ -1113,6 +1282,16 @@ class BotEquipManager {
                 && !isWeaponCompatible(receiver, ii.getWeaponType(candidate.getItemId()))) return null;
         if (!isRecommendationCandidate(receiver, ii, candidate, primarySlot, scope)) return null;
 
+        // Cheap dominance pre-filter for IMMEDIATE scope: if the candidate is Pareto-dominated
+        // by what's already worn in its slot (over the receiver's job-relevant stats), the DP
+        // cannot choose it as a strict upgrade. Skipping the DP setup here turns the
+        // owner-pickup hot path (notifyOwnerGainedEquip) from O(K equips × N bots) full
+        // optimizer runs into a fast in-slot dominance check for the common trash-loot case.
+        // Cross-slot rescues are excluded by construction since relevant stats are job-trimmed.
+        if (scope == RecommendationScope.IMMEDIATE && !isEquipUsefulToBot(receiver, ii, candidate)) {
+            return null;
+        }
+
         Inventory receiverEquippedInv = receiver.getInventory(InventoryType.EQUIPPED);
 
         // Run the DP with the candidate added to the receiver's pool — recommend iff the
@@ -1231,13 +1410,38 @@ class BotEquipManager {
     }
 
     private static boolean paretoDominates(EnumSet<RelevantStat> relevant, Equip a, Equip b) {
+        RelevantStat primary = primaryStatFor(relevant);
         boolean strictlyGreater = false;
         for (RelevantStat s : relevant) {
-            int va = s.of(a), vb = s.of(b);
+            int va = effectiveStatValue(s, primary, a), vb = effectiveStatValue(s, primary, b);
             if (va < vb) return false;
             if (va > vb) strictlyGreater = true;
         }
         return strictlyGreater;
+    }
+
+    // For classes that score gear ACC (warriors, STR-pirates), DEX also contributes to
+    // in-game accuracy via stat scaling. The client uses ~0.8 acc per DEX, but DEX is more
+    // generally useful, so for dominance we weight DEX 1:1 with ACC — a DEX-heavy item can
+    // outclass a low-ACC item even with zero raw ACC.
+    private static int effectiveStatValue(RelevantStat s, RelevantStat primary, Equip e) {
+        if (s == RelevantStat.ACC) return e.getAcc() + e.getDex();
+        if (primary != null && s == RelevantStat.WATK) {
+            return e.getWatk() + primary.of(e) / 5;
+        }
+        if (s == primary) {
+            return s.of(e) + e.getWatk() * 2;
+        }
+        return s.of(e);
+    }
+
+    private static RelevantStat primaryStatFor(EnumSet<RelevantStat> relevant) {
+        if (relevant == null || !relevant.contains(RelevantStat.WATK)) return null;
+        if (relevant.contains(RelevantStat.LUK)) return RelevantStat.LUK;
+        if (relevant.contains(RelevantStat.STR) && relevant.contains(RelevantStat.ACC)) return RelevantStat.STR;
+        if (relevant.contains(RelevantStat.DEX)) return RelevantStat.DEX;
+        if (relevant.contains(RelevantStat.STR)) return RelevantStat.STR;
+        return null;
     }
 
     static boolean isEquipUsefulToBot(Character recipient, EquipUsefulnessHooks hooks, Equip item) {
@@ -1289,7 +1493,7 @@ class BotEquipManager {
         Map<String, List<Equip>> byTrack = new LinkedHashMap<>();
         for (Equip equip : ownedItems) {
             if (equip == null || hooks.isCash(equip.getItemId())) continue;
-            if (!isOwnClassEquip(bot, hooks, equip)) continue;
+            if (!isFutureOwnClassEquip(bot, hooks, equip)) continue;
             if (!hasPositiveRelevant(relevant, equip)) continue;
             String track = selfReserveTrackKey(bot, hooks, equip);
             if (track == null) continue;
@@ -1371,7 +1575,6 @@ class BotEquipManager {
         if (!reqsAtLeastAsEasy(hooks, better, worse)
                 && !hooks.meetsReqs(better, bot.getJob(), bot.getLevel(),
                                     bot.getStr(), bot.getDex(), bot.getInt(), bot.getLuk(), bot.getFame())) return false;
-        if (sameRequirementSignature(hooks, better, worse) && better.getItemId() != worse.getItemId()) return false;
         return true;
     }
 
@@ -1394,6 +1597,13 @@ class BotEquipManager {
     }
 
     private static boolean isOwnClassEquip(Character bot, EquipUsefulnessHooks hooks, Equip equip) {
+        int level = bot.getLevel() > 0 ? bot.getLevel() : Short.MAX_VALUE;
+        return hooks.meetsReqs(equip, bot.getJob(), level,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, bot.getFame());
+    }
+
+    private static boolean isFutureOwnClassEquip(Character bot, EquipUsefulnessHooks hooks, Equip equip) {
         return hooks.meetsReqs(equip, bot.getJob(), Short.MAX_VALUE,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE);
@@ -1411,7 +1621,12 @@ class BotEquipManager {
         return textSlotKey(EquipUsefulnessHooks.from(ii), equip);
     }
 
-    private static boolean isWeaponSlot(String textSlot) { return "Wp".equals(textSlot); }
+    private static boolean isWeaponSlot(String textSlot) {
+        // Weapons can come back as "Wp" (1H), "WpSi" (2H — occupies shield slot), or "WpSp"
+        // (LOW_WEAPON). All three resolve to the -11 weapon slot and must be routed through
+        // the weapon-type compatibility check (isWeaponCompatible).
+        return "Wp".equals(textSlot) || "WpSi".equals(textSlot) || "WpSp".equals(textSlot);
+    }
 
     private static boolean meetsReqsNaked(Character bot, ItemInformationProvider ii,
                                           StatSnapshot naked, Equip equip) {
@@ -1541,8 +1756,8 @@ class BotEquipManager {
             case "ring4" -> new short[]{-16};
             case "petwear" -> new short[]{-14};
             case "pendant" -> new short[]{-17};
-            case "medal" -> new short[]{-21};
-            case "belt" -> new short[]{-22};
+            case "medal" -> new short[]{-49};
+            case "belt" -> new short[]{-50};
             default -> new short[0];
         };
     }
@@ -1561,6 +1776,24 @@ class BotEquipManager {
      */
     private static int damageWith(StatSnapshot sim, ItemInformationProvider ii, WeaponType wtype,
                                    MapDamageProfile mobProfile) {
+        int rawMax = rawPhysicalMax(sim, wtype);
+        if (rawMax <= 0) return 0;
+        if (mobProfile == null) {
+            return rawMax;
+        }
+        double expectedAfterDef = expectedDamageAfterDef(rawMax, mobProfile.mobWdef());
+        double hitChance;
+        try {
+            hitChance = CombatFormulaProvider.getInstance().calculatePhysicalMobHitChance(
+                    sim.totalAcc(), sim.level(), mobProfile.mobLevel(), mobProfile.mobAvoid());
+        } catch (Throwable t) {
+            hitChance = 1.0;
+        }
+        // Scale by 1000 so hitChance and small expectedAfterDef differences survive the int cast.
+        return Math.max(1, (int) Math.round(expectedAfterDef * hitChance * 1000.0));
+    }
+
+    private static int rawPhysicalMax(StatSnapshot sim, WeaponType wtype) {
         if (wtype == null) return 0;
         WeaponType effective = wtype;
         if (sim.job() != null && sim.job().isA(Job.THIEF) && effective == WeaponType.DAGGER_OTHER) {
@@ -1580,20 +1813,7 @@ class BotEquipManager {
             case POLE_ARM_SWING -> (WeaponType.POLE_ARM_SWING.getMaxDamageMultiplier() + WeaponType.POLE_ARM_STAB.getMaxDamageMultiplier()) / 2.0;
             default             -> effective.getMaxDamageMultiplier();
         };
-        int rawMax = (int) Math.ceil((mult * main + sec) / 100.0 * sim.watk());
-        if (mobProfile == null) {
-            return rawMax;
-        }
-        double expectedAfterDef = expectedDamageAfterDef(rawMax, mobProfile.mobWdef());
-        double hitChance;
-        try {
-            hitChance = CombatFormulaProvider.getInstance().calculatePhysicalMobHitChance(
-                    sim.totalAcc(), sim.level(), mobProfile.mobLevel(), mobProfile.mobAvoid());
-        } catch (Throwable t) {
-            hitChance = 1.0;
-        }
-        // Scale by 1000 so hitChance and small expectedAfterDef differences survive the int cast.
-        return Math.max(1, (int) Math.round(expectedAfterDef * hitChance * 1000.0));
+        return (int) Math.ceil((mult * main + sec) / 100.0 * sim.watk());
     }
 
     /**
@@ -2011,19 +2231,188 @@ class BotEquipManager {
      * Prune for lookahead pools where reqs differ across items. {@code b} dominates {@code a}
      * only if b's stats ≥ a's AND b's reqs ≤ a's — otherwise a weaker but easier-to-wear
      * item is meaningful and must be retained.
+     *
+     * <p>Job-aware variant: dim selection focuses on the bot's job-primary stat + watk/magic
+     * + job-conditional eff_acc + req-relevant str/dex/int/luk dims. Stats that don't matter
+     * to the bot's damage formula and don't gate any candidate's reqs collapse into a
+     * combat-effectiveness tiebreaker score. Much tighter than the legacy 14-dim raw vec —
+     * shrinks per-slot pools so the DP step downstream sees fewer candidates.
      */
-    private static List<Equip> pruneDominatedWithReqs(ItemInformationProvider ii, List<Equip> items) {
+    private static List<Equip> pruneDominatedWithReqs(ItemInformationProvider ii, List<Equip> items,
+                                                       Job job, boolean[] reqRel) {
         if (items == null || items.size() <= 1) return items;
-        List<Equip> kept = new ArrayList<>(items.size());
-        for (Equip a : items) {
+        int[] priority = jobStatPriority(job);
+        boolean isMage = isMageJob(job);
+        boolean accRel = isAccRelevantJob(job);
+        // Precompute vec + tiebreak per item; the dominance scan is O(N^2) but the per-item
+        // computation is O(N).
+        final int n = items.size();
+        int[][] vecs = new int[n][];
+        int[] tiebreak = new int[n];
+        for (int i = 0; i < n; i++) {
+            vecs[i] = dedupStatVec(items.get(i), priority, reqRel, isMage, accRel);
+            tiebreak[i] = dedupTiebreak(items.get(i), priority);
+        }
+        List<Equip> kept = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            Equip a = items.get(i);
             boolean dominated = false;
-            for (Equip b : items) {
-                if (a == b) continue;
-                if (dominates(b, a) && reqsAtLeastAsEasy(ii, b, a)) { dominated = true; break; }
+            for (int j = 0; j < n; j++) {
+                if (i == j) continue;
+                Equip b = items.get(j);
+                if (!dedupDominatesPre(vecs[j], vecs[i], tiebreak[j], tiebreak[i])) continue;
+                if (!reqsAtLeastAsEasy(ii, b, a)) continue;
+                dominated = true; break;
             }
             if (!dominated) kept.add(a);
         }
         return kept.isEmpty() ? items : kept;
+    }
+
+    /**
+     * Per-job stat priority for the dedup vec / tiebreaker. Index 0 is the primary damage
+     * stat; remaining indices are secondaries (added at 0.25 weight into eff_primary).
+     * Stat indices: 0=str, 1=dex, 2=int, 3=luk.
+     */
+    private static int[] jobStatPriority(Job job) {
+        if (job == null) return new int[]{0, 1};
+        if (isMageJob(job)) return new int[]{2};
+        int id = job.getId();
+        int niche = (id / 100) % 10;
+        return switch (niche) {
+            case 1 -> new int[]{0, 1};       // warrior (str primary, dex secondary)
+            case 3 -> new int[]{1, 0};       // bowman (dex primary, str secondary)
+            case 4 -> new int[]{3, 1, 0};    // thief (luk primary, dex+str secondary)
+            case 5 -> (id / 10 == 51 || id / 10 == 151)
+                    ? new int[]{0, 1}        // brawler line: str primary
+                    : new int[]{1, 0};       // gunslinger line: dex primary
+            default -> new int[]{0, 1};
+        };
+    }
+
+    /** Acc-contribution stats only earn a vec dim for jobs that actually need acc to hit. */
+    private static boolean isAccRelevantJob(Job job) {
+        if (job == null) return false;
+        int id = job.getId();
+        int niche = (id / 100) % 10;
+        if (niche == 1) return true;             // warrior
+        if (niche == 5) {
+            int sub = id / 10;
+            return sub == 51 || sub == 151;      // brawler / thunderbreaker
+        }
+        return false;
+    }
+
+    /**
+     * Scans every candidate pool to detect which stat reqs (str/dex/int/luk) appear on any
+     * item. Returned mask drives whether that stat survives as a raw dim in {@code dedupStatVec}
+     * — preserves req-unlocking potential while still allowing aggressive dedup on
+     * never-req-gated stats.
+     */
+    private static boolean[] scanReqRelevantDims(Map<Short, List<Equip>> bySlot,
+                                                  ItemInformationProvider ii) {
+        return scanReqRelevantDims(bySlot, ii::getEquipStats);
+    }
+
+    private static boolean[] scanReqRelevantDims(Map<Short, List<Equip>> bySlot,
+                                                  OptimizerHooks hooks) {
+        return scanReqRelevantDims(bySlot, hooks::getEquipStats);
+    }
+
+    private interface EquipStatsLookup {
+        Map<String, Integer> getEquipStats(int itemId);
+    }
+
+    private static boolean[] scanReqRelevantDims(Map<Short, List<Equip>> bySlot,
+                                                  EquipStatsLookup lookup) {
+        boolean[] mask = new boolean[4];
+        for (List<Equip> pool : bySlot.values()) {
+            if (pool == null) continue;
+            for (Equip e : pool) {
+                Map<String, Integer> s = lookup.getEquipStats(e.getItemId());
+                if (s == null) continue;
+                if (s.getOrDefault("reqSTR", 0) > 0) mask[0] = true;
+                if (s.getOrDefault("reqDEX", 0) > 0) mask[1] = true;
+                if (s.getOrDefault("reqINT", 0) > 0) mask[2] = true;
+                if (s.getOrDefault("reqLUK", 0) > 0) mask[3] = true;
+                if (mask[0] && mask[1] && mask[2] && mask[3]) return mask;
+            }
+        }
+        return mask;
+    }
+
+    /**
+     * Dims (in this order): job-primary stat (always); watk for non-mage / magic for mage;
+     * eff_acc = acc + dex + luk*0.5 (warrior/brawler only); each of str/dex/int/luk where
+     * reqRel[stat] is true (and not already emitted as primary).
+     */
+    private static int[] dedupStatVec(Equip e, int[] priority, boolean[] reqRel,
+                                       boolean isMage, boolean accRelevant) {
+        int primaryIdx = priority.length > 0 ? priority[0] : -1;
+        boolean[] reqDim = new boolean[4];
+        for (int i = 0; i < 4; i++) {
+            reqDim[i] = reqRel != null && reqRel[i] && i != primaryIdx;
+        }
+        int count = (primaryIdx >= 0 ? 1 : 0) + 1 /* watk or magic */
+                + (accRelevant ? 1 : 0);
+        for (boolean b : reqDim) if (b) count++;
+        int[] v = new int[count];
+        int k = 0;
+        int primary = primaryIdx >= 0 ? statByIdx(e, primaryIdx) : 0;
+        if (primaryIdx >= 0) v[k++] = isMage ? primary : primary + e.getWatk() * 2;
+        v[k++] = isMage ? e.getMatk() : e.getWatk() + primary / 5;
+        if (accRelevant) {
+            v[k++] = e.getAcc() + e.getDex() + (int) Math.round(e.getLuk() * 0.5);
+        }
+        for (int i = 0; i < 4; i++) {
+            if (reqDim[i]) v[k++] = statByIdx(e, i);
+        }
+        return v;
+    }
+
+    /**
+     * Tiebreaker score used when {@link #dedupStatVec} ties — captures combat-relevant
+     * contributions that didn't survive into the vec. eff_primary = primary + secondaries*0.25
+     * picks up secondary stats that aren't already raw dims (e.g. str for a thief when no
+     * candidate has reqSTR). watk added at ×4 keeps damage signal dominant.
+     */
+    private static int dedupTiebreak(Equip e, int[] priority) {
+        if (priority == null || priority.length == 0) return 0;
+        int main = statByIdx(e, priority[0]);
+        int secSum = 0;
+        for (int i = 1; i < priority.length; i++) secSum += statByIdx(e, priority[i]);
+        int effPrimary = main + (int) Math.round(secSum * 0.25);
+        return effPrimary + e.getWatk() * 4;
+    }
+
+    private static int statByIdx(Equip e, int idx) {
+        return switch (idx) {
+            case 0 -> e.getStr();
+            case 1 -> e.getDex();
+            case 2 -> e.getInt();
+            case 3 -> e.getLuk();
+            default -> 0;
+        };
+    }
+
+    private static int statByIdx(StatSnapshot s, int idx) {
+        return switch (idx) {
+            case 0 -> s.str();
+            case 1 -> s.dex();
+            case 2 -> s.int_();
+            case 3 -> s.luk();
+            default -> 0;
+        };
+    }
+
+    private static boolean dedupDominatesPre(int[] bs, int[] as, int bTie, int aTie) {
+        boolean strict = false;
+        for (int i = 0; i < bs.length; i++) {
+            if (bs[i] < as[i]) return false;
+            if (bs[i] > as[i]) strict = true;
+        }
+        if (strict) return true;
+        return bTie > aTie;
     }
 
     private static boolean reqsAtLeastAsEasy(ItemInformationProvider ii, Equip b, Equip a) {

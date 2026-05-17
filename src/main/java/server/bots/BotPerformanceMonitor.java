@@ -10,9 +10,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-final class BotPerformanceMonitor {
+public final class BotPerformanceMonitor {
     static final class Config {
-        public boolean ENABLED = true;
+        public boolean ENABLED = false;
         public int LOG_INTERVAL_MS = 15000;
         public double SLOW_SAMPLE_MS = 50.0;
         public double REPORT_MAX_MS = 250.0;
@@ -26,36 +26,124 @@ final class BotPerformanceMonitor {
         long slowTotalNs = 0;
     }
 
+    /** Immutable snapshot of one section's stats — returned by {@link #snapshot()}. */
+    public record SectionSnapshot(String section,
+                                  long count,
+                                  long totalNs,
+                                  long maxNs,
+                                  long slowCount,
+                                  long slowTotalNs) {
+        public double avgMs() {
+            return totalNs / (double) Math.max(1L, count) / 1_000_000.0;
+        }
+        public double maxMs() {
+            return maxNs / 1_000_000.0;
+        }
+        public double slowAvgMs() {
+            return slowTotalNs / (double) Math.max(1L, slowCount) / 1_000_000.0;
+        }
+    }
+
     private static final Logger log = LoggerFactory.getLogger(BotPerformanceMonitor.class);
     private static final Object LOCK = new Object();
     private static final int MAX_LOGGED_SECTIONS = 12;
     static Config cfg = new Config();
+    private static volatile boolean enabled = cfg.ENABLED;
 
     private static long lastLogAtMs = System.currentTimeMillis();
     private static long nextLogAtMs = lastLogAtMs + cfg.LOG_INTERVAL_MS;
     private static final Map<String, Stat> statsBySection = new LinkedHashMap<>();
-    private static final Map<String, String> SECTION_NOTES = Map.of(
-            "tick-total", "complete bot tick, including common systems, AI, combat, navigation, and movement",
-            "move-ground", "ground physics, foothold collision, fallback steering, and movement packet sync",
-            "move-air", "air physics, foothold landing checks, and air steering",
-            "move-climb", "rope/ladder attachment, climb movement, and dismount checks",
-            "move-swim", "swim physics, vertical hold selection, and movement packet sync",
-            "nav-resolve", "region lookup, graph/path selection, edge reuse, and waypoint selection",
-            "pathfind", "A* search over the current bot navigation graph",
-            "pathfind-target-score", "A* called while ranking grind target regions",
-            "combat-target-search", "monster scan, distance filtering, foothold lookup, and candidate sorting",
-            "combat-plan", "skill/basic attack route selection and hitbox construction"
-    );
+    private static final Map<String, String> SECTION_NOTES;
+    static {
+        Map<String, String> notes = new LinkedHashMap<>();
+        notes.put("tick-total", "complete bot tick, including common systems, AI, combat, navigation, and movement");
+        notes.put("move-ground", "ground physics, foothold collision, fallback steering, and movement packet sync");
+        notes.put("move-air", "air physics, foothold landing checks, and air steering");
+        notes.put("move-climb", "rope/ladder attachment, climb movement, and dismount checks");
+        notes.put("move-swim", "swim physics, vertical hold selection, and movement packet sync");
+        notes.put("nav-resolve", "region lookup, graph/path selection, edge reuse, and waypoint selection");
+        notes.put("pathfind", "A* search over the current bot navigation graph");
+        notes.put("pathfind-target-score", "A* called while ranking grind target regions");
+        notes.put("combat-target-search", "monster scan, distance filtering, foothold lookup, and candidate sorting");
+        notes.put("combat-plan", "skill/basic attack route selection and hitbox construction");
+        // Common tick systems (run every tick, instrumented in BotManager.runCommonTickSystems)
+        notes.put("common-mob-damage", "BotCombatManager.tickMobDamage (mob damage decay timers)");
+        notes.put("common-release-mob", "tickReleaseMonsterControl (release stale controlled mobs)");
+        notes.put("common-passive-loot", "BotInventoryManager.tickPassiveLoot (scan drops + pickup + autoEquip)");
+        notes.put("common-potion-check", "BotPotionManager.tickPotionCheck (HP/MP potion request)");
+        notes.put("potion-autopot", "BotPotionManager.setupAutopotForBot (scan USE bag + choose HP/MP autopot bindings)");
+        notes.put("potion-ammo-check", "BotCombatManager.tickAmmoCheck invoked from potion check");
+        notes.put("potion-ammo-share", "BotAmmoManager.tickAmmoShareCheck invoked from potion check");
+        notes.put("potion-count", "BotPotionManager.countPotions for the active bot");
+        notes.put("potion-recovery-scan", "BotPotionManager.recoveryPotions (USE inventory scan + recovery classification)");
+        notes.put("potion-recovery-count", "BotPotionManager.countPotions second pass over recovery items");
+        notes.put("potion-share-hp", "HP low-pot branch including donor search / scheduling");
+        notes.put("potion-share-mp", "MP low-pot branch including donor search / scheduling");
+        notes.put("potion-grind-stop", "low-pot grind-stop branch (follow owner + emote)");
+        notes.put("potion-request", "BotPotionManager.requestPotShare total");
+        notes.put("potion-donor-select", "BotPotionManager.selectPotDonor sibling scan");
+        notes.put("common-passive-recovery", "BotPotionManager.tickPassiveRecovery (regen / mana recovery)");
+        notes.put("common-build-levelup", "BotBuildManager.checkLevelUp (skill point allocation)");
+        notes.put("common-afk-check", "BotChatManager.tickAfkCheck (owner-AFK detection)");
+        notes.put("common-trade", "BotInventoryManager.tickTrade (in-progress bot trade state machine)");
+        notes.put("common-manual-trade", "BotInventoryManager.tickManualTrade (manual bot/player trade)");
+        notes.put("common-pq-hooks", "BotPqHooks.tick (KPQ / OPQ / LPQ state machines)");
+        notes.put("common-script-tasks", "tickScriptTasks (BotScriptRunner)");
+        notes.put("common-action-lock", "BotCombatManager.tickActionLock (attack/move cooldown decay)");
+        notes.put("common-skill-cache", "BotCombatManager.rebuildSkillCacheIfNeeded");
+        notes.put("common-support-heal", "BotCombatManager.tickSupportHealing (cleric heal)");
+        notes.put("common-combat-buffs", "BotCombatManager.tickBuffs (player skill rebuff)");
+        notes.put("common-buff-pots", "BotBuffManager.tick (consumable buff pots)");
+        // Dispatch buckets
+        notes.put("tick-idle", "tickIdleEntry physics-only idle dispatch");
+        notes.put("tick-trade-physics", "tickTradePhysicsOnly (trade-window safe physics)");
+        notes.put("tick-shop-visit", "BotShopManager.tickShopVisit");
+        notes.put("tick-anchored-farm", "tickAnchoredFarm dispatch");
+        notes.put("tick-standalone-move", "tickStandaloneMoveTarget (owner-offline move)");
+        notes.put("tick-grind-dispatch", "grind mode dispatch in tickCore");
+        notes.put("tick-map-change", "map change handler (rebuild footholds, regrounding)");
+        notes.put("step-movement-core", "stepMovementCore wrapper (nav resolve + movement phase)");
+        notes.put("opportunity-attack", "tryLocalOpportunityAttack");
+        notes.put("broadcast-move", "BotMovementManager.broadcastMovement (packet build + map broadcast)");
+        notes.put("stuck-detect", "tickStuckDetection");
+        notes.put("grind-loot-scan", "BotInventoryManager.findNearestGrindLootTarget");
+        notes.put("auto-equip", "BotEquipManager.autoEquip (Pareto DP) triggered on equip pickup");
+        SECTION_NOTES = notes;
+    }
 
     private BotPerformanceMonitor() {
     }
 
-    static boolean enabled() {
-        return cfg.ENABLED;
+    public static boolean enabled() {
+        return enabled;
+    }
+
+    public static void setEnabled(boolean enabledValue) {
+        cfg.ENABLED = enabledValue;
+        enabled = enabledValue;
+        reset();
+    }
+
+    public static boolean toggleEnabled() {
+        boolean next = !enabled;
+        setEnabled(next);
+        return next;
+    }
+
+    /** Returns a start timestamp suitable for {@link #recordSince}, or 0 if monitoring is disabled. */
+    static long start() {
+        return enabled ? System.nanoTime() : 0L;
+    }
+
+    /** Records elapsed time since the matching {@link #start} call. No-op when start returned 0. */
+    static void recordSince(String section, long startedAtNs) {
+        if (startedAtNs != 0L) {
+            record(section, System.nanoTime() - startedAtNs);
+        }
     }
 
     static void record(String section, long elapsedNs) {
-        if (!cfg.ENABLED || elapsedNs < 0) {
+        if (!enabled || elapsedNs < 0) {
             return;
         }
 
@@ -69,6 +157,27 @@ final class BotPerformanceMonitor {
                 stat.slowTotalNs += elapsedNs;
             }
             maybeLog();
+        }
+    }
+
+    /** Clears all accumulated stats. Used by perf harnesses to start a clean window. */
+    public static void reset() {
+        synchronized (LOCK) {
+            statsBySection.clear();
+            lastLogAtMs = System.currentTimeMillis();
+            nextLogAtMs = lastLogAtMs + cfg.LOG_INTERVAL_MS;
+        }
+    }
+
+    /** Returns an immutable per-section snapshot of current stats. */
+    public static List<SectionSnapshot> snapshot() {
+        synchronized (LOCK) {
+            List<SectionSnapshot> snapshots = new ArrayList<>(statsBySection.size());
+            for (Map.Entry<String, Stat> entry : statsBySection.entrySet()) {
+                Stat s = entry.getValue();
+                snapshots.add(new SectionSnapshot(entry.getKey(), s.count, s.totalNs, s.maxNs, s.slowCount, s.slowTotalNs));
+            }
+            return snapshots;
         }
     }
 

@@ -28,7 +28,7 @@ final class BotAttackExecutionProvider {
     record SkillAttackTiming(int hitDelayMs, int cooldownMs) {
     }
 
-    record BasicAttackData(Rectangle hitBox, int display, int direction, int rangedDirection,
+    record BasicAttackData(Rectangle hitBox, int display, int direction, int rangedDirection, String action,
                            int stance, int speed, int hitDelayMs, int cooldownMs, BotCombatManager.AttackRoute route) {
     }
 
@@ -98,7 +98,7 @@ final class BotAttackExecutionProvider {
                 ? closeRangeBasicHitBox(bot.getPosition(), facingLeft)
                 : rangedBasicHitBox(route, bot, facingLeft);
 
-        return new BasicAttackData(hitBox, display, direction, direction, stance, effectiveAttackSpeed,
+        return new BasicAttackData(hitBox, display, direction, direction, action, stance, effectiveAttackSpeed,
                 hitDelayMs, cooldownMs, route);
     }
 
@@ -131,7 +131,7 @@ final class BotAttackExecutionProvider {
                 ? closeRangeBasicHitBox(bot.getPosition(), facingLeft)
                 : bot != null ? rangedBasicHitBox(route, bot, facingLeft) : null;
 
-        return new BasicAttackData(hitBox, display, direction, direction,
+        return new BasicAttackData(hitBox, display, direction, direction, action,
                 attackPacketStance(facingLeft),
                 effectiveAttackSpeed, defaultHitDelayMs(adjustedAnimationDelayMs), toCooldownMs(adjustedAnimationDelayMs),
                 route);
@@ -228,10 +228,18 @@ final class BotAttackExecutionProvider {
 
         WeaponType weaponType = getEquippedWeaponType(bot);
         if (weaponType == WeaponType.WAND || weaponType == WeaponType.STAFF) {
-            return BotCombatManager.AttackRoute.MAGIC;
+            return isMagicAttackSkill(skillId)
+                    ? BotCombatManager.AttackRoute.MAGIC
+                    : BotCombatManager.AttackRoute.CLOSE;
         }
 
         return determineWeaponRoute(weaponType);
+    }
+
+    private static boolean isMagicAttackSkill(int skillId) {
+        int job = skillId / 10000;
+        int family = job / 100;
+        return family == 2 || family == 12 || family == 22;
     }
 
     static BotCombatManager.AttackRoute determineBasicWeaponRoute(WeaponType weaponType) {

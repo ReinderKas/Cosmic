@@ -102,6 +102,7 @@ import client.command.commands.gm2.WhereaMiCommand;
 import client.command.commands.gm3.AirshowCommand;
 import client.command.commands.gm3.BanCommand;
 import client.command.commands.gm3.BotNavCommand;
+import client.command.commands.gm3.BotPerfDebugCommand;
 import client.command.commands.gm3.ChatCommand;
 import client.command.commands.gm3.CheckDmgCommand;
 import client.command.commands.gm3.ClosePortalCommand;
@@ -456,6 +457,7 @@ public class CommandsExecutor {
         addCommand("spawn", 3, SpawnCommand.class);
         addCommand(new String[]{"deletechar", "delchar"}, 3, DeleteCharCommand.class);
         addCommand("botnav", 3, BotNavCommand.class);
+        addCommand("botperfdebug", 3, BotPerfDebugCommand.class);
         addCommand("airshow", 3, AirshowCommand.class);
         addCommand("regennav", 3, RegenNavCommand.class);
         addCommand("mutemap", 3, MuteMapCommand.class);

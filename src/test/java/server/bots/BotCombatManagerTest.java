@@ -10,10 +10,15 @@ import client.inventory.InventoryType;
 import client.inventory.WeaponType;
 import constants.game.CharacterStance;
 import constants.skills.Archer;
+import constants.skills.Assassin;
 import constants.skills.Beginner;
 import constants.skills.Cleric;
+import constants.skills.DragonKnight;
 import constants.skills.Hunter;
+import constants.skills.ILWizard;
 import constants.skills.Magician;
+import constants.skills.Rogue;
+import constants.skills.Spearman;
 import constants.skills.Warrior;
 import net.packet.Packet;
 import org.junit.jupiter.api.Test;
@@ -33,6 +38,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Collections;
 import java.util.Set;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -44,6 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.eq;
@@ -153,6 +160,455 @@ class BotCombatManagerTest {
     }
 
     @Test
+    void shouldNotTreatMpEaterAsActiveAttackSkill() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.IL_WIZARD);
+        when(bot.getLevel()).thenReturn(35);
+
+        Skill thunderbolt = skillWithAttack(ILWizard.THUNDERBOLT, 1, 6, 115);
+        Skill mpEater = passiveOverTimeSkillWithCombatMetadata(ILWizard.MP_EATER, 115, 1, 1);
+
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        skills.put(mpEater, null);
+        skills.put(thunderbolt, null);
+        when(bot.getSkills()).thenReturn(skills);
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skill.getId() == ILWizard.MP_EATER || skill.getId() == ILWizard.THUNDERBOLT ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertEquals(ILWizard.THUNDERBOLT, entry.aoeSkillId);
+        assertEquals(0, entry.attackSkillId);
+        assertFalse(entry.buffSkillIds.contains(ILWizard.MP_EATER));
+    }
+
+    @Test
+    void shouldCacheActionBackedSupportBuffButNotPassiveOverTimeSkill() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.CLERIC);
+        when(bot.getLevel()).thenReturn(35);
+
+        Skill bless = skillWithBuffAction(Cleric.BLESS);
+        Skill mpEater = passiveOverTimeSkillWithCombatMetadata(Cleric.MP_EATER, 0, 1, 1);
+
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        skills.put(mpEater, null);
+        skills.put(bless, null);
+        when(bot.getSkills()).thenReturn(skills);
+        when(bot.getSkillLevel(any(Skill.class))).thenReturn((byte) 1);
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertFalse(entry.buffSkillIds.contains(Cleric.MP_EATER));
+        assertTrue(entry.buffSkillIds.contains(Cleric.BLESS));
+    }
+
+    @Test
+    void shouldStillCacheMagicClawAsActiveAttackSkill() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.MAGICIAN);
+        when(bot.getLevel()).thenReturn(18);
+
+        Skill magicClaw = skillWithAttack(Magician.MAGIC_CLAW, 2, 1, 40);
+        Skill fakePassive = passiveSkillWithCombatMetadata(ILWizard.MP_EATER, 115, 1, 1);
+
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        skills.put(fakePassive, null);
+        skills.put(magicClaw, null);
+        when(bot.getSkills()).thenReturn(skills);
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skill.getId() == ILWizard.MP_EATER || skill.getId() == Magician.MAGIC_CLAW ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertEquals(Magician.MAGIC_CLAW, entry.attackSkillId);
+    }
+
+    @Test
+    void shouldStillCacheDoubleShotAsActiveAttackSkill() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.BOWMAN);
+        when(bot.getLevel()).thenReturn(12);
+
+        Skill doubleShot = skillWithAttack(Archer.DOUBLE_SHOT, 2, 1, 130);
+        Skill fakePassive = passiveSkillWithCombatMetadata(Archer.CRITICAL_SHOT, 200, 1, 1);
+
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        skills.put(fakePassive, null);
+        skills.put(doubleShot, null);
+        when(bot.getSkills()).thenReturn(skills);
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skill.getId() == Archer.CRITICAL_SHOT || skill.getId() == Archer.DOUBLE_SHOT ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertEquals(Archer.DOUBLE_SHOT, entry.attackSkillId);
+    }
+
+    @Test
+    void shouldStillCacheLuckySevenAsActiveAttackSkill() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.THIEF);
+        when(bot.getLevel()).thenReturn(14);
+
+        Skill luckySeven = skillWithAttack(Rogue.LUCKY_SEVEN, 2, 1, 150);
+        Skill fakePassive = passiveSkillWithCombatMetadata(Archer.CRITICAL_SHOT, 200, 1, 1);
+
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        skills.put(fakePassive, null);
+        skills.put(luckySeven, null);
+        when(bot.getSkills()).thenReturn(skills);
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skill.getId() == Archer.CRITICAL_SHOT || skill.getId() == Rogue.LUCKY_SEVEN ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertEquals(Rogue.LUCKY_SEVEN, entry.attackSkillId);
+    }
+
+    @Test
+    void shouldStillCacheThunderboltAsActiveAttackSkill() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.IL_WIZARD);
+        when(bot.getLevel()).thenReturn(35);
+
+        Skill thunderbolt = skillWithAttack(ILWizard.THUNDERBOLT, 1, 6, 115);
+        Skill fakePassive = passiveSkillWithCombatMetadata(ILWizard.MP_EATER, 115, 1, 1);
+
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        skills.put(fakePassive, null);
+        skills.put(thunderbolt, null);
+        when(bot.getSkills()).thenReturn(skills);
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skill.getId() == ILWizard.MP_EATER || skill.getId() == ILWizard.THUNDERBOLT ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertEquals(ILWizard.THUNDERBOLT, entry.aoeSkillId);
+    }
+
+    @Test
+    void shouldIgnorePassiveCombatMetadataWithoutActiveSkillAction() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.BOWMAN);
+        when(bot.getLevel()).thenReturn(12);
+
+        Skill criticalShot = new Skill(Archer.CRITICAL_SHOT);
+        StatEffect passiveEffect = mock(StatEffect.class);
+        when(passiveEffect.getDamage()).thenReturn(200);
+        when(passiveEffect.getAttackCount()).thenReturn(1);
+        when(passiveEffect.getBulletCount()).thenReturn((short) 0);
+        when(passiveEffect.getMobCount()).thenReturn(1);
+        when(passiveEffect.isOverTime()).thenReturn(false);
+        criticalShot.addLevelEffect(passiveEffect);
+
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        skills.put(criticalShot, null);
+        when(bot.getSkills()).thenReturn(skills);
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skill.getId() == Archer.CRITICAL_SHOT ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertEquals(0, entry.attackSkillId);
+        assertEquals(0, entry.aoeSkillId);
+        assertTrue(entry.buffSkillIds.isEmpty());
+    }
+
+    @Test
+    void shouldIgnoreFinalAttackPassiveDamageMetadata() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.HUNTER);
+        when(bot.getLevel()).thenReturn(35);
+
+        Skill finalAttack = passiveSkillWithCombatMetadata(Hunter.FINAL_ATTACK, 105, 1, 1);
+        finalAttack.setSkillType(3);
+
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        skills.put(finalAttack, null);
+        when(bot.getSkills()).thenReturn(skills);
+        when(bot.getSkillLevel(any(Skill.class))).thenReturn((byte) 1);
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertEquals(0, entry.attackSkillId);
+        assertEquals(0, entry.aoeSkillId);
+        assertTrue(entry.buffSkillIds.isEmpty());
+    }
+
+    @Test
+    void shouldClassifyInspectedSecondJobSkillsFromRealWzData() {
+        SkillFactory.loadAllSkills();
+
+        assertRealWzCache(Job.IL_WIZARD, 35,
+                Set.of(ILWizard.MP_EATER, ILWizard.MEDITATION, ILWizard.SLOW, ILWizard.COLD_BEAM, ILWizard.THUNDERBOLT),
+                ILWizard.COLD_BEAM, ILWizard.THUNDERBOLT,
+                Set.of(ILWizard.MEDITATION, ILWizard.SLOW),
+                Set.of(ILWizard.MP_EATER));
+        assertRealWzCache(Job.CLERIC, 35,
+                Set.of(Cleric.MP_EATER, Cleric.HEAL, Cleric.INVINCIBLE, Cleric.BLESS, Cleric.HOLY_ARROW),
+                Cleric.HOLY_ARROW, 0,
+                Set.of(Cleric.INVINCIBLE, Cleric.BLESS),
+                Set.of(Cleric.MP_EATER));
+        assertRealWzCache(Job.HUNTER, 35,
+                Set.of(Archer.DOUBLE_SHOT, Hunter.FINAL_ATTACK, Hunter.BOW_BOOSTER, Hunter.SOUL_ARROW, Hunter.ARROW_BOMB),
+                Archer.DOUBLE_SHOT, Hunter.ARROW_BOMB,
+                Set.of(Hunter.BOW_BOOSTER, Hunter.SOUL_ARROW),
+                Set.of(Hunter.FINAL_ATTACK));
+        assertRealWzCache(Job.ASSASSIN, 35,
+                Set.of(Rogue.LUCKY_SEVEN, Assassin.CRITICAL_THROW, Assassin.CLAW_BOOSTER, Assassin.HASTE, Assassin.DRAIN),
+                Rogue.LUCKY_SEVEN, 0,
+                Set.of(Assassin.CLAW_BOOSTER, Assassin.HASTE),
+                Set.of(Assassin.CRITICAL_THROW));
+        assertRealWzCache(Job.SPEARMAN, 35,
+                Set.of(Warrior.POWER_STRIKE, Warrior.SLASH_BLAST, Spearman.FINAL_ATTACK_SPEAR,
+                        Spearman.FINAL_ATTACK_POLEARM, Spearman.SPEAR_BOOSTER, Spearman.IRON_WILL, Spearman.HYPER_BODY),
+                Warrior.POWER_STRIKE, Warrior.SLASH_BLAST,
+                Set.of(Spearman.SPEAR_BOOSTER, Spearman.IRON_WILL, Spearman.HYPER_BODY),
+                Set.of(Spearman.FINAL_ATTACK_SPEAR, Spearman.FINAL_ATTACK_POLEARM));
+    }
+
+    @Test
+    void shouldCacheDragonKnightAttackCandidatesButExcludePowerCrash() {
+        SkillFactory.loadAllSkills();
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.DRAGONKNIGHT);
+        when(bot.getLevel()).thenReturn(100);
+
+        Set<Integer> skillIds = Set.of(
+                DragonKnight.SPEAR_CRUSHER,
+                DragonKnight.SPEAR_DRAGON_FURY,
+                DragonKnight.DRAGON_ROAR,
+                DragonKnight.POWER_CRASH,
+                DragonKnight.DRAGON_BLOOD);
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        for (int skillId : skillIds) {
+            Skill skill = SkillFactory.getSkill(skillId);
+            assertTrue(skill != null, "missing real WZ skill " + skillId);
+            skills.put(skill, null);
+        }
+        when(bot.getSkills()).thenReturn(skills);
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skillIds.contains(skill.getId()) ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertTrue(entry.attackSkillIds.contains(DragonKnight.SPEAR_CRUSHER));
+        assertTrue(entry.attackSkillIds.contains(DragonKnight.SPEAR_DRAGON_FURY));
+        assertTrue(entry.attackSkillIds.contains(DragonKnight.DRAGON_ROAR));
+        assertFalse(entry.attackSkillIds.contains(DragonKnight.POWER_CRASH));
+        assertFalse(entry.buffSkillIds.contains(DragonKnight.POWER_CRASH));
+        assertTrue(entry.buffSkillIds.contains(DragonKnight.DRAGON_BLOOD));
+    }
+
+    @Test
+    void shouldNotUseDragonRoarBelowTargetThresholdWithoutNearbyHealer() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mockBot(new Point(100, 200), map, 20_000, null);
+        when(bot.calculateMaxBaseDamage(100)).thenReturn(20);
+        when(bot.calculateMinBaseDamage(100, 0.1d)).thenReturn(10);
+        Skill cheaperAoe = skillWithAttackBox(Warrior.SLASH_BLAST, 1, 6, 200,
+                new Rectangle(80, 150, 220, 100));
+        Skill roar = skillWithAttackBox(DragonKnight.DRAGON_ROAR, 1, 15, 240,
+                new Rectangle(-300, -200, 800, 500));
+        List<Monster> mobs = List.of(
+                mockMob(new Point(140, 200), 9300300),
+                mockMob(new Point(150, 200), 9300301),
+                mockMob(new Point(160, 200), 9300302));
+        when(map.getAllMonsters()).thenReturn(mobs);
+        when(bot.getSkillLevel(any(Skill.class))).thenReturn((byte) 1);
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.attackSkillIds.add(cheaperAoe.getId());
+        entry.attackSkillIds.add(roar.getId());
+
+        try (MockedStatic<SkillFactory> skillFactory = Mockito.mockStatic(SkillFactory.class)) {
+            skillFactory.when(() -> SkillFactory.getSkill(cheaperAoe.getId())).thenReturn(cheaperAoe);
+            skillFactory.when(() -> SkillFactory.getSkill(roar.getId())).thenReturn(roar);
+
+            BotCombatManager.AttackPlan plan = BotCombatManager.planAttack(entry, bot, mobs.get(0));
+
+            assertEquals(Warrior.SLASH_BLAST, plan.skillId);
+        }
+    }
+
+    @Test
+    void shouldUseDragonRoarWhenLargeClusterMeetsTargetThreshold() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mockBot(new Point(100, 200), map, 20_000, null);
+        when(bot.calculateMaxBaseDamage(100)).thenReturn(20);
+        when(bot.calculateMinBaseDamage(100, 0.1d)).thenReturn(10);
+        Skill cheaperAoe = skillWithAttackBox(Warrior.SLASH_BLAST, 1, 6, 200,
+                new Rectangle(80, 150, 220, 100));
+        Skill roar = skillWithAttackBox(DragonKnight.DRAGON_ROAR, 1, 15, 240,
+                new Rectangle(-300, -200, 800, 500));
+        List<Monster> mobs = List.of(
+                mockMob(new Point(140, 200), 9300400),
+                mockMob(new Point(150, 200), 9300401),
+                mockMob(new Point(160, 200), 9300402),
+                mockMob(new Point(170, 200), 9300403),
+                mockMob(new Point(180, 200), 9300404),
+                mockMob(new Point(190, 200), 9300405),
+                mockMob(new Point(200, 200), 9300406),
+                mockMob(new Point(210, 200), 9300407),
+                mockMob(new Point(220, 200), 9300408),
+                mockMob(new Point(230, 200), 9300409));
+        when(map.getAllMonsters()).thenReturn(mobs);
+        when(bot.getSkillLevel(any(Skill.class))).thenReturn((byte) 1);
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.attackSkillIds.add(cheaperAoe.getId());
+        entry.attackSkillIds.add(roar.getId());
+
+        try (MockedStatic<SkillFactory> skillFactory = Mockito.mockStatic(SkillFactory.class)) {
+            skillFactory.when(() -> SkillFactory.getSkill(cheaperAoe.getId())).thenReturn(cheaperAoe);
+            skillFactory.when(() -> SkillFactory.getSkill(roar.getId())).thenReturn(roar);
+
+            BotCombatManager.AttackPlan plan = BotCombatManager.planAttack(entry, bot, mobs.get(0));
+
+            assertEquals(DragonKnight.DRAGON_ROAR, plan.skillId);
+            assertEquals(10, plan.targets.size());
+        }
+    }
+
+    @Test
+    void shouldAllowDragonRoarBelowTargetThresholdWhenNearbyHealerAndDamageWins() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mockBot(new Point(100, 200), map, 20_000, null);
+        Character healer = mockBot(new Point(120, 200), map, 20_000, null);
+        when(healer.getId()).thenReturn(2);
+        when(healer.getSkillLevel(Cleric.HEAL)).thenReturn(1);
+        when(bot.getPartyMembersOnSameMap()).thenReturn(List.of(healer));
+        when(bot.calculateMaxBaseDamage(100)).thenReturn(20);
+        when(bot.calculateMinBaseDamage(100, 0.1d)).thenReturn(10);
+        Skill cheaperAoe = skillWithAttackBox(Warrior.SLASH_BLAST, 1, 6, 100,
+                new Rectangle(80, 150, 220, 100));
+        Skill roar = skillWithAttackBox(DragonKnight.DRAGON_ROAR, 1, 15, 240,
+                new Rectangle(-300, -200, 800, 500));
+        List<Monster> mobs = List.of(
+                mockMob(new Point(140, 200), 9300410),
+                mockMob(new Point(150, 200), 9300411),
+                mockMob(new Point(160, 200), 9300412));
+        when(map.getAllMonsters()).thenReturn(mobs);
+        when(bot.getSkillLevel(any(Skill.class))).thenReturn((byte) 1);
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.attackSkillIds.add(cheaperAoe.getId());
+        entry.attackSkillIds.add(roar.getId());
+
+        try (MockedStatic<SkillFactory> skillFactory = Mockito.mockStatic(SkillFactory.class)) {
+            skillFactory.when(() -> SkillFactory.getSkill(cheaperAoe.getId())).thenReturn(cheaperAoe);
+            skillFactory.when(() -> SkillFactory.getSkill(roar.getId())).thenReturn(roar);
+
+            BotCombatManager.AttackPlan plan = BotCombatManager.planAttack(entry, bot, mobs.get(0));
+
+            assertEquals(DragonKnight.DRAGON_ROAR, plan.skillId);
+        }
+    }
+
+    @Test
+    void shouldNotForceDragonRoarWithNearbyHealerWhenAlternativeDamageWins() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mockBot(new Point(100, 200), map, 20_000, null);
+        Character healer = mockBot(new Point(120, 200), map, 20_000, null);
+        when(healer.getId()).thenReturn(2);
+        when(healer.getSkillLevel(Cleric.HEAL)).thenReturn(1);
+        when(bot.getPartyMembersOnSameMap()).thenReturn(List.of(healer));
+        when(bot.calculateMaxBaseDamage(100)).thenReturn(20);
+        when(bot.calculateMinBaseDamage(100, 0.1d)).thenReturn(10);
+        Skill cheaperAoe = skillWithAttackBox(Warrior.SLASH_BLAST, 1, 6, 500,
+                new Rectangle(80, 150, 220, 100));
+        Skill roar = skillWithAttackBox(DragonKnight.DRAGON_ROAR, 1, 15, 10,
+                new Rectangle(-300, -200, 800, 500));
+        List<Monster> mobs = List.of(
+                mockMob(new Point(140, 200), 9300420),
+                mockMob(new Point(150, 200), 9300421),
+                mockMob(new Point(160, 200), 9300422));
+        when(map.getAllMonsters()).thenReturn(mobs);
+        when(bot.getSkillLevel(any(Skill.class))).thenReturn((byte) 1);
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.attackSkillIds.add(cheaperAoe.getId());
+        entry.attackSkillIds.add(roar.getId());
+
+        try (MockedStatic<SkillFactory> skillFactory = Mockito.mockStatic(SkillFactory.class)) {
+            skillFactory.when(() -> SkillFactory.getSkill(cheaperAoe.getId())).thenReturn(cheaperAoe);
+            skillFactory.when(() -> SkillFactory.getSkill(roar.getId())).thenReturn(roar);
+
+            BotCombatManager.AttackPlan plan = BotCombatManager.planAttack(entry, bot, mobs.get(0));
+
+            assertEquals(Warrior.SLASH_BLAST, plan.skillId);
+        }
+    }
+
+    @Test
+    void shouldNotUseDragonRoarAtOrBelowHalfHp() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mockBot(new Point(100, 200), map, 10_000, null);
+        when(bot.getCurrentMaxHp()).thenReturn(20_000);
+        when(bot.calculateMaxBaseDamage(100)).thenReturn(20);
+        when(bot.calculateMinBaseDamage(100, 0.1d)).thenReturn(10);
+        Skill roar = skillWithAttackBox(DragonKnight.DRAGON_ROAR, 1, 15, 240,
+                new Rectangle(-300, -200, 800, 500));
+        List<Monster> mobs = List.of(
+                mockMob(new Point(140, 200), 9300430),
+                mockMob(new Point(150, 200), 9300431),
+                mockMob(new Point(160, 200), 9300432),
+                mockMob(new Point(170, 200), 9300433),
+                mockMob(new Point(180, 200), 9300434),
+                mockMob(new Point(190, 200), 9300435),
+                mockMob(new Point(200, 200), 9300436),
+                mockMob(new Point(210, 200), 9300437),
+                mockMob(new Point(220, 200), 9300438),
+                mockMob(new Point(230, 200), 9300439));
+        when(map.getAllMonsters()).thenReturn(mobs);
+        when(bot.getSkillLevel(any(Skill.class))).thenReturn((byte) 1);
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.attackSkillIds.add(roar.getId());
+
+        try (MockedStatic<SkillFactory> skillFactory = Mockito.mockStatic(SkillFactory.class)) {
+            skillFactory.when(() -> SkillFactory.getSkill(roar.getId())).thenReturn(roar);
+
+            BotCombatManager.AttackPlan plan = BotCombatManager.planAttack(entry, bot, mobs.get(0));
+
+            assertEquals(0, plan.skillId);
+        }
+    }
+
+    @Test
+    void shouldSkipPolearmDragonKnightSkillsWhenSpearIsEquipped() {
+        assertTrue(BotCombatManager.canUseAttackSkillWithWeapon(DragonKnight.SPEAR_CRUSHER, WeaponType.SPEAR_STAB));
+        assertTrue(BotCombatManager.canUseAttackSkillWithWeapon(DragonKnight.SPEAR_DRAGON_FURY, WeaponType.SPEAR_STAB));
+        assertFalse(BotCombatManager.canUseAttackSkillWithWeapon(DragonKnight.POLE_ARM_CRUSHER, WeaponType.SPEAR_STAB));
+        assertFalse(BotCombatManager.canUseAttackSkillWithWeapon(DragonKnight.POLE_ARM_DRAGON_FURY, WeaponType.SPEAR_STAB));
+        assertTrue(BotCombatManager.canUseAttackSkillWithWeapon(DragonKnight.POLE_ARM_CRUSHER, WeaponType.POLE_ARM_SWING));
+    }
+
+    @Test
     void shouldChooseSingleTargetSkillWhenMobDefenseCollapsesLowDamageAoeLines() {
         MapleMap map = mock(MapleMap.class);
         Character bot = mockBot(new Point(100, 200), map, 20_000, null);
@@ -184,7 +640,7 @@ class BotCombatManagerTest {
     }
 
     @Test
-    void shouldCapSingleTargetOverkillWhenAoeDoesMoreUsefulDamage() {
+    void shouldNotUseWeakAoeOnlyBecauseCurrentHpIsLow() {
         MapleMap map = mock(MapleMap.class);
         Character bot = mockBot(new Point(100, 200), map, 20_000, null);
         Skill powerStrike = skillWithAttack(Warrior.POWER_STRIKE, 1, 1, 260);
@@ -208,14 +664,67 @@ class BotCombatManagerTest {
 
             BotCombatManager.AttackPlan plan = BotCombatManager.planAttack(entry, bot, primary);
 
-            assertEquals(Warrior.SLASH_BLAST, plan.skillId);
-            assertEquals(List.of(primary, secondary), plan.targets);
+            assertEquals(Warrior.POWER_STRIKE, plan.skillId);
+            assertEquals(List.of(primary), plan.targets);
         }
     }
 
     @Test
     void shouldTreatBasicStaffAttacksAsCloseRange() {
         assertEquals(BotCombatManager.AttackRoute.CLOSE, BotAttackExecutionProvider.determineBasicWeaponRoute(WeaponType.STAFF));
+    }
+
+    @Test
+    void shouldTreatNonMageSkillsWithStaffAsCloseRange() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+
+        try (MockedStatic<BotAttackExecutionProvider> attacks =
+                     Mockito.mockStatic(BotAttackExecutionProvider.class, Mockito.CALLS_REAL_METHODS)) {
+            attacks.when(() -> BotAttackExecutionProvider.getEquippedWeaponType(bot)).thenReturn(WeaponType.STAFF);
+
+            assertEquals(BotCombatManager.AttackRoute.CLOSE,
+                    BotAttackExecutionProvider.determineSkillRoute(bot, Warrior.POWER_STRIKE));
+            assertEquals(BotCombatManager.AttackRoute.MAGIC,
+                    BotAttackExecutionProvider.determineSkillRoute(bot, Magician.MAGIC_CLAW));
+        }
+    }
+
+    @Test
+    void shouldUseDpsInsteadOfRawDamageForSlowDragonRoar() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mockBot(new Point(100, 200), map, 20_000, null);
+        when(bot.calculateMaxBaseDamage(100)).thenReturn(1_000);
+        when(bot.calculateMinBaseDamage(100, 0.1d)).thenReturn(500);
+        Skill slashBlast = skillWithAttackBox(Warrior.SLASH_BLAST, 1, 6, 200,
+                new Rectangle(80, 150, 220, 100), 500);
+        Skill roar = skillWithAttackBox(DragonKnight.DRAGON_ROAR, 1, 15, 240,
+                new Rectangle(-300, -200, 800, 500), 4_000);
+        List<Monster> mobs = List.of(
+                mockMob(new Point(140, 200), 9300440),
+                mockMob(new Point(150, 200), 9300441),
+                mockMob(new Point(160, 200), 9300442),
+                mockMob(new Point(170, 200), 9300443),
+                mockMob(new Point(180, 200), 9300444),
+                mockMob(new Point(190, 200), 9300445),
+                mockMob(new Point(200, 200), 9300446),
+                mockMob(new Point(210, 200), 9300447),
+                mockMob(new Point(220, 200), 9300448),
+                mockMob(new Point(230, 200), 9300449));
+        when(map.getAllMonsters()).thenReturn(mobs);
+        when(bot.getSkillLevel(any(Skill.class))).thenReturn((byte) 1);
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.attackSkillIds.add(slashBlast.getId());
+        entry.attackSkillIds.add(roar.getId());
+
+        try (MockedStatic<SkillFactory> skillFactory = Mockito.mockStatic(SkillFactory.class)) {
+            skillFactory.when(() -> SkillFactory.getSkill(slashBlast.getId())).thenReturn(slashBlast);
+            skillFactory.when(() -> SkillFactory.getSkill(roar.getId())).thenReturn(roar);
+
+            BotCombatManager.AttackPlan plan = BotCombatManager.planAttack(entry, bot, mobs.get(0));
+
+            assertEquals(Warrior.SLASH_BLAST, plan.skillId);
+        }
     }
 
     @Test
@@ -262,7 +771,7 @@ class BotCombatManagerTest {
         BotEntry entry = new BotEntry(bot, null, null);
         entry.facingDir = 1;
 
-        BotCombatManager.applyMobHit(entry, bot, mob);
+        runWithStubbedBotAfter(() -> BotCombatManager.applyMobHit(entry, bot, mob));
 
         assertTrue(entry.inAir);
         assertFalse(entry.climbing);
@@ -288,7 +797,7 @@ class BotCombatManagerTest {
         entry.airVelX = -4;
         entry.facingDir = -1;
 
-        BotCombatManager.applyMobHit(entry, bot, mob);
+        runWithStubbedBotAfter(() -> BotCombatManager.applyMobHit(entry, bot, mob));
 
         assertTrue(entry.inAir);
         assertTrue(entry.climbUpIntent);
@@ -307,7 +816,7 @@ class BotCombatManagerTest {
         Monster mob = mockMob(new Point(140, 200), 9300002);
         BotEntry entry = new BotEntry(bot, null, null);
 
-        BotCombatManager.applyMobHit(entry, bot, mob);
+        runWithStubbedBotAfter(() -> BotCombatManager.applyMobHit(entry, bot, mob));
 
         assertFalse(entry.inAir);
         assertFalse(entry.climbing);
@@ -325,7 +834,7 @@ class BotCombatManagerTest {
         entry.facingDir = -1;
         Monster mob = mockMob(new Point(140, 200), 9300003);
 
-        BotCombatManager.applyMobHit(entry, bot, mob);
+        runWithStubbedBotAfter(() -> BotCombatManager.applyMobHit(entry, bot, mob));
 
         assertEquals(CharacterStance.DEAD_LEFT_STANCE, bot.getStance());
         assertTrue(entry.deadUntil > 0);
@@ -491,11 +1000,11 @@ class BotCombatManagerTest {
         BotCombatManager.AttackPlan rangedBowPlan = new BotCombatManager.AttackPlan(
                 Hunter.ARROW_BOMB, 1, 1, new Rectangle(100, 150, 300, 100),
                 List.of(mockMob(new Point(180, 200), 9300200)), BotCombatManager.AttackRoute.RANGED,
-                0, 11, 11, 11, 4, 300, 600);
+                0, 11, 11, 11, 4, 300, 600, null);
         BotCombatManager.AttackPlan closePlan = new BotCombatManager.AttackPlan(
                 0, 0, 1, new Rectangle(100, 150, 80, 70),
                 List.of(mockMob(new Point(120, 200), 9300201)), BotCombatManager.AttackRoute.CLOSE,
-                4, 1, 1, 0, 4, 300, 600);
+                4, 1, 1, 0, 4, 300, 600, null);
 
         assertFalse(BotCombatManager.canUseAttackPlanNow(entry, WeaponType.BOW, rangedBowPlan));
         assertFalse(BotCombatManager.canUseAttackPlanNow(entry, WeaponType.CROSSBOW, rangedBowPlan));
@@ -677,11 +1186,73 @@ class BotCombatManagerTest {
         }
     }
 
+    @Test
+    void shouldExcludeOneWayPatrolNeighborFromRoamTargeting() {
+        MapleMap map = spy(new MapleMap(910009053, 0, 0, 910009053, 1.0f));
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        Foothold homeFoothold = new Foothold(new Point(0, 100), new Point(100, 100), 1);
+        Foothold oneWayFoothold = new Foothold(new Point(200, 140), new Point(300, 140), 2);
+        Foothold returnableFoothold = new Foothold(new Point(400, 100), new Point(500, 100), 3);
+        footholds.insert(homeFoothold);
+        footholds.insert(oneWayFoothold);
+        footholds.insert(returnableFoothold);
+        map.setFootholds(footholds);
+
+        BotNavigationGraph.Region homeRegion = new BotNavigationGraph.Region(
+                1, List.of(new BotNavigationGraph.Segment(homeFoothold)));
+        BotNavigationGraph.Region oneWayRegion = new BotNavigationGraph.Region(
+                2, List.of(new BotNavigationGraph.Segment(oneWayFoothold)));
+        BotNavigationGraph.Region returnableRegion = new BotNavigationGraph.Region(
+                3, List.of(new BotNavigationGraph.Segment(returnableFoothold)));
+        BotNavigationGraph graph = new BotNavigationGraph(
+                map.getId(),
+                1,
+                BotMovementProfile.base(),
+                List.of(homeRegion, oneWayRegion, returnableRegion),
+                Map.of(1, homeRegion, 2, oneWayRegion, 3, returnableRegion),
+                Map.of(1, 1, 2, 2, 3, 3),
+                Map.of(
+                        1, List.of(
+                                new BotNavigationGraph.Edge(1, 2, BotNavigationGraph.EdgeType.DROP,
+                                        new Point(100, 100), new Point(200, 140), 0, 0, 0, 0, 0, 100),
+                                new BotNavigationGraph.Edge(1, 3, BotNavigationGraph.EdgeType.WALK,
+                                        new Point(100, 100), new Point(400, 100), 0, 0, 0, 0, 0, 120)),
+                        3, List.of(new BotNavigationGraph.Edge(3, 1, BotNavigationGraph.EdgeType.WALK,
+                                new Point(400, 100), new Point(100, 100), 0, 0, 0, 0, 0, 120))),
+                Set.of());
+
+        Character bot = mockBot(new Point(50, 100), map, 20_000, null);
+        Monster oneWayTarget = mockMob(new Point(240, 140), 9300402);
+        Monster returnableTarget = mockMob(new Point(440, 100), 9300403);
+        doReturn(List.of(oneWayTarget, returnableTarget)).when(map).getAllMonsters();
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.patrolRegionId = 1;
+
+        try (MockedStatic<BotNavigationGraphProvider> graphProvider =
+                     Mockito.mockStatic(BotNavigationGraphProvider.class, Mockito.CALLS_REAL_METHODS)) {
+            graphProvider.when(() -> BotNavigationGraphProvider.peekGraph(map, BotMovementProfile.base()))
+                    .thenReturn(graph);
+
+            Monster target = BotCombatManager.findPatrolTarget(entry, bot);
+
+            assertEquals(returnableTarget, target);
+        }
+    }
+
     private static void assertDamageDirection(MapleMap map, Character bot, int expectedBroadcasts, int expectedDirection) {
         ArgumentCaptor<Packet> packets = ArgumentCaptor.forClass(Packet.class);
         verify(map, times(expectedBroadcasts)).broadcastMessage(eq(bot), packets.capture(), eq(false));
         byte[] payload = packets.getAllValues().get(0).getBytes();
         assertEquals(expectedDirection, Byte.toUnsignedInt(payload[15]));
+    }
+
+    private static void runWithStubbedBotAfter(Runnable action) {
+        try (MockedStatic<BotManager> botManager = Mockito.mockStatic(BotManager.class, Mockito.CALLS_REAL_METHODS)) {
+            botManager.when(() -> BotManager.after(anyLong(), any(Runnable.class)))
+                    .thenReturn(mock(ScheduledFuture.class));
+            action.run();
+        }
     }
 
     private static Character mockBot(Point startPosition, MapleMap map, int startingHp, Integer stancePercent) {
@@ -698,6 +1269,7 @@ class BotCombatManagerTest {
         }).when(bot).setPosition(any(Point.class));
         when(bot.getMap()).thenReturn(map);
         when(bot.getHp()).thenAnswer(invocation -> hp.get());
+        when(bot.getCurrentMaxHp()).thenReturn(startingHp);
         doAnswer(invocation -> {
             hp.addAndGet(invocation.getArgument(0));
             return null;
@@ -711,6 +1283,7 @@ class BotCombatManagerTest {
         when(bot.getMapId()).thenReturn(0);
         when(bot.getJob()).thenReturn(Job.BEGINNER);
         when(bot.getLevel()).thenReturn(200);
+        when(bot.isAlive()).thenReturn(true);
         when(bot.isFacingLeft()).thenReturn(false);
         when(bot.getTotalMoveSpeedStat()).thenReturn(100);
         when(bot.getTotalJumpStat()).thenReturn(100);
@@ -745,6 +1318,7 @@ class BotCombatManagerTest {
         when(mob.getWdef()).thenReturn(0);
         when(mob.getMdef()).thenReturn(0);
         when(mob.getHp()).thenReturn(10_000);
+        when(mob.getMaxHp()).thenReturn(10_000);
         when(mob.isAlive()).thenReturn(true);
         return mob;
     }
@@ -760,6 +1334,93 @@ class BotCombatManagerTest {
         when(effect.canPaySkillCost(any(Character.class))).thenReturn(true);
         skill.addLevelEffect(effect);
         return skill;
+    }
+
+    private static Skill skillWithAttackBox(int skillId, int attackCount, int mobCount, int damage, Rectangle hitBox) {
+        Skill skill = skillWithAttack(skillId, attackCount, mobCount, damage);
+        return skillWithAttackBox(skill, hitBox);
+    }
+
+    private static Skill skillWithAttackBox(int skillId, int attackCount, int mobCount, int damage,
+                                            Rectangle hitBox, int animationTimeMs) {
+        Skill skill = skillWithAttack(skillId, attackCount, mobCount, damage);
+        skill.setAction0("testSkillDelay" + skillId);
+        skill.setAnimationTime(animationTimeMs);
+        return skillWithAttackBox(skill, hitBox);
+    }
+
+    private static Skill skillWithAttackBox(Skill skill, Rectangle hitBox) {
+        StatEffect effect = skill.getEffect(1);
+        when(effect.hasBoundingBox()).thenReturn(true);
+        when(effect.calculateBoundingBox(any(Point.class), anyBoolean())).thenReturn(new Rectangle(hitBox));
+        return skill;
+    }
+
+    private static Skill passiveOverTimeSkillWithCombatMetadata(int skillId, int damage, int attackCount, int mobCount) {
+        Skill skill = new Skill(skillId);
+        StatEffect effect = mock(StatEffect.class);
+        when(effect.getDamage()).thenReturn(damage);
+        when(effect.getAttackCount()).thenReturn(attackCount);
+        when(effect.getBulletCount()).thenReturn((short) 0);
+        when(effect.getMobCount()).thenReturn(mobCount);
+        when(effect.isOverTime()).thenReturn(true);
+        skill.addLevelEffect(effect);
+        return skill;
+    }
+
+    private static Skill passiveSkillWithCombatMetadata(int skillId, int damage, int attackCount, int mobCount) {
+        Skill skill = new Skill(skillId);
+        StatEffect effect = mock(StatEffect.class);
+        when(effect.getDamage()).thenReturn(damage);
+        when(effect.getAttackCount()).thenReturn(attackCount);
+        when(effect.getBulletCount()).thenReturn((short) 0);
+        when(effect.getMobCount()).thenReturn(mobCount);
+        when(effect.isOverTime()).thenReturn(false);
+        skill.addLevelEffect(effect);
+        return skill;
+    }
+
+    private static Skill skillWithBuffAction(int skillId) {
+        Skill skill = new Skill(skillId);
+        skill.setAction(true);
+        StatEffect effect = mock(StatEffect.class);
+        when(effect.isOverTime()).thenReturn(true);
+        skill.addLevelEffect(effect);
+        return skill;
+    }
+
+    private static void assertRealWzCache(Job job, int level, Set<Integer> skillIds,
+                                          int expectedAttackSkillId, int expectedAoeSkillId,
+                                          Set<Integer> expectedBuffSkillIds, Set<Integer> excludedSkillIds) {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(job);
+        when(bot.getLevel()).thenReturn(level);
+
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        for (int skillId : skillIds) {
+            Skill skill = SkillFactory.getSkill(skillId);
+            assertTrue(skill != null, "missing real WZ skill " + skillId);
+            skills.put(skill, null);
+        }
+        when(bot.getSkills()).thenReturn(skills);
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skillIds.contains(skill.getId()) ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertEquals(expectedAttackSkillId, entry.attackSkillId);
+        assertEquals(expectedAoeSkillId, entry.aoeSkillId);
+        for (int skillId : expectedBuffSkillIds) {
+            assertTrue(entry.buffSkillIds.contains(skillId), "expected cached buff " + skillId);
+        }
+        for (int skillId : excludedSkillIds) {
+            assertFalse(entry.buffSkillIds.contains(skillId), "unexpected cached buff " + skillId);
+            assertFalse(entry.attackSkillId == skillId || entry.aoeSkillId == skillId,
+                    "unexpected cached attack " + skillId);
+        }
     }
 
     private static Skill skillWithAnchoredAoe(int skillId, int attackCount, int mobCount, int damage) {

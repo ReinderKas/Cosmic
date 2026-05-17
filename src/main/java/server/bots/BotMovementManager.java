@@ -303,7 +303,12 @@ class BotMovementManager {
         if (targetPos.x != entry.climbRope.x()) {
             return false;
         }
-        if (targetPos.y <= entry.climbRope.topY() || targetPos.y >= entry.climbRope.bottomY()) {
+        // Allow target == bottomY: rope-exit launch anchors can be authored at the rope bottom
+        // (pathlog-Leroy/John). The exclusive guard rejected those anchors, leaving the bot
+        // grinding the climb integrator against a fixed-step overshoot — every step landed
+        // past bottomY, beginFall(0,0) detached, repeat. Top step-off keeps its strict guard
+        // because dismount there is driven by physics top-boundary detach, not snap.
+        if (targetPos.y <= entry.climbRope.topY() || targetPos.y > entry.climbRope.bottomY()) {
             return false;
         }
         return Math.abs(dy) < BotPhysicsEngine.climbStepPerTick();
@@ -869,30 +874,63 @@ class BotMovementManager {
     }
 
     static void broadcastMovement(BotEntry entry) {
-        Character bot = entry.bot;
-        int x = bot.getPosition().x;
-        int y = bot.getPosition().y;
-        BotPhysicsEngine.MovementSnapshot snapshot = BotPhysicsEngine.movementSnapshot(entry);
-        int fhId = resolveBroadcastFhId(entry, bot);
+        if (!BotPerformanceMonitor.enabled()) {
+            Character bot = entry.bot;
+            int x = bot.getPosition().x;
+            int y = bot.getPosition().y;
+            BotPhysicsEngine.MovementSnapshot snapshot = BotPhysicsEngine.movementSnapshot(entry);
+            int fhId = resolveBroadcastFhId(entry, bot);
 
-        if (entry.movementBroadcastValid
-                && entry.lastBroadcastX == x
-                && entry.lastBroadcastY == y
-                && entry.lastBroadcastVelX == snapshot.velX()
-                && entry.lastBroadcastVelY == snapshot.velY()
-                && entry.lastBroadcastStance == snapshot.stance()
-                && entry.lastBroadcastFh == fhId) {
+            if (entry.movementBroadcastValid
+                    && entry.lastBroadcastX == x
+                    && entry.lastBroadcastY == y
+                    && entry.lastBroadcastVelX == snapshot.velX()
+                    && entry.lastBroadcastVelY == snapshot.velY()
+                    && entry.lastBroadcastStance == snapshot.stance()
+                    && entry.lastBroadcastFh == fhId) {
+                return;
+            }
+
+            entry.movementBroadcastValid = true;
+            entry.lastBroadcastX = x;
+            entry.lastBroadcastY = y;
+            entry.lastBroadcastVelX = snapshot.velX();
+            entry.lastBroadcastVelY = snapshot.velY();
+            entry.lastBroadcastStance = snapshot.stance();
+            entry.lastBroadcastFh = fhId;
+            sendMovementPacket(bot, snapshot, fhId);
             return;
         }
 
-        entry.movementBroadcastValid = true;
-        entry.lastBroadcastX = x;
-        entry.lastBroadcastY = y;
-        entry.lastBroadcastVelX = snapshot.velX();
-        entry.lastBroadcastVelY = snapshot.velY();
-        entry.lastBroadcastStance = snapshot.stance();
-        entry.lastBroadcastFh = fhId;
-        sendMovementPacket(bot, snapshot, fhId);
+        long startedAt = System.nanoTime();
+        try {
+            Character bot = entry.bot;
+            int x = bot.getPosition().x;
+            int y = bot.getPosition().y;
+            BotPhysicsEngine.MovementSnapshot snapshot = BotPhysicsEngine.movementSnapshot(entry);
+            int fhId = resolveBroadcastFhId(entry, bot);
+
+            if (entry.movementBroadcastValid
+                    && entry.lastBroadcastX == x
+                    && entry.lastBroadcastY == y
+                    && entry.lastBroadcastVelX == snapshot.velX()
+                    && entry.lastBroadcastVelY == snapshot.velY()
+                    && entry.lastBroadcastStance == snapshot.stance()
+                    && entry.lastBroadcastFh == fhId) {
+                return;
+            }
+
+            entry.movementBroadcastValid = true;
+            entry.lastBroadcastX = x;
+            entry.lastBroadcastY = y;
+            entry.lastBroadcastVelX = snapshot.velX();
+            entry.lastBroadcastVelY = snapshot.velY();
+            entry.lastBroadcastStance = snapshot.stance();
+            entry.lastBroadcastFh = fhId;
+            sendMovementPacket(bot, snapshot, fhId);
+        } finally {
+            BotPerformanceMonitor.record("broadcast-move", System.nanoTime() - startedAt);
+        }
     }
 
     // Real clients report the foothold ID they're standing on in every move packet; the

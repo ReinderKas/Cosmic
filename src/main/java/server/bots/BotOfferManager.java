@@ -1,14 +1,13 @@
 package server.bots;
 
-import config.YamlConfig;
 import client.BotClient;
 import client.Character;
-import client.Job;
 import client.inventory.Equip;
 import client.inventory.Inventory;
 import client.inventory.InventoryType;
 import client.inventory.Item;
 import client.inventory.WeaponType;
+import config.YamlConfig;
 import constants.inventory.ItemConstants;
 import server.ItemInformationProvider;
 
@@ -24,7 +23,7 @@ final class BotOfferManager {
             "\\b(no|nope|nah|nvm|never\\s*mind|dont|don't|not\\s+now|skip)\\b",
             Pattern.CASE_INSENSITIVE);
     private static final List<String> BOT_ACCEPT_MSGS = List.of(
-            "sure!", "ok!", "ty!", "yes pls", "thx!", "ooh nice, ty", "yes!");
+            "sure!", "ok!", "yes", "y!", "y", "yes!", "yes pls", "yes please!", "yes please", "ooh nice, ty", "that would be great!", "that would be awesome!", "of course!");
 
     private enum GearOfferNeed {
         CURRENT,
@@ -307,37 +306,36 @@ final class BotOfferManager {
     }
 
     static String buildLootOfferPrompt(String recipientName, String itemName, boolean targetIsOwner) {
-        return buildLootOfferPrompt(recipientName, itemName, targetIsOwner, false);
+        return buildSharedLootOfferPrompt(recipientName, itemName, false);
     }
 
     static String buildLootOfferPrompt(String recipientName, String itemName, boolean targetIsOwner, boolean forLater) {
-        List<String> prompts = targetIsOwner
-                ? (forLater
-                ? List.of(
-                        "I have %s, you might need it later, want?",
-                        "picked up %s, could be useful later, want it?",
-                        "I got %s for later if you want it")
-                : List.of(
-                        "I have %s, you want?",
-                        "picked up %s, want it?",
-                        "I got %s for you, want?"))
-                : (forLater
+        return buildSharedLootOfferPrompt(recipientName, itemName, forLater);
+    }
+
+    private static String buildSharedLootOfferPrompt(String recipientName, String itemName, boolean forLater) {
+        List<String> prompts = forLater
                 ? List.of(
                         "%s, you might need %s later, want it?",
                         "%s, picked up %s, could help later if you want it",
-                        "%s, I got %s for later if you want it")
+                        "%s, I got %s for later if you want it",
+                        "%s, %s looks useful for later, want me to trade it over?",
+                        "%s, holding %s in case you want it later",
+                        "%s, saved %s for later if you want it")
                 : List.of(
                         "%s, I have %s, you want?",
                         "%s, picked up %s, want it?",
-                        "%s, I got %s if you want it"));
+                        "%s, I got %s if you want it",
+                        "%s, want %s?",
+                        "%s, I can trade you %s",
+                        "%s, grabbed %s for you if you want it");
         String format = BotManager.randomReply(prompts);
-        return targetIsOwner ? String.format(format, itemName) : String.format(format, recipientName, itemName);
+        return String.format(format, recipientName, itemName);
     }
 
     private static String buildLootOfferPrompt(Character recipient, Character owner, Item item, boolean forLater) {
         String itemDesc = formatItemSpecifier(item, recipient);
-        boolean targetIsOwner = owner != null && recipient.getId() == owner.getId();
-        return buildLootOfferPrompt(recipient.getName(), itemDesc, targetIsOwner, forLater);
+        return buildSharedLootOfferPrompt(recipient.getName(), itemDesc, forLater);
     }
 
     /**
@@ -547,15 +545,31 @@ final class BotOfferManager {
         if (ItemConstants.getInventoryType(item.getItemId()) != InventoryType.EQUIP) {
             return false;
         }
-        if (gearOfferNeed(entry, owner, donor, item) != null) {
+        if (!(item instanceof Equip equip)) {
+            return false;
+        }
+        ItemInformationProvider ii = ItemInformationProvider.getInstance();
+        // Trade-classification path: only the FUTURE (Pareto self-reserve) check is used here.
+        // The IMMEDIATE optimizer-DP check that gearOfferNeed() also runs is intentionally
+        // skipped — it's expensive and its picks are essentially a subset of the FUTURE set,
+        // so it adds no signal for "should this item be held back from a player→bot trade?".
+        // Proactive offer paths still call gearOfferNeed() directly and keep both checks.
+        if (isFutureReservedForRecipient(owner, equip, ii)) {
             return true;
         }
         for (Character member : eligibleBotRecipients(owner, donor)) {
-            if (gearOfferNeed(entry, member, donor, item) != null) {
+            if (isFutureReservedForRecipient(member, equip, ii)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static boolean isFutureReservedForRecipient(Character recipient, Equip equip, ItemInformationProvider ii) {
+        if (!isWeaponOfferCompatible(recipient, equip)) {
+            return false;
+        }
+        return BotEquipManager.wouldReserveIncomingItem(recipient, ii, equip);
     }
 
     private static Character findWeakestThrowingStarRecipient(Character owner, Character donor) {

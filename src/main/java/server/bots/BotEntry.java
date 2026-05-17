@@ -2,6 +2,7 @@ package server.bots;
 
 import client.Character;
 import client.inventory.Item;
+import server.Trade;
 import server.life.Monster;
 import server.maps.Foothold;
 import server.maps.MapItem;
@@ -21,6 +22,12 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class BotEntry {
+    static final class ScrollReactionStreakState {
+        int streak = 0;
+        boolean lastWasSuccess = false;
+        long lastOutcomeAtMs = 0L;
+    }
+
     final Character bot;
     volatile Character owner;
     volatile boolean following = false;
@@ -100,6 +107,8 @@ public class BotEntry {
     // Skill cache
     int cachedSkillJob = -1;
     int cachedSkillLevel = -1;
+    int cachedSkillSignature = 0;
+    final List<Integer> attackSkillIds = new ArrayList<>();
     int attackSkillId = 0;
     int aoeSkillId = 0;
     int aoeSkillMobs = 1;
@@ -126,6 +135,9 @@ public class BotEntry {
     boolean shopSequenceActive = false;
     long shopVisitStartedAtMs = 0L;
     long shopSequenceStartedAtMs = 0L;
+    boolean shopSellTrashPending = false;
+    Point shopStuckCheckPos = null;
+    long shopStuckCheckAtMs = 0L;
 
     // Damage taken
     long deadUntil = 0;
@@ -135,6 +147,22 @@ public class BotEntry {
     // Mirrors CharLook::alerted (TimedBool, 5000ms) in maplestory-wasm. Absolute reset on each
     // trigger (attack/hit/heal/buff), never additive.
     long alertedUntilMs = 0L;
+    // Debounce flag for the scheduled stance-reset callback in BotCombatManager.markAlerted.
+    // Without this, when the bot stops moving while alerted (e.g. "stay" command), no new
+    // movement snapshot ever fires — so the wire stance stays ALERT forever. The callback
+    // pushes a fresh STAND broadcast once the timer expires.
+    boolean alertResetScheduled = false;
+
+    // Most recent command the owner issued that handleChat actually matched.
+    // Used by SituationBuilder to give the LLM context like "owner told you to
+    // farm here 3 min ago" so 'what are you doing' answers stay coherent.
+    public volatile String lastOwnerCommand = null;
+    public volatile long lastOwnerCommandAtMs = 0L;
+
+    public boolean isGrinding() { return grinding; }
+    public boolean isFollowing() { return following; }
+    public java.awt.Point getFarmAnchor() { return farmAnchor; }
+    public int getFarmAnchorMapId() { return farmAnchorMapId; }
     Point lastMobTouchCheckPos = null;
     int lastMobTouchMapId = -1;
 
@@ -286,6 +314,11 @@ public class BotEntry {
     boolean spawnUpgradeCheckDone = false;
     final Set<Integer> requestedUpgradeItemIds = ConcurrentHashMap.newKeySet();
     boolean pendingLootOfferBotRequesting = false; // true = bot asked for owner's item
+    double recentScrollReactionLoad = 0.0;
+    long lastScrollReactionObservedAtMs = 0L;
+    long nextScrollReactionAtMs = 0L;
+    final Map<Integer, ScrollReactionStreakState> scrollReactionStreaksByScroller = new HashMap<>();
+    long nextScrollReactionStreakPruneAtMs = 0L;
 
     // Path logging (debug)
     BotPathLogger pathLogger = null;
@@ -308,6 +341,8 @@ public class BotEntry {
 
     // Manual trade: countdown before bot accepts an incoming trade invite (both owner and peer-bot)
     int manualTradeAcceptDelayMs = 0;
+    Trade manualTradeRef = null;
+    int manualTradeTimeoutMs = 0;
 
     // Movement packet cache so repeated no-op packets are suppressed
     boolean movementBroadcastValid = false;
@@ -324,4 +359,10 @@ public class BotEntry {
         this.owner = owner;
         this.task = task;
     }
+
+    // Accessors for code outside the server.bots package (e.g. server.bots.llm).
+    // Mutations stay package-private to preserve existing invariants.
+    public Character getBot() { return bot; }
+    public Character getOwner() { return owner; }
+    public ReplyChannel getReplyChannel() { return replyChannel; }
 }

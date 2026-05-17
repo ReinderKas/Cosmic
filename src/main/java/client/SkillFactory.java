@@ -118,6 +118,7 @@ public class SkillFactory {
         Skill ret = new Skill(id);
         boolean isBuff = false;
         int skillType = DataTool.getInt("skillType", data, -1);
+        ret.setSkillType(skillType);
         String elem = DataTool.getString("elemAttr", data, null);
         if (elem != null) {
             ret.setElement(Element.getFromChar(elem.charAt(0)));

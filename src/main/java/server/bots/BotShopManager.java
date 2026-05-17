@@ -19,19 +19,25 @@ import server.maps.MapObjectType;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 final class BotShopManager {
 
     private static final int SHOP_MANHATTAN_RADIUS = 200;
-    private static final int SHOP_ARRIVE_DIST = 50;
+    private static final int SHOP_ARRIVE_DIST = 100;
     private static final int SHOP_NPC_SEARCH_DIST = 601;
     private static final int SHOP_APPROACH_DELAY_MAX_MS = 5001;
     private static final int SHOP_STEP_DELAY_MIN_MS = 2000;
     private static final int SHOP_STEP_DELAY_MAX_MS = 4001;
+    private static final int SELL_TRASH_STEP_DELAY_MS = 500;
     private static final long SHOP_VISIT_TIMEOUT_MS = 30_000L;
     private static final long SHOP_SEQUENCE_TIMEOUT_MS = 45_000L;
+    private static final long SHOP_STUCK_FALLBACK_MS = 1000L;
+    private static final int SHOP_STUCK_MOVE_TOLERANCE_PX = 2;
     private static final int POT_TRIGGER_THRESHOLD = 4; // 80% of target (5) for early trigger
     private static final int POT_TARGET_THRESHOLD = 5; // full target when buying at shop
     private static final int AMMO_TRIGGER_THRESHOLD = 8;
@@ -82,7 +88,7 @@ final class BotShopManager {
     static void onMapChange(BotEntry entry, Character bot) {
         clearShopState(entry);
 
-        NpcShopMatch match = findBestShop(bot);
+        NpcShopMatch match = findBestShop(bot, false);
         if (match == null) {
             return;
         }
@@ -103,6 +109,35 @@ final class BotShopManager {
             BotManager.getInstance().botSay(bot, BotManager.randomReply(RESUPPLY_MSGS));
         }
 
+        startShopVisit(entry, bot, match);
+    }
+
+    static void requestSellTrashVisit(BotEntry entry, Character bot) {
+        if (entry == null || bot == null || bot.getMap() == null) {
+            return;
+        }
+        if (BotInventoryManager.collectSellTrashEquips(entry, bot).isEmpty()) {
+            BotManager.getInstance().botReply(entry, "no trash equips worth selling");
+            return;
+        }
+
+        entry.shopSellTrashPending = true;
+        if (entry.shopVisitPending) {
+            return;
+        }
+
+        NpcShopMatch match = findBestShop(bot, true);
+        if (match == null) {
+            entry.shopSellTrashPending = false;
+            BotManager.getInstance().botReply(entry, "can't find a shop here");
+            return;
+        }
+
+        BotManager.getInstance().botReply(entry, "ok gonna sell the junk");
+        startShopVisit(entry, bot, match);
+    }
+
+    private static void startShopVisit(BotEntry entry, Character bot, NpcShopMatch match) {
         entry.shopVisitPending = true;
         entry.shopNpcPos = match.npcPos;
         entry.shopTargetPos = pickShopApproachPoint(match.npcPos, entry, bot);
@@ -120,15 +155,12 @@ final class BotShopManager {
             return false;
         }
         long now = System.currentTimeMillis();
-        if (entry.shopVisitStartedAtMs > 0 && now - entry.shopVisitStartedAtMs > SHOP_VISIT_TIMEOUT_MS) {
-            if (!entry.shopSequenceActive && entry.shopNpcPos != null && findNpcNear(bot, entry.shopNpcPos) != null) {
-                entry.shopTargetPos = bot.getPosition();
-                entry.shopApproachDelayMs = 0;
-            } else {
-                BotManager.getInstance().botSay(bot, "couldn't reach shop in time");
-                clearShopState(entry);
-                return false;
-            }
+        if (entry.shopVisitStartedAtMs > 0
+                && !entry.shopSequenceActive
+                && now - entry.shopVisitStartedAtMs > SHOP_VISIT_TIMEOUT_MS) {
+            BotManager.getInstance().botSay(bot, "couldn't reach shop in time");
+            clearShopState(entry);
+            return false;
         }
         if (entry.shopSequenceActive
                 && entry.shopSequenceStartedAtMs > 0
@@ -143,7 +175,11 @@ final class BotShopManager {
 
         Point botPos = bot.getPosition();
         Point target = entry.shopTargetPos != null ? entry.shopTargetPos : entry.shopNpcPos;
-        if (botPos.distanceSq(target) <= (long) SHOP_ARRIVE_DIST * SHOP_ARRIVE_DIST) {
+        boolean reachedApproach = manhattan(botPos, target) <= SHOP_ARRIVE_DIST;
+        boolean stuckAtNpc = !entry.shopSequenceActive
+                && !reachedApproach
+                && isStuckNearNpc(entry, botPos, now);
+        if (reachedApproach || stuckAtNpc) {
             if (!entry.shopSequenceActive) {
                 entry.shopSequenceActive = true;
                 entry.shopSequenceStartedAtMs = System.currentTimeMillis();
@@ -157,7 +193,32 @@ final class BotShopManager {
         return true;
     }
 
-    private static NpcShopMatch findBestShop(Character bot) {
+    private static boolean isStuckNearNpc(BotEntry entry, Point botPos, long now) {
+        if (entry.shopNpcPos == null) {
+            return false;
+        }
+        if (entry.shopStuckCheckPos == null) {
+            entry.shopStuckCheckPos = new Point(botPos);
+            entry.shopStuckCheckAtMs = now;
+            return false;
+        }
+        if (botPos.distanceSq(entry.shopStuckCheckPos)
+                > (long) SHOP_STUCK_MOVE_TOLERANCE_PX * SHOP_STUCK_MOVE_TOLERANCE_PX) {
+            entry.shopStuckCheckPos.setLocation(botPos);
+            entry.shopStuckCheckAtMs = now;
+            return false;
+        }
+        if (now - entry.shopStuckCheckAtMs < SHOP_STUCK_FALLBACK_MS) {
+            return false;
+        }
+        return manhattan(botPos, entry.shopNpcPos) <= SHOP_ARRIVE_DIST;
+    }
+
+    private static int manhattan(Point a, Point b) {
+        return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+    }
+
+    private static NpcShopMatch findBestShop(Character bot, boolean allowAnyShop) {
         List<MapObject> objects = bot.getMap().getMapObjectsInRange(
                 new Point(0, 0), Double.POSITIVE_INFINITY,
                 Arrays.asList(MapObjectType.NPC));
@@ -171,7 +232,7 @@ final class BotShopManager {
             if (shop == null) {
                 continue;
             }
-            if (shopHasAnythingNeeded(bot, shop)) {
+            if (allowAnyShop || shopHasAnythingNeeded(bot, shop)) {
                 return new NpcShopMatch(npc, shop, npc.getPosition());
             }
         }
@@ -244,7 +305,11 @@ final class BotShopManager {
             return;
         }
         if (index >= sequence.actions().size()) {
-            finishPurchaseSequence(sequence);
+            if (sequence.entry().shopSellTrashPending) {
+                startSellTrashSequence(sequence);
+            } else {
+                finishPurchaseSequence(sequence);
+            }
             return;
         }
 
@@ -289,6 +354,86 @@ final class BotShopManager {
         }
 
         finish.run();
+    }
+
+    private static void startSellTrashSequence(PurchaseSequence sequence) {
+        List<Item> items = BotInventoryManager.collectSellTrashEquips(sequence.entry(), sequence.bot());
+        if (items.isEmpty()) {
+            sequence.entry().shopSellTrashPending = false;
+            BotManager.getInstance().botSay(sequence.bot(), "no trash equips worth selling");
+            finishPurchaseSequence(sequence);
+            return;
+        }
+
+        List<Item> plan = List.copyOf(items);
+        scheduleShopStep(sequence.entry(), SELL_TRASH_STEP_DELAY_MS,
+                () -> runSellTrashStep(
+                        sequence.entry(),
+                        sequence.bot(),
+                        sequence.npcPos(),
+                        0,
+                        Collections.newSetFromMap(new IdentityHashMap<>()),
+                        plan));
+    }
+
+    private static void runSellTrashStep(BotEntry entry, Character bot, Point npcPos, int soldCount, Set<Item> failedItems, List<Item> plan) {
+        if (!isShopSequenceValid(entry, bot, npcPos)) {
+            clearShopState(entry);
+            return;
+        }
+
+        List<Item> items = plan.stream()
+                .filter(item -> BotInventoryManager.hasItem(bot, item))
+                .filter(item -> !failedItems.contains(item))
+                .toList();
+        if (items.isEmpty()) {
+            entry.shopSellTrashPending = false;
+            if (soldCount > 0) {
+                BotManager.getInstance().botSay(bot, "sold " + soldCount + " trash equip" + (soldCount != 1 ? "s" : ""));
+            }
+            if (!failedItems.isEmpty()) {
+                BotManager.getInstance().botSay(bot, buildSellTrashFailureMessage(failedItems.size()));
+            } else if (soldCount == 0) {
+                BotManager.getInstance().botSay(bot, "no trash equips worth selling");
+            }
+            finishPurchaseSequence(new PurchaseSequence(entry, bot, npcPos, List.of(), new ArrayList<>(), null));
+            return;
+        }
+
+        Item item = items.get(0);
+        if (!BotInventoryManager.hasItem(bot, item)) {
+            scheduleShopStep(entry, SELL_TRASH_STEP_DELAY_MS,
+                    () -> runSellTrashStep(entry, bot, npcPos, soldCount, failedItems, plan));
+            return;
+        }
+
+        NPC npc = findNpcNear(bot, npcPos);
+        if (npc == null) {
+            clearShopState(entry);
+            return;
+        }
+        Shop shop = ShopFactory.getInstance().getShopForNPC(npc.getId());
+        if (shop == null) {
+            clearShopState(entry);
+            return;
+        }
+
+        shop.sell(bot.getClient(), InventoryType.EQUIP, item.getPosition(), (short) 1);
+        if (BotInventoryManager.hasItem(bot, item)) {
+            failedItems.add(item);
+            scheduleShopStep(entry, SELL_TRASH_STEP_DELAY_MS,
+                    () -> runSellTrashStep(entry, bot, npcPos, soldCount, failedItems, plan));
+            return;
+        }
+
+        int nextSoldCount = soldCount + 1;
+        scheduleShopStep(entry, SELL_TRASH_STEP_DELAY_MS,
+                () -> runSellTrashStep(entry, bot, npcPos, nextSoldCount, failedItems, plan));
+    }
+
+    private static String buildSellTrashFailureMessage(int failedCount) {
+        String items = failedCount + " item" + (failedCount != 1 ? "s" : "");
+        return "unable to sell " + items + ", tell me to drop them if you want them gone";
     }
 
     private static PurchaseSequence appendBuyReport(PurchaseSequence sequence, BuyReport report, String fallbackName) {
@@ -528,7 +673,7 @@ final class BotShopManager {
                 && entry.shopSequenceActive
                 && npcPos != null
                 && bot.getMap() != null
-                && bot.getPosition().distanceSq(entry.shopTargetPos != null ? entry.shopTargetPos : npcPos) <= (long) SHOP_ARRIVE_DIST * SHOP_ARRIVE_DIST
+                && manhattan(bot.getPosition(), entry.shopTargetPos != null ? entry.shopTargetPos : npcPos) <= SHOP_ARRIVE_DIST
                 && findNpcNear(bot, npcPos) != null;
     }
 
@@ -544,6 +689,9 @@ final class BotShopManager {
         entry.shopSequenceActive = false;
         entry.shopVisitStartedAtMs = 0L;
         entry.shopSequenceStartedAtMs = 0L;
+        entry.shopSellTrashPending = false;
+        entry.shopStuckCheckPos = null;
+        entry.shopStuckCheckAtMs = 0L;
     }
 
     private static long stepDelayMs() {
@@ -551,7 +699,11 @@ final class BotShopManager {
     }
 
     private static void scheduleShopStep(BotEntry entry, Runnable step) {
-        BotManager.after(stepDelayMs(), () -> {
+        scheduleShopStep(entry, stepDelayMs(), step);
+    }
+
+    private static void scheduleShopStep(BotEntry entry, long delayMs, Runnable step) {
+        BotManager.after(delayMs, () -> {
             if (!entry.shopVisitPending) {
                 return;
             }

@@ -17,6 +17,7 @@ import testutil.Items;
 import java.awt.*;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -94,6 +95,42 @@ class BotShopManagerTest {
 
         assertFalse(entryWouldTriggerShopVisit(bot, WeaponType.BOW));
         assertTrue(BotShopManager.shouldBuyFixedAmmoWhileShopping(bot, WeaponType.BOW));
+    }
+
+    @Test
+    void shouldTriggerSellTrashShopVisitEvenWhenNoResupplyIsNeeded() {
+        Character bot = mock(Character.class);
+        MapleMap map = mock(MapleMap.class);
+        BotEntry entry = new BotEntry(bot, null, null);
+        NPC npc = shopNpc(new Point(20, 0));
+        Shop shop = mock(Shop.class);
+
+        when(bot.getMap()).thenReturn(map);
+        when(bot.getPosition()).thenReturn(new Point(0, 0));
+        when(bot.getInventory(InventoryType.USE)).thenReturn(new Inventory(bot, InventoryType.USE, (byte) 24));
+        when(bot.getBuffedValue(any(BuffStat.class))).thenReturn(null);
+        when(map.getMapObjectsInRange(any(Point.class), anyDouble(), any())).thenReturn(List.of(npc));
+        when(shop.getItems()).thenReturn(List.of());
+
+        try (MockedStatic<BotAttackExecutionProvider> attacks =
+                     mockStatic(BotAttackExecutionProvider.class, org.mockito.Mockito.CALLS_REAL_METHODS);
+             MockedStatic<BotPotionManager> potions = mockStatic(BotPotionManager.class);
+             MockedStatic<ShopFactory> shops = mockStatic(ShopFactory.class);
+             MockedStatic<BotInventoryManager> inventories = mockStatic(BotInventoryManager.class)) {
+            ShopFactory factory = mock(ShopFactory.class);
+            shops.when(ShopFactory::getInstance).thenReturn(factory);
+            when(factory.getShopForNPC(npc.getId())).thenReturn(shop);
+            attacks.when(() -> BotAttackExecutionProvider.getEquippedWeaponType(bot)).thenReturn(WeaponType.CLAW);
+            potions.when(() -> BotPotionManager.countPotions(bot)).thenReturn(new int[]{9999, 9999});
+            inventories.when(() -> BotInventoryManager.collectSellTrashEquips(entry, bot))
+                    .thenReturn(List.of(mock(Item.class)));
+
+            BotShopManager.requestSellTrashVisit(entry, bot);
+        }
+
+        assertTrue(entry.shopVisitPending);
+        assertTrue(entry.shopSellTrashPending);
+        assertEquals(new Point(20, 0), entry.shopNpcPos);
     }
 
     private static Character clawBotWithStars(int... quantities) {

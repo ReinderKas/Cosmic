@@ -18,9 +18,12 @@ import server.life.MonsterStats;
 
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -336,6 +339,31 @@ class BotEquipManagerTest {
     }
 
     @Test
+    void selectItemsBeatingBaselineUsesConservativeWatkMainStatEquivalence() {
+        EnumSet<BotEquipManager.RelevantStat> assassin = BotEquipManager.relevantStatsFor(Job.ASSASSIN);
+        Equip tenAtkTwoLuk = glove(/*luk*/ 2, 0, /*watk*/ 10);
+        Equip nineAtkFourLuk = glove(/*luk*/ 4, 0, /*watk*/ 9);
+        Equip nineAtkTenLuk = glove(/*luk*/ 10, 0, /*watk*/ 9);
+        Equip elevenAtkZeroLuk = glove(/*luk*/ 0, 0, /*watk*/ 11);
+        Equip tenAtkOneLuk = glove(/*luk*/ 1, 0, /*watk*/ 10);
+
+        Set<Equip> first = BotEquipManager.selectItemsBeatingBaseline(
+                assassin, List.of(nineAtkFourLuk), List.of(tenAtkTwoLuk));
+        assertFalse(first.contains(nineAtkFourLuk),
+                "10 atk + 2 main should dominate 9 atk + 4 main under conservative equivalence");
+
+        Set<Equip> second = BotEquipManager.selectItemsBeatingBaseline(
+                assassin, List.of(elevenAtkZeroLuk), List.of(nineAtkTenLuk));
+        assertFalse(second.contains(elevenAtkZeroLuk),
+                "9 atk + 10 main should dominate 11 atk + 0 main under conservative equivalence");
+
+        Set<Equip> nearMiss = BotEquipManager.selectItemsBeatingBaseline(
+                assassin, List.of(nineAtkFourLuk), List.of(tenAtkOneLuk));
+        assertTrue(nearMiss.contains(nineAtkFourLuk),
+                "equivalence must stay conservative: 10 atk + 1 main should not dominate 9 atk + 4 main");
+    }
+
+    @Test
     void relevantStatsForJobMatchesClassRoles() {
         assertEquals(EnumSet.of(BotEquipManager.RelevantStat.LUK, BotEquipManager.RelevantStat.DEX,
                                 BotEquipManager.RelevantStat.WATK),
@@ -436,10 +464,10 @@ class BotEquipManagerTest {
         when(hooks.getEquipmentSlot(1072132)).thenReturn("So");
         when(hooks.meetsReqs(wornBoots, Job.HUNTER, Short.MAX_VALUE,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 0)).thenReturn(true);
         when(hooks.meetsReqs(redPierre, Job.HUNTER, Short.MAX_VALUE,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 0)).thenReturn(true);
         assertTrue(BotEquipManager.shouldReserveOwnedItem(bot, hooks, redPierre),
                 "John's +8 STR Red Pierre Shoes should stay reserved for self ahead of owner/sibling offers");
     }
@@ -488,10 +516,10 @@ class BotEquipManagerTest {
         when(hooks.getWeaponType(1300002)).thenReturn(WeaponType.SWORD1H);
         when(hooks.meetsReqs(equippedAxe, Job.FIGHTER, Short.MAX_VALUE,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 0)).thenReturn(true);
         when(hooks.meetsReqs(candidateSword, Job.FIGHTER, Short.MAX_VALUE,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 0)).thenReturn(true);
 
         assertTrue(BotEquipManager.shouldReserveOwnedItem(bot, hooks, candidateSword),
                 "equipped axe should not block a sword-spec fighter from reserving a sword");
@@ -521,10 +549,10 @@ class BotEquipManagerTest {
         when(hooks.getWeaponType(1300001)).thenReturn(WeaponType.GENERAL1H_SWING);
         when(hooks.meetsReqs(equippedSword, Job.FIGHTER, Short.MAX_VALUE,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 0)).thenReturn(true);
         when(hooks.meetsReqs(candidateAxe, Job.FIGHTER, Short.MAX_VALUE,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
-                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 0)).thenReturn(true);
 
         assertTrue(BotEquipManager.shouldReserveOwnedItem(bot, hooks, equippedSword),
                 "dual-mastery fighter should keep sword family");
@@ -590,7 +618,7 @@ class BotEquipManagerTest {
     }
 
     @Test
-    void selfReserveSameReqDifferentItemIdDoesNotDominate() {
+    void selfReserveSameReqDifferentItemIdDoesDominate() {
         Character bot = mock(Character.class);
         when(bot.getJob()).thenReturn(Job.SPEARMAN);
 
@@ -604,8 +632,146 @@ class BotEquipManagerTest {
         Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks, List.of(itemA, itemB));
 
         assertTrue(keep.contains(itemA));
-        assertTrue(keep.contains(itemB),
-                "same req signature but different itemId should not dominate");
+        assertFalse(keep.contains(itemB),
+                "items sharing a requirement profile should dominate freely across item ids");
+    }
+
+    @Test
+    void selfReserveWeightsDexIntoAccForWarriorDominance_redBandanaDominated() {
+        // From equiplog-Leroy-2026-05-11T031549.txt: Spearman with Red Bandana#1 (acc=4, dex=0)
+        // and Yellow Metal Gear#18 (dex=7, acc=0). Without DEX→ACC weighting, neither dominates
+        // (Red has more raw ACC). With 1:1 weighting Yellow's effective acc = 7 > 4 = Red's.
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.SPEARMAN);
+
+        Equip redBandana = equipWithIdStats(1002022, 0, 0, 4);
+        Equip yellowMetalGear = equipWithIdStats(1002053, 0, 7, 0);
+
+        BotEquipManager.SelfReserveHooks hooks = mock(BotEquipManager.SelfReserveHooks.class);
+        stubReserveItem(hooks, Job.SPEARMAN, redBandana, "Cp", 10, 0, 0, 0, 0, 0, 0);
+        stubReserveItem(hooks, Job.SPEARMAN, yellowMetalGear, "Cp", 10, 0, 0, 0, 0, 0, 0);
+
+        Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks,
+                List.of(redBandana, yellowMetalGear));
+
+        assertTrue(keep.contains(yellowMetalGear));
+        assertFalse(keep.contains(redBandana),
+                "Red Bandana (acc=4) should be dominated by Yellow Metal Gear (dex=7) under DEX→ACC weighting");
+    }
+
+    @Test
+    void selfReserveWeightsDexIntoAccForWarriorDominance_ivoryPantsDominated() {
+        // Two Ivory Shouldermail Pants from the same log: #10 (dex=6, acc=4 → weighted-acc=10)
+        // and #21 (dex=8, acc=3 → weighted-acc=11). Same req profile, same item id, but #21
+        // strictly dominates #10 on DEX and weighted-ACC.
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.SPEARMAN);
+
+        Equip ivoryPants10 = equipWithIdStats(1060076, 0, 6, 4);
+        Equip ivoryPants21 = equipWithIdStats(1060076, 0, 8, 3);
+
+        BotEquipManager.SelfReserveHooks hooks = mock(BotEquipManager.SelfReserveHooks.class);
+        stubReserveItem(hooks, Job.SPEARMAN, ivoryPants10, "Pn", 50, 1, 180, 0, 0, 0, 0);
+        stubReserveItem(hooks, Job.SPEARMAN, ivoryPants21, "Pn", 50, 1, 180, 0, 0, 0, 0);
+
+        Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks,
+                List.of(ivoryPants10, ivoryPants21));
+
+        assertTrue(keep.contains(ivoryPants21));
+        assertFalse(keep.contains(ivoryPants10),
+                "Ivory Pants dex=6/acc=4 should be dominated by dex=8/acc=3 under DEX→ACC weighting");
+    }
+
+    @Test
+    void selfReserveSpearmanWithSpearMasteryRejectsAxeAndPolearm() {
+        // Spearman who has only put SP into Spear Mastery (not Polearm Mastery) should not
+        // reserve polearms or axes from inventory.
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.SPEARMAN);
+        when(bot.getSkillLevel(Spearman.SPEAR_MASTERY)).thenReturn(1);
+        when(bot.getSkillLevel(Spearman.SPEAR_BOOSTER)).thenReturn(0);
+        when(bot.getSkillLevel(Spearman.POLEARM_MASTERY)).thenReturn(0);
+        when(bot.getSkillLevel(Spearman.POLEARM_BOOSTER)).thenReturn(0);
+
+        Equip spear = equipWithIdStats(1432012, 2, 0, 0);
+        Equip polearm = equipWithIdStats(1442012, 4, 0, 0);
+        Equip axe = equipWithIdStats(1312012, 6, 0, 0);
+
+        BotEquipManager.SelfReserveHooks hooks = mock(BotEquipManager.SelfReserveHooks.class);
+        stubReserveItem(hooks, Job.SPEARMAN, spear, "Wp", 43, 1, 0, 0, 0, 0, 0);
+        stubReserveItem(hooks, Job.SPEARMAN, polearm, "Wp", 43, 1, 0, 0, 0, 0, 0);
+        stubReserveItem(hooks, Job.SPEARMAN, axe, "Wp", 43, 1, 0, 0, 0, 0, 0);
+        when(hooks.getWeaponType(1432012)).thenReturn(WeaponType.SPEAR_STAB);
+        when(hooks.getWeaponType(1442012)).thenReturn(WeaponType.POLE_ARM_SWING);
+        when(hooks.getWeaponType(1312012)).thenReturn(WeaponType.GENERAL2H_SWING);
+
+        Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks,
+                List.of(spear, polearm, axe));
+
+        assertTrue(keep.contains(spear), "spear-mastery spearman should keep spears");
+        assertFalse(keep.contains(polearm),
+                "spear-only spearman should not reserve polearms");
+        assertFalse(keep.contains(axe),
+                "spearman should never reserve axes regardless of mastery");
+    }
+
+    @Test
+    void selfReserveSpearmanDoesNotReserveMapleDoomSinger() {
+        // From equiplog-Leroy-2026-05-11T031549.txt: Maple Doom Singer (2-handed mace) was
+        // appearing in the spearman's reserved set. As a non-spear/non-polearm weapon, it must
+        // never be reserved regardless of mastery layout.
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.SPEARMAN);
+        when(bot.getSkillLevel(Spearman.SPEAR_MASTERY)).thenReturn(1);
+        when(bot.getSkillLevel(Spearman.POLEARM_MASTERY)).thenReturn(1);
+
+        Equip mapleImpaler = equipWithIdStats(1432012, 2, 0, 0);
+        Equip mapleDoomSinger = equipWithIdStats(1422014, 4, 0, 0);
+
+        BotEquipManager.SelfReserveHooks hooks = mock(BotEquipManager.SelfReserveHooks.class);
+        stubReserveItem(hooks, Job.SPEARMAN, mapleImpaler, "Wp", 43, 1, 0, 0, 0, 0, 0);
+        // Maple Doom Singer (item 1422014) is a 2-handed weapon — text slot "WpSi", not "Wp".
+        // The earlier bug was that isWeaponSlot only matched "Wp", so 2H weapons skipped the
+        // mastery filter and stayed in the reserved set.
+        stubReserveItem(hooks, Job.SPEARMAN, mapleDoomSinger, "WpSi", 43, 1, 0, 0, 0, 0, 0);
+        when(hooks.getWeaponType(1432012)).thenReturn(WeaponType.SPEAR_STAB);
+        when(hooks.getWeaponType(1422014)).thenReturn(WeaponType.GENERAL2H_SWING);
+
+        Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks,
+                List.of(mapleImpaler, mapleDoomSinger));
+
+        assertTrue(keep.contains(mapleImpaler));
+        assertFalse(keep.contains(mapleDoomSinger),
+                "spearman must not reserve Maple Doom Singer (2-handed mace)");
+    }
+
+    @Test
+    void selfReserveSpearmanWithBothMasteriesKeepsSpearAndPolearmRejectsAxe() {
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.SPEARMAN);
+        when(bot.getSkillLevel(Spearman.SPEAR_MASTERY)).thenReturn(1);
+        when(bot.getSkillLevel(Spearman.SPEAR_BOOSTER)).thenReturn(0);
+        when(bot.getSkillLevel(Spearman.POLEARM_MASTERY)).thenReturn(1);
+        when(bot.getSkillLevel(Spearman.POLEARM_BOOSTER)).thenReturn(0);
+
+        Equip spear = equipWithIdStats(1432012, 2, 0, 0);
+        Equip polearm = equipWithIdStats(1442012, 4, 0, 0);
+        Equip axe = equipWithIdStats(1312012, 6, 0, 0);
+
+        BotEquipManager.SelfReserveHooks hooks = mock(BotEquipManager.SelfReserveHooks.class);
+        stubReserveItem(hooks, Job.SPEARMAN, spear, "Wp", 43, 1, 0, 0, 0, 0, 0);
+        stubReserveItem(hooks, Job.SPEARMAN, polearm, "Wp", 43, 1, 0, 0, 0, 0, 0);
+        stubReserveItem(hooks, Job.SPEARMAN, axe, "Wp", 43, 1, 0, 0, 0, 0, 0);
+        when(hooks.getWeaponType(1432012)).thenReturn(WeaponType.SPEAR_STAB);
+        when(hooks.getWeaponType(1442012)).thenReturn(WeaponType.POLE_ARM_SWING);
+        when(hooks.getWeaponType(1312012)).thenReturn(WeaponType.GENERAL2H_SWING);
+
+        Set<Equip> keep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks,
+                List.of(spear, polearm, axe));
+
+        assertTrue(keep.contains(spear));
+        assertTrue(keep.contains(polearm));
+        assertFalse(keep.contains(axe));
     }
 
     @Test
@@ -650,6 +816,162 @@ class BotEquipManagerTest {
                 "immediate optimizer may consider gear that only needs more stats");
         assertFalse(BotEquipManager.statOnlyBlocked(bot, hooks, levelBlocked),
                 "immediate optimizer must skip gear blocked by current level/job/fame");
+    }
+
+    @Test
+    void selfReserveKeepsFutureGearBlockedByCurrentLevelOrFame() {
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.ASSASSIN);
+        when(bot.getLevel()).thenReturn(43);
+        when(bot.getFame()).thenReturn(1);
+        when(bot.getSkillLevel(Assassin.CLAW_MASTERY)).thenReturn(1);
+        when(bot.getSkillLevel(Assassin.CLAW_BOOSTER)).thenReturn(0);
+
+        Equip wearable = clawWithStats(1472022, 2, 21, 0);
+        Equip levelBlocked = clawWithStats(1472052, 7, 27, 0);
+        Equip fameBlocked = clawWithStats(1472053, 4, 28, 0);
+
+        BotEquipManager.SelfReserveHooks hooks = mock(BotEquipManager.SelfReserveHooks.class);
+        stubReserveItem(hooks, Job.ASSASSIN, wearable, "Wp", 35, 8, 0, 70, 0, 95, 0);
+        stubReserveItem(hooks, Job.ASSASSIN, levelBlocked, "Wp", 50, 8, 0, 90, 0, 140, 0);
+        stubReserveItem(hooks, Job.ASSASSIN, fameBlocked, "Wp", 50, 8, 0, 90, 0, 140, 20);
+        when(hooks.getWeaponType(1472022)).thenReturn(WeaponType.CLAW);
+        when(hooks.getWeaponType(1472052)).thenReturn(WeaponType.CLAW);
+        when(hooks.getWeaponType(1472053)).thenReturn(WeaponType.CLAW);
+        when(hooks.meetsReqs(wearable, Job.ASSASSIN, 43,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 1)).thenReturn(true);
+        when(hooks.meetsReqs(levelBlocked, Job.ASSASSIN, 43,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 1)).thenReturn(false);
+        when(hooks.meetsReqs(fameBlocked, Job.ASSASSIN, 43,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 1)).thenReturn(false);
+        when(hooks.meetsReqs(levelBlocked, Job.ASSASSIN, Short.MAX_VALUE,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+        when(hooks.meetsReqs(fameBlocked, Job.ASSASSIN, Short.MAX_VALUE,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+
+        Set<Equip> levelKeep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks,
+                List.of(wearable, levelBlocked));
+        Set<Equip> fameKeep = BotEquipManager.selectOwnedItemsForSelfReserve(bot, hooks,
+                List.of(wearable, fameBlocked));
+
+        assertTrue(levelKeep.contains(wearable));
+        assertTrue(levelKeep.contains(levelBlocked),
+                "self-reserve should keep future own-class gear blocked only by current level");
+        assertTrue(fameKeep.contains(wearable));
+        assertTrue(fameKeep.contains(fameBlocked),
+                "self-reserve should keep future own-class gear blocked only by current fame");
+    }
+
+    @Test
+    void autoEquipTriggerIsThrottledPerBotUnlessForced() {
+        Character bot = mock(Character.class);
+        when(bot.getId()).thenReturn(9_876_543);
+
+        assertTrue(BotEquipManager.shouldRunAutoEquip(bot, 1_000L, false));
+        assertFalse(BotEquipManager.shouldRunAutoEquip(bot, 5_000L, false),
+                "duplicate mode-command triggers should not rerun the optimizer");
+        assertTrue(BotEquipManager.shouldRunAutoEquip(bot, 6_000L, true),
+                "explicit autoequip command should bypass the throttle");
+        assertFalse(BotEquipManager.shouldRunAutoEquip(bot, 7_000L, false),
+                "forced runs still refresh the normal throttle window");
+        assertTrue(BotEquipManager.shouldRunAutoEquip(bot, 36_001L, false));
+    }
+
+    @Test
+    void clawerFullEquipLogDoesNotHitParetoCap() {
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.ASSASSIN);
+
+        LogEquipFixture f = new LogEquipFixture();
+        Map<Short, List<Equip>> bySlot = new LinkedHashMap<>();
+
+        Equip mapleKandayo = f.equip(1472032, -11, "Wp", 0, 0, 0, 0, 34, 0, 0, 0, 0, 25, 82, 84, 43, 8, 0, 0, 0, 0, 0);
+        Equip blueAvenger = f.equip(1051025, -5, "MaPn", 0, 10, 0, 0, 0, 0, 45, 0, 0, 0, 62, 65, 35, 8, 0, 0, 0, 0, 0);
+        Equip squishyShoes = f.equip(1072005, -7, "So", 0, 6, 4, 4, 0, 0, 12, 9, 0, 0, 52, 57, 30, 0, 0, 0, 0, 0, 0);
+        Equip purpleWorkGloves = f.equip(1082007, -8, "Gv", 0, 1, 0, 4, 0, 0, 1, 0, 2, 0, 48, 43, 10, 0, 0, 0, 0, 0, 0);
+        Equip brownBambooHat = f.equip(1002021, -1, "Cp", 0, 0, 0, 3, 0, 0, 17, 0, 0, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0);
+        Equip oldRaggedyCape = f.equip(1102000, -9, "Sr", 0, 0, 0, 0, 0, 0, 0, 0, 0, 12, 41, 45, 25, 0, 0, 0, 0, 0, 0);
+        Equip sapphireEarrings = f.equip(1032015, -4, "Ae", 0, 0, 0, 0, 0, 0, 0, 19, 0, 0, 59, 37, 35, 0, 0, 0, 0, 0, 0);
+        Equip medal = f.equip(1142000, -49, "Me", 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 38, 35, 0, 0, 0, 0, 0, 0, 0);
+
+        add(bySlot, (short) -11, f.equip(1472052, 18, "Wp", 0, 0, 0, 7, 27, 0, 0, 0, 0, 8, 76, 87, 50, 8, 0, 90, 0, 140, 0));
+        add(bySlot, (short) -11, f.equip(1472029, 7, "Wp", 0, 2, 0, 0, 19, 0, 2, 0, 0, 0, 0, 0, 40, 8, 0, 80, 0, 120, 0));
+        add(bySlot, (short) -11, f.equip(1472030, 8, "Wp", 0, 1, 0, 0, 24, 0, 4, 0, 0, 0, 0, 0, 40, 8, 0, 80, 0, 120, 0));
+        add(bySlot, (short) -11, f.equip(1472031, 10, "Wp", 0, 0, 0, 8, 23, 0, 8, 0, 0, 0, 68, 62, 40, 8, 0, 80, 0, 120, 0));
+        add(bySlot, (short) -11, f.equip(1472017, 33, "Wp", 0, 0, 0, 2, 20, 0, 3, 0, 0, 0, 0, 0, 30, 8, 0, 60, 0, 80, 0));
+        add(bySlot, (short) -11, f.equip(1472022, 39, "Wp", 0, 0, 0, 2, 21, 0, 2, 0, 0, 0, 0, 0, 35, 8, 0, 70, 0, 95, 0));
+        add(bySlot, (short) -11, f.equip(1472018, 19, "Wp", 0, 0, 0, 3, 19, 0, 1, 0, 0, 0, 0, 0, 30, 8, 0, 60, 0, 80, 0));
+        add(bySlot, (short) -11, f.equip(1472019, 30, "Wp", 0, 0, 0, 5, 17, 0, 8, 0, 0, 0, 44, 59, 30, 8, 0, 60, 0, 80, 0));
+        add(bySlot, (short) -11, f.equip(1472053, 2, "Wp", 0, 0, 0, 4, 28, 0, 0, 0, 0, 5, 82, 56, 50, 8, 0, 90, 0, 140, 0));
+        add(bySlot, (short) -11, mapleKandayo);
+
+        add(bySlot, (short) -5, f.equip(1040105, 15, "Ma", 0, 1, 0, 6, 0, 0, 27, 0, 0, 0, 36, 51, 30, 8, 0, 60, 0, 80, 0));
+        add(bySlot, (short) -5, f.equip(1040108, 25, "Ma", 0, 3, 0, 6, 0, 0, 46, 0, 0, 0, 62, 83, 50, 8, 0, 90, 0, 140, 0));
+        add(bySlot, (short) -5, f.equip(1040106, 20, "Ma", 0, 7, 0, 0, 0, 0, 27, 0, 0, 0, 45, 41, 30, 8, 0, 60, 0, 80, 0));
+        add(bySlot, (short) -5, f.equip(1051026, 13, "MaPn", 0, 0, 0, 9, 0, 0, 49, 0, 0, 0, 66, 74, 35, 8, 0, 70, 0, 95, 0));
+        add(bySlot, (short) -5, blueAvenger);
+
+        add(bySlot, (short) -8, f.equip(1082074, 17, "Gv", 0, 0, 0, 7, 0, 0, 14, 0, 0, 0, 53, 49, 35, 8, 0, 70, 0, 95, 0));
+        add(bySlot, (short) -8, f.equip(1082068, 9, "Gv", 0, 1, 0, 7, 0, 0, 20, 0, 0, 0, 79, 51, 50, 8, 0, 90, 0, 140, 0));
+        add(bySlot, (short) -8, f.equip(1082069, 21, "Gv", 0, 4, 0, 6, 0, 0, 19, 0, 0, 0, 70, 61, 50, 8, 0, 90, 0, 140, 0));
+        add(bySlot, (short) -8, purpleWorkGloves);
+
+        add(bySlot, (short) -7, f.equip(1072136, 37, "So", 0, 3, 0, 7, 0, 0, 35, 0, 0, 0, 53, 85, 50, 8, 0, 90, 0, 140, 0));
+        add(bySlot, (short) -7, f.equip(1072039, 3, "So", 0, 0, 0, 5, 0, 0, 18, 0, 0, 0, 47, 41, 30, 8, 0, 60, 0, 80, 0));
+        add(bySlot, (short) -7, f.equip(1072125, 27, "So", 0, 5, 0, 6, 0, 0, 25, 0, 0, 0, 49, 60, 40, 8, 0, 80, 0, 110, 0));
+        add(bySlot, (short) -7, squishyShoes);
+
+        add(bySlot, (short) -6, f.equip(1060094, 1, "Pn", 0, 0, 0, 2, 0, 0, 24, 0, 0, 0, 0, 11, 40, 8, 0, 80, 0, 110, 0));
+        add(bySlot, (short) -6, f.equip(1060095, 11, "Pn", 0, 6, 0, 0, 0, 0, 31, 0, 0, 0, 74, 61, 40, 8, 0, 80, 0, 110, 0));
+        add(bySlot, (short) -6, f.equip(1060107, 38, "Pn", 0, 0, 0, 5, 0, 0, 29, 0, 3, 0, 78, 70, 50, 8, 0, 90, 0, 140, 0));
+
+        add(bySlot, (short) -1, f.equip(1002155, 4, "Cp", 0, 0, 0, 5, 0, 0, 32, 0, 0, 0, 47, 50, 40, 8, 0, 80, 0, 110, 0));
+        add(bySlot, (short) -1, f.equip(1002156, 6, "Cp", 0, 6, 0, 0, 0, 0, 30, 0, 0, 0, 38, 59, 35, 8, 0, 70, 0, 95, 0));
+        add(bySlot, (short) -1, f.equip(1002157, 14, "Cp", 0, 6, 0, 0, 0, 0, 27, 0, 0, 0, 54, 52, 35, 8, 0, 70, 0, 95, 0));
+        add(bySlot, (short) -1, brownBambooHat);
+
+        add(bySlot, (short) -9, oldRaggedyCape);
+        add(bySlot, (short) -4, sapphireEarrings);
+        add(bySlot, (short) -49, medal);
+
+        List<Short> dpSlots = List.of((short) -1, (short) -4, (short) -5, (short) -6,
+                (short) -7, (short) -8, (short) -9, (short) -49);
+        Map<Short, Equip> currentBySlot = Map.of(
+                (short) -11, mapleKandayo,
+                (short) -5, blueAvenger,
+                (short) -7, squishyShoes,
+                (short) -8, purpleWorkGloves,
+                (short) -1, brownBambooHat,
+                (short) -9, oldRaggedyCape,
+                (short) -4, sapphireEarrings,
+                (short) -49, medal);
+        BotEquipManager.StatSnapshot naked = new BotEquipManager.StatSnapshot(
+                4, 35, 4, 227, 21, 24, 25, 50, 2, Job.ASSASSIN);
+        BotEquipManager.MapDamageProfile mob = new BotEquipManager.MapDamageProfile(120, 16, 41);
+
+        long startedAt = System.nanoTime();
+        boolean anyCap = false;
+        BotEquipManager.DpResult best = null;
+        for (Equip weapon : bySlot.get((short) -11)) {
+            BotEquipManager.DpResult result = BotEquipManager.solveForWeapon(
+                    bot, f.hooks(), naked, weapon, dpSlots, currentBySlot, bySlot, mob);
+            if (result == null) continue;
+            anyCap |= result.paretoCapHit();
+            if (best == null || result.score().damage() > best.score().damage()) {
+                best = result;
+            }
+        }
+        long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
+        System.out.println("clawer full equip optimizer benchmark: " + elapsedMs
+                + " ms, capHit=" + anyCap
+                + ", bestDamage=" + (best != null ? best.score().damage() : -1));
+
+        assertFalse(anyCap, "full Clawer log should optimize without hitting the Pareto cap");
     }
 
     private static Equip mageOverall(int int_, int luk) {
@@ -697,6 +1019,79 @@ class BotEquipManagerTest {
         return e;
     }
 
+    private static void add(Map<Short, List<Equip>> bySlot, short slot, Equip equip) {
+        bySlot.computeIfAbsent(slot, ignored -> new ArrayList<>()).add(equip);
+    }
+
+    private static final class LogEquipFixture {
+        private final Map<Integer, String> slots = new HashMap<>();
+        private final Map<Integer, WeaponType> weaponTypes = new HashMap<>();
+        private final Set<Integer> overalls = new HashSet<>();
+        private final Map<Integer, Map<String, Integer>> reqs = new HashMap<>();
+
+        Equip equip(int itemId, int pos, String slot, int str, int dex, int int_, int luk,
+                   int watk, int matk, int wdef, int mdef, int acc, int avoid, int hp, int mp,
+                   int reqLevel, int reqJob, int reqStr, int reqDex, int reqInt, int reqLuk, int reqPop) {
+            Equip e = mock(Equip.class);
+            when(e.getItemId()).thenReturn(itemId);
+            when(e.getPosition()).thenReturn((short) pos);
+            when(e.getStr()).thenReturn((short) str);
+            when(e.getDex()).thenReturn((short) dex);
+            when(e.getInt()).thenReturn((short) int_);
+            when(e.getLuk()).thenReturn((short) luk);
+            when(e.getWatk()).thenReturn((short) watk);
+            when(e.getMatk()).thenReturn((short) matk);
+            when(e.getWdef()).thenReturn((short) wdef);
+            when(e.getMdef()).thenReturn((short) mdef);
+            when(e.getAcc()).thenReturn((short) acc);
+            when(e.getAvoid()).thenReturn((short) avoid);
+            when(e.getHp()).thenReturn((short) hp);
+            when(e.getMp()).thenReturn((short) mp);
+            slots.put(itemId, slot);
+            weaponTypes.put(itemId, "Wp".equals(slot) ? WeaponType.CLAW : WeaponType.NOT_A_WEAPON);
+            if ("MaPn".equals(slot)) {
+                overalls.add(itemId);
+            }
+            reqs.put(itemId, Map.of(
+                    "reqLevel", reqLevel,
+                    "reqJob", reqJob,
+                    "reqSTR", reqStr,
+                    "reqDEX", reqDex,
+                    "reqINT", reqInt,
+                    "reqLUK", reqLuk,
+                    "reqPOP", reqPop));
+            return e;
+        }
+
+        BotEquipManager.OptimizerHooks hooks() {
+            return new BotEquipManager.OptimizerHooks() {
+                @Override public boolean isTwoHanded(int itemId) { return false; }
+                @Override public WeaponType getWeaponType(int itemId) { return weaponTypes.getOrDefault(itemId, WeaponType.NOT_A_WEAPON); }
+                @Override public boolean isOverall(int itemId) { return overalls.contains(itemId); }
+                @Override public boolean meetsReqs(Equip equip, Job job, int level, int str, int dex,
+                                                   int int_, int luk, int fame) {
+                    Map<String, Integer> r = reqs.get(equip.getItemId());
+                    if (r == null) return true;
+                    return level >= r.getOrDefault("reqLevel", 0)
+                            && reqJobMatches(job, r.getOrDefault("reqJob", 0))
+                            && str >= r.getOrDefault("reqSTR", 0)
+                            && dex >= r.getOrDefault("reqDEX", 0)
+                            && int_ >= r.getOrDefault("reqINT", 0)
+                            && luk >= r.getOrDefault("reqLUK", 0)
+                            && fame >= r.getOrDefault("reqPOP", 0);
+                }
+                @Override public Map<String, Integer> getEquipStats(int itemId) {
+                    return reqs.getOrDefault(itemId, Map.of());
+                }
+            };
+        }
+
+        private static boolean reqJobMatches(Job job, int reqJob) {
+            if (reqJob == 0) return true;
+            return job != null && (reqJob & 0x8) != 0 && job.isA(Job.THIEF);
+        }
+    }
+
     private static void stubReserveItem(BotEquipManager.SelfReserveHooks hooks, Job job, Equip equip, String slot,
                                         int reqLevel, int reqJob, int reqStr, int reqDex,
                                         int reqInt, int reqLuk, int reqPop) {
@@ -706,6 +1101,9 @@ class BotEquipManagerTest {
         when(hooks.meetsReqs(equip, job, Short.MAX_VALUE,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE)).thenReturn(true);
+        when(hooks.meetsReqs(equip, job, Short.MAX_VALUE,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, 0)).thenReturn(true);
         when(hooks.getEquipLevelReq(itemId)).thenReturn(reqLevel);
         when(hooks.getEquipStats(itemId)).thenReturn(java.util.Map.of(
                 "reqJob", reqJob,
