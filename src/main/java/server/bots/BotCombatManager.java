@@ -917,18 +917,59 @@ class BotCombatManager {
     }
 
     private static AttackPlan selectBestAttackPlan(Character bot, List<AttackPlan> candidates) {
-        AttackPlan best = null;
-        double bestDamage = Double.NEGATIVE_INFINITY;
+        List<PlanScore> scores = new ArrayList<>(candidates.size());
         for (AttackPlan candidate : candidates) {
-            double damage = estimatePlanDamage(bot, candidate);
+            scores.add(scoreAttackPlan(bot, candidate));
+        }
+
+        boolean hasGuaranteedFullHpKill = scores.stream().anyMatch(score -> score.minimumKillsFullHpTargets);
+        PlanScore best = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (PlanScore score : scores) {
+            if (hasGuaranteedFullHpKill && !score.minimumKillsFullHpTargets) {
+                continue;
+            }
+            double candidateScore = hasGuaranteedFullHpKill ? score.usefulDps : score.rawDps;
             if (best == null
-                    || damage > bestDamage
-                    || (Double.compare(damage, bestDamage) == 0 && isBetterTieBreak(candidate, best))) {
-                best = candidate;
-                bestDamage = damage;
+                    || candidateScore > bestScore
+                    || (Double.compare(candidateScore, bestScore) == 0 && isBetterTieBreak(score.plan, best.plan))) {
+                best = score;
+                bestScore = candidateScore;
             }
         }
-        return best;
+        return best != null ? best.plan : null;
+    }
+
+    private record PlanScore(AttackPlan plan, double usefulDamage, double rawDamage, double usefulDps, double rawDps,
+                             boolean minimumKillsFullHpTargets) {
+    }
+
+    private static PlanScore scoreAttackPlan(Character bot, AttackPlan attackPlan) {
+        CombatFormulaProvider.DamageProfile damageProfile = CombatFormulaProvider.getInstance().resolveDamageProfile(
+                bot, attackPlan.skillId, attackPlan.skillLevel,
+                attackPlan.route == AttackRoute.MAGIC, attackPlan.damageWeaponType);
+        double usefulDamage = 0.0d;
+        double rawDamage = 0.0d;
+        boolean minimumKillsFullHpTargets = !attackPlan.targets.isEmpty();
+        for (Monster target : attackPlan.targets) {
+            double expectedDamage = CombatFormulaProvider.getInstance().estimateExpectedDamage(bot, target, attackPlan.numDamage,
+                    attackPlan.skillId, damageProfile);
+            usefulDamage += capDamageByCurrentHp(expectedDamage, target);
+            rawDamage += expectedDamage;
+
+            int fullHp = target.getMaxHp();
+            if (fullHp <= 0) {
+                fullHp = target.getHp();
+            }
+            int minimumDamage = CombatFormulaProvider.getInstance().estimateMinimumDamage(bot, target, attackPlan.numDamage,
+                    attackPlan.skillId, damageProfile);
+            if (fullHp <= 0 || minimumDamage < fullHp) {
+                minimumKillsFullHpTargets = false;
+            }
+        }
+        double animationSeconds = Math.max(1, attackPlan.cooldownMs) / 1000.0d;
+        return new PlanScore(attackPlan, usefulDamage, rawDamage,
+                usefulDamage / animationSeconds, rawDamage / animationSeconds, minimumKillsFullHpTargets);
     }
 
     private static boolean isBetterTieBreak(AttackPlan candidate, AttackPlan currentBest) {
@@ -939,16 +980,7 @@ class BotCombatManager {
     }
 
     private static double estimatePlanDamage(Character bot, AttackPlan attackPlan) {
-        CombatFormulaProvider.DamageProfile damageProfile = CombatFormulaProvider.getInstance().resolveDamageProfile(
-                bot, attackPlan.skillId, attackPlan.skillLevel,
-                attackPlan.route == AttackRoute.MAGIC, attackPlan.damageWeaponType);
-        double total = 0.0d;
-        for (Monster target : attackPlan.targets) {
-            double expectedDamage = CombatFormulaProvider.getInstance().estimateExpectedDamage(bot, target, attackPlan.numDamage,
-                    attackPlan.skillId, damageProfile);
-            total += capDamageByCurrentHp(expectedDamage, target);
-        }
-        return total;
+        return scoreAttackPlan(bot, attackPlan).usefulDamage;
     }
 
     private static double capDamageByCurrentHp(double expectedDamage, Monster target) {

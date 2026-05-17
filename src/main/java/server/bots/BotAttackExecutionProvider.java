@@ -228,10 +228,18 @@ final class BotAttackExecutionProvider {
 
         WeaponType weaponType = getEquippedWeaponType(bot);
         if (weaponType == WeaponType.WAND || weaponType == WeaponType.STAFF) {
-            return BotCombatManager.AttackRoute.MAGIC;
+            return isMagicAttackSkill(skillId)
+                    ? BotCombatManager.AttackRoute.MAGIC
+                    : BotCombatManager.AttackRoute.CLOSE;
         }
 
         return determineWeaponRoute(weaponType);
+    }
+
+    private static boolean isMagicAttackSkill(int skillId) {
+        int job = skillId / 10000;
+        int family = job / 100;
+        return family == 2 || family == 12 || family == 22;
     }
 
     static BotCombatManager.AttackRoute determineBasicWeaponRoute(WeaponType weaponType) {

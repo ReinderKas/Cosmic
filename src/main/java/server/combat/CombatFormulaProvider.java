@@ -338,25 +338,7 @@ public final class CombatFormulaProvider {
             return averageDamage(damageProfile.minDamage(), damageProfile.maxDamage()) * normalizedHits;
         }
 
-        long rawMin = applyCharacterDamageModifiers(damageProfile.minDamage(), bot, skillId);
-        long rawMax = applyCharacterDamageModifiers(damageProfile.maxDamage(), bot, skillId);
-        boolean elementalResetActive = bot.getBuffedValue(BuffStat.ELEMENTAL_RESET) != null;
-        rawMax = applySkillElementalMultiplier(rawMax, skillId, monster, elementalResetActive);
-        rawMin = applySkillElementalMultiplier(rawMin, skillId, monster, elementalResetActive);
-        if (skillId != 0 && !elementalResetActive && monster != null) {
-            Skill elemSkill = SkillFactory.getSkill(skillId);
-            if (elemSkill != null && elemSkill.getElement() != Element.NEUTRAL
-                    && monster.getElementalEffectiveness(elemSkill.getElement()) == ElementalEffectiveness.STRONG) {
-                rawMax = Math.max(1, rawMax / 2);
-                rawMin = Math.max(1, rawMin / 2);
-            }
-        }
-        rawMax = applyWkChargeElementalBonus(rawMax, bot, monster);
-        rawMin = applyWkChargeElementalBonus(rawMin, bot, monster);
-
-        int modMax = (int) Math.min(Integer.MAX_VALUE, rawMax);
-        int modMin = (int) Math.min(modMax, Math.max(1, (int) rawMin));
-        int[] adjustedDamage = applyMonsterDefense(bot, monster, modMin, modMax, damageProfile.magicAttack());
+        int[] adjustedDamage = adjustedDamageRange(bot, monster, skillId, damageProfile);
         double hitChance = calculateMobHitChance(bot, monster, damageProfile.magicAttack());
         boolean shadowPartner = normalizedHits > 1 && bot.getBuffEffect(BuffStat.SHADOWPARTNER) != null;
         if (damageProfile.magicAttack()) {
@@ -395,6 +377,50 @@ public final class CombatFormulaProvider {
                     + expectedPhysicalLineDamage(partnerMin, partnerMax, hitChance, crit) * partnerHits;
         }
         return expectedPhysicalLineDamage(adjustedDamage[0], adjustedDamage[1], hitChance, crit) * normalizedHits;
+    }
+
+    public int estimateMinimumDamage(Character bot, Monster monster, int hits, int skillId,
+                                     DamageProfile damageProfile) {
+        int normalizedHits = Math.max(0, hits);
+        if (normalizedHits == 0 || damageProfile == null) {
+            return 0;
+        }
+        if (damageProfile.alwaysHit()) {
+            return Math.max(0, damageProfile.minDamage()) * normalizedHits;
+        }
+
+        int[] adjustedDamage = adjustedDamageRange(bot, monster, skillId, damageProfile);
+        int minLine = adjustedDamage[0];
+        boolean shadowPartner = normalizedHits > 1 && bot.getBuffEffect(BuffStat.SHADOWPARTNER) != null;
+        if (shadowPartner) {
+            int mainHits = normalizedHits / 2;
+            int partnerHits = normalizedHits - mainHits;
+            int partnerMin = Math.max(1, Math.min(Math.max(1, adjustedDamage[1] / 2), minLine / 2));
+            return minLine * mainHits + partnerMin * partnerHits;
+        }
+        return minLine * normalizedHits;
+    }
+
+    private int[] adjustedDamageRange(Character bot, Monster monster, int skillId, DamageProfile damageProfile) {
+        long rawMin = applyCharacterDamageModifiers(damageProfile.minDamage(), bot, skillId);
+        long rawMax = applyCharacterDamageModifiers(damageProfile.maxDamage(), bot, skillId);
+        boolean elementalResetActive = bot.getBuffedValue(BuffStat.ELEMENTAL_RESET) != null;
+        rawMax = applySkillElementalMultiplier(rawMax, skillId, monster, elementalResetActive);
+        rawMin = applySkillElementalMultiplier(rawMin, skillId, monster, elementalResetActive);
+        if (skillId != 0 && !elementalResetActive && monster != null) {
+            Skill elemSkill = SkillFactory.getSkill(skillId);
+            if (elemSkill != null && elemSkill.getElement() != Element.NEUTRAL
+                    && monster.getElementalEffectiveness(elemSkill.getElement()) == ElementalEffectiveness.STRONG) {
+                rawMax = Math.max(1, rawMax / 2);
+                rawMin = Math.max(1, rawMin / 2);
+            }
+        }
+        rawMax = applyWkChargeElementalBonus(rawMax, bot, monster);
+        rawMin = applyWkChargeElementalBonus(rawMin, bot, monster);
+
+        int modMax = (int) Math.min(Integer.MAX_VALUE, rawMax);
+        int modMin = (int) Math.min(modMax, Math.max(1, (int) rawMin));
+        return applyMonsterDefense(bot, monster, modMin, modMax, damageProfile.magicAttack());
     }
 
     private double expectedPhysicalLineDamage(int minDamage, int maxDamage, double hitChance, CritProfile crit) {
