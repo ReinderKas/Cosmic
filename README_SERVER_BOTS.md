@@ -15,7 +15,7 @@
 
 ## Bot Maintenance Guide
 
-1. Give them mesos, take them shopping to resupply pots/ammo - can also manually give a bot some excess and they will auto distribute among themselves.
+1. [Give them mesos, take them shopping to resupply pots/ammo - can also manually give a bot some excess and they will auto distribute among themselves.](docs/bot/consumable-automation-audit.html)
 2. use `inv?` command to check inventory spaces, `trade <equip/use/etc/...>` or `trade trash` to get those items, or `sell trash` if you like to live dangerously (bot might sell something expensive)
 3. use `brb` or `logout` command to send bot to town safely or despawn
 
