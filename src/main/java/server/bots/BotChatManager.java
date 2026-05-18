@@ -440,6 +440,11 @@ public class BotChatManager {
     private static final Pattern TRADE_EQUIPS_COMMAND_PATTERN = Pattern.compile(
             "\\b" + TRADE_CMD_VERB + "\\s+" + TRANSFER_RECIPIENT + TRANSFER_OWNER + EQUIP_WORDS + "\\b",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern TRADE_RESERVE_COMMAND_PATTERN = Pattern.compile(
+            "^\\s*" + TRADE_CMD_VERB
+            + "\\s+" + TRANSFER_RECIPIENT
+            + "(?:(?:your|ur|my)\\s+)?reserve(?:d)?(?:\\s+(\\d+))?\\s*[?!.,]*\\s*$",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern TRADE_TRASH_COMMAND_PATTERN = Pattern.compile(
             "\\b" + TRADE_CMD_VERB + "\\s+" + TRANSFER_RECIPIENT
             + "(?:(?:your|ur|my)\\s+)?" + TRASH_WORDS + "\\b",
@@ -2226,6 +2231,10 @@ public class BotChatManager {
         if (TRADE_POTS_COMMAND_PATTERN.matcher(message).find()) return "pots";
         if (TRADE_BUFF_COMMAND_PATTERN.matcher(message).find()) return "buff";
         if (TRADE_AMMO_COMMAND_PATTERN.matcher(message).find()) return "ammo";
+        Matcher reserveMatcher = TRADE_RESERVE_COMMAND_PATTERN.matcher(message);
+        if (reserveMatcher.matches()) {
+            return BotInventoryManager.reservedEquipsCategory(parseTradeReservePage(reserveMatcher.group(1)));
+        }
         if (TRADE_USE_COMMAND_PATTERN.matcher(message).find()) return "use";
         if (TRADE_EQUIPS_COMMAND_PATTERN.matcher(message).find()) return "equips";
         if (TRADE_TRASH_COMMAND_PATTERN.matcher(message).find()) return "trash";
@@ -2314,6 +2323,17 @@ public class BotChatManager {
             return (int) Math.min(amount, Integer.MAX_VALUE);
         } catch (NumberFormatException ignored) {
             return 0;
+        }
+    }
+
+    private static int parseTradeReservePage(String pageToken) {
+        if (pageToken == null || pageToken.isBlank()) {
+            return 1;
+        }
+        try {
+            return Integer.parseInt(pageToken);
+        } catch (NumberFormatException ignored) {
+            return 1;
         }
     }
 

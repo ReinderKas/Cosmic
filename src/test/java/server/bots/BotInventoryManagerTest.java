@@ -1,6 +1,7 @@
 package server.bots;
 
 import client.Character;
+import client.Job;
 import client.inventory.Equip;
 import client.inventory.Inventory;
 import client.inventory.Item;
@@ -141,6 +142,91 @@ class BotInventoryManagerTest {
         assertTrue(BotInventoryManager.hasProtectedSellTrashStat(Map.of("reqJob", 16), pirateDex, 6));
         assertTrue(BotInventoryManager.hasProtectedSellTrashWeaponStat(Map.of("reqJob", 1), currentWarriorWeapon, baseWarriorWeapon));
         assertTrue(BotInventoryManager.hasProtectedSellTrashWeaponStat(Map.of("reqJob", 2), currentMageWeapon, baseMageWeapon));
+    }
+
+    @Test
+    void shouldClampReservedTradePages() {
+        assertEquals(1, BotInventoryManager.clampTradePage(-4, 0));
+        assertEquals(1, BotInventoryManager.clampTradePage(0, 5));
+        assertEquals(1, BotInventoryManager.clampTradePage(1, 9));
+        assertEquals(2, BotInventoryManager.clampTradePage(2, 10));
+        assertEquals(2, BotInventoryManager.clampTradePage(99, 10));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldSortOwnReservedEquipsByEquipmentScore() throws Exception {
+        Character bot = mock(Character.class);
+        when(bot.getJob()).thenReturn(Job.FIGHTER);
+
+        Equip highScore = mock(Equip.class);
+        when(highScore.getWatk()).thenReturn((short) 10);
+        when(highScore.getStr()).thenReturn((short) 5);
+        when(highScore.getDex()).thenReturn((short) 2);
+        when(highScore.getMatk()).thenReturn((short) 0);
+        when(highScore.getItemId()).thenReturn(1302000);
+        when(highScore.getPosition()).thenReturn((short) 3);
+
+        Equip lowScore = mock(Equip.class);
+        when(lowScore.getWatk()).thenReturn((short) 1);
+        when(lowScore.getStr()).thenReturn((short) 1);
+        when(lowScore.getDex()).thenReturn((short) 0);
+        when(lowScore.getMatk()).thenReturn((short) 0);
+        when(lowScore.getItemId()).thenReturn(1050000);
+        when(lowScore.getPosition()).thenReturn((short) 1);
+
+        Equip midScore = mock(Equip.class);
+        when(midScore.getWatk()).thenReturn((short) 3);
+        when(midScore.getStr()).thenReturn((short) 2);
+        when(midScore.getDex()).thenReturn((short) 1);
+        when(midScore.getMatk()).thenReturn((short) 0);
+        when(midScore.getItemId()).thenReturn(1070000);
+        when(midScore.getPosition()).thenReturn((short) 2);
+
+        Method sortEquipsByTradeScore = method(BotInventoryManager.class, "sortEquipsByTradeScore", List.class, Character.class);
+
+        List<Item> sorted = (List<Item>) sortEquipsByTradeScore.invoke(
+                null,
+                new java.util.ArrayList<>(List.of(highScore, lowScore, midScore)),
+                bot);
+
+        assertEquals(List.of(lowScore, midScore, highScore), sorted);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldSortJunkAndOtherReserveByItemId() throws Exception {
+        Equip highScoreLowId = mock(Equip.class);
+        when(highScoreLowId.getWatk()).thenReturn((short) 10);
+        when(highScoreLowId.getStr()).thenReturn((short) 5);
+        when(highScoreLowId.getDex()).thenReturn((short) 2);
+        when(highScoreLowId.getMatk()).thenReturn((short) 0);
+        when(highScoreLowId.getItemId()).thenReturn(1000000);
+        when(highScoreLowId.getPosition()).thenReturn((short) 3);
+
+        Equip lowScoreHighId = mock(Equip.class);
+        when(lowScoreHighId.getWatk()).thenReturn((short) 1);
+        when(lowScoreHighId.getStr()).thenReturn((short) 1);
+        when(lowScoreHighId.getDex()).thenReturn((short) 0);
+        when(lowScoreHighId.getMatk()).thenReturn((short) 0);
+        when(lowScoreHighId.getItemId()).thenReturn(1302000);
+        when(lowScoreHighId.getPosition()).thenReturn((short) 1);
+
+        Equip midId = mock(Equip.class);
+        when(midId.getWatk()).thenReturn((short) 3);
+        when(midId.getStr()).thenReturn((short) 2);
+        when(midId.getDex()).thenReturn((short) 1);
+        when(midId.getMatk()).thenReturn((short) 0);
+        when(midId.getItemId()).thenReturn(1070000);
+        when(midId.getPosition()).thenReturn((short) 2);
+
+        Method sortEquipsByItemId = method(BotInventoryManager.class, "sortEquipsByItemId", List.class);
+
+        List<Item> sorted = (List<Item>) sortEquipsByItemId.invoke(
+                null,
+                new java.util.ArrayList<>(List.of(lowScoreHighId, highScoreLowId, midId)));
+
+        assertEquals(List.of(highScoreLowId, midId, lowScoreHighId), sorted);
     }
 
     @Test
