@@ -18,11 +18,13 @@ import constants.skills.Bowmaster;
 import constants.skills.Buccaneer;
 import constants.skills.Cleric;
 import constants.skills.Corsair;
+import constants.skills.Crossbowman;
 import constants.skills.Crusader;
 import constants.skills.DawnWarrior;
 import constants.skills.DragonKnight;
 import constants.skills.Fighter;
 import constants.skills.GM;
+import constants.skills.Hermit;
 import constants.skills.Hunter;
 import constants.skills.Marksman;
 import constants.skills.NightWalker;
@@ -190,6 +192,25 @@ class BotCombatManager {
     private static final int CLIENT_PROJECTILE_NEAR_INSET = 5;
     private static final int CLIENT_PROJECTILE_TOP = 50;
     private static final int CLIENT_PROJECTILE_BOTTOM = 50;
+
+    // Pierce-line projectiles do NOT use the generic ±50 px vertical band: the actual
+    // client projectile sprite is much thinner (Iron Arrow) or much taller (Avenger)
+    // and the launch height sits at ~30 px above the character's feet.
+    //   yAbove = how far the projectile box extends above the bot's feet.
+    //   yBelow = how far it extends below (can be negative when the entire box is above
+    //            the feet, e.g. a thin Iron Arrow line at player.Y - 30).
+    // Values measured 2026-05-18 from monitored-packets-{ironarrow,avenger}-*.log
+    // (Bowgurl / admin) by binary-searching the mob-Y vs. player-feet-Y delta at which
+    // the client stopped including a mob in the per-attack mob list:
+    //   Iron Arrow: hit @ Δy=17, miss @ Δy=41  → reach ≈ 30 (~thin horizontal line)
+    //   Avenger:    hit @ Δy=56, miss @ Δy=65  → reach ≈ 60 (~±30 around launch line)
+    private record ProjectileVerticalReach(int yAbove, int yBelow) { }
+
+    private static final Map<Integer, ProjectileVerticalReach> PIERCE_LINE_PROJECTILE_REACH = Map.of(
+            Crossbowman.IRON_ARROW, new ProjectileVerticalReach(32, -28),
+            Hermit.AVENGER, new ProjectileVerticalReach(60, 0),
+            NightWalker.AVENGER, new ProjectileVerticalReach(60, 0)
+    );
     private static final List<Integer> PASSIVE_PROJECTILE_RANGE_SKILL_IDS = List.of(
             Archer.EYE_OF_AMAZON,
             Rogue.KEEN_EYES,
@@ -1304,7 +1325,7 @@ class BotCombatManager {
             return effect.calculateBoundingBox(anchor, facingLeft);
         }
 
-        return fallbackSkillHitBox(effect, bot, facingLeft, route);
+        return fallbackSkillHitBox(effect, bot, facingLeft, route, skillId);
     }
 
     static boolean isStrikePointAnchoredAoeSkill(int skillId) {
@@ -1328,7 +1349,7 @@ class BotCombatManager {
         return new Rectangle(left, top, horizontalRange, height);
     }
 
-    static Rectangle fallbackSkillHitBox(StatEffect effect, Character bot, boolean facingLeft, AttackRoute route) {
+    static Rectangle fallbackSkillHitBox(StatEffect effect, Character bot, boolean facingLeft, AttackRoute route, int skillId) {
         if (route == AttackRoute.CLOSE) {
             return fallbackCloseRangeSkillHitBox(effect, bot, facingLeft);
         }
@@ -1336,10 +1357,30 @@ class BotCombatManager {
             return null;
         }
 
+        ProjectileVerticalReach reach = PIERCE_LINE_PROJECTILE_REACH.get(skillId);
+        if (reach != null) {
+            return clientProjectileHitBox(bot, facingLeft, projectileRangeScale(effect),
+                    reach.yAbove(), reach.yBelow());
+        }
         return clientProjectileHitBox(bot, facingLeft, projectileRangeScale(effect));
     }
 
     static Rectangle clientProjectileHitBox(Character bot, boolean facingLeft, float horizontalScale) {
+        return clientProjectileHitBox(bot, facingLeft, horizontalScale,
+                CLIENT_PROJECTILE_TOP, CLIENT_PROJECTILE_BOTTOM);
+    }
+
+    // Vertical extents are signed offsets from the character feet (origin.y):
+    //   yAboveOrigin >  0 → box top is yAboveOrigin px above feet.
+    //   yBelowOrigin >  0 → box bottom is yBelowOrigin px below feet.
+    //   yBelowOrigin <  0 → box bottom is |yBelowOrigin| px above feet (used for thin
+    //                       pierce-line projectiles fired from mid-body).
+    // Empirically (see kb-pierce-line-projectile-vertical) the projectile launches from
+    // approximately player.Y - 30 (mid-body) and its vertical reach is the projectile
+    // sprite half-height. The bot derives this from per-skill measurements rather than
+    // the client's WZ projectile asset because we do not yet parse those.
+    static Rectangle clientProjectileHitBox(Character bot, boolean facingLeft, float horizontalScale,
+                                            int yAboveOrigin, int yBelowOrigin) {
         if (bot == null || bot.getPosition() == null) {
             return null;
         }
@@ -1349,8 +1390,9 @@ class BotCombatManager {
         int farEdge = Math.max(CLIENT_PROJECTILE_NEAR_INSET, Math.round(projectileRange * Math.max(0f, horizontalScale)));
         int left = facingLeft ? origin.x - farEdge : origin.x + CLIENT_PROJECTILE_NEAR_INSET;
         int right = facingLeft ? origin.x - CLIENT_PROJECTILE_NEAR_INSET : origin.x + farEdge;
-        return new Rectangle(left, origin.y - CLIENT_PROJECTILE_TOP, right - left,
-                CLIENT_PROJECTILE_TOP + CLIENT_PROJECTILE_BOTTOM);
+        int top = origin.y - yAboveOrigin;
+        int height = Math.max(1, yAboveOrigin + yBelowOrigin);
+        return new Rectangle(left, top, right - left, height);
     }
 
     static float projectileRangeScale(StatEffect effect) {

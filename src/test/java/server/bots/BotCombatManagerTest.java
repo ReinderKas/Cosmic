@@ -873,7 +873,7 @@ class BotCombatManagerTest {
         StatEffect effect = mock(StatEffect.class);
         when(effect.getRange()).thenReturn(0);
 
-        Rectangle hitBox = BotCombatManager.fallbackSkillHitBox(effect, bot, false, BotCombatManager.AttackRoute.RANGED);
+        Rectangle hitBox = BotCombatManager.fallbackSkillHitBox(effect, bot, false, BotCombatManager.AttackRoute.RANGED, 0);
 
         assertEquals(new Rectangle(105, 150, 395, 100), hitBox);
     }
@@ -885,7 +885,7 @@ class BotCombatManagerTest {
         StatEffect effect = mock(StatEffect.class);
         when(effect.getRange()).thenReturn(0);
 
-        Rectangle hitBox = BotCombatManager.fallbackSkillHitBox(effect, bot, true, BotCombatManager.AttackRoute.MAGIC);
+        Rectangle hitBox = BotCombatManager.fallbackSkillHitBox(effect, bot, true, BotCombatManager.AttackRoute.MAGIC, 0);
 
         assertEquals(new Rectangle(-300, 150, 395, 100), hitBox);
     }
@@ -897,9 +897,39 @@ class BotCombatManagerTest {
         StatEffect effect = mock(StatEffect.class);
         when(effect.getRange()).thenReturn(150);
 
-        Rectangle hitBox = BotCombatManager.fallbackSkillHitBox(effect, bot, false, BotCombatManager.AttackRoute.MAGIC);
+        Rectangle hitBox = BotCombatManager.fallbackSkillHitBox(effect, bot, false, BotCombatManager.AttackRoute.MAGIC, 0);
 
         assertEquals(new Rectangle(105, 150, 595, 100), hitBox);
+    }
+
+    @Test
+    void shouldUseTightVerticalReachForIronArrow() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mockBot(new Point(100, 200), map, 20_000, null);
+        StatEffect effect = mock(StatEffect.class);
+        when(effect.getRange()).thenReturn(0);
+
+        // Iron Arrow: yAbove=32, yBelow=-28 → rect from y=168 to y=172 (height 4)
+        Rectangle hitBox = BotCombatManager.fallbackSkillHitBox(effect, bot, false,
+                BotCombatManager.AttackRoute.RANGED, constants.skills.Crossbowman.IRON_ARROW);
+
+        assertEquals(168, hitBox.y);
+        assertEquals(4, hitBox.height);
+    }
+
+    @Test
+    void shouldUseWideVerticalReachForAvenger() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mockBot(new Point(100, 200), map, 20_000, null);
+        StatEffect effect = mock(StatEffect.class);
+        when(effect.getRange()).thenReturn(0);
+
+        // Avenger: yAbove=60, yBelow=0 → rect from y=140 to y=200 (height 60)
+        Rectangle hitBox = BotCombatManager.fallbackSkillHitBox(effect, bot, false,
+                BotCombatManager.AttackRoute.RANGED, constants.skills.Hermit.AVENGER);
+
+        assertEquals(140, hitBox.y);
+        assertEquals(60, hitBox.height);
     }
 
     @Test
