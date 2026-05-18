@@ -1027,6 +1027,9 @@ class BotCombatManager {
     }
 
     static boolean isTargetInAttackRange(AttackPlan attackPlan, Character bot, Monster target) {
+        if (attackPlan == null) {
+            return false;
+        }
         if (attackPlan.hasHitBox()) {
             return doesHitBoxIntersectMonster(attackPlan.hitBox, target);
         }
