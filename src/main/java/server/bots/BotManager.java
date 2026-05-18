@@ -2195,6 +2195,7 @@ public class BotManager {
                     // bot must still walk to the edge launch this tick.
                     if (attacked && !entry.inAir && crossRegionRetreatPos == null) return;
                 } else if (!entry.inAir
+                        && attackPlan != null
                         && BotCombatManager.isTargetJumpable(entry.movementProfile, attackPlan.isCloseRangeRoute(), botPos, tp)
                         && grindWeaponType != WeaponType.BOW && grindWeaponType != WeaponType.CROSSBOW
                         && grindWeaponType != WeaponType.WAND && grindWeaponType != WeaponType.STAFF) {
@@ -2339,6 +2340,7 @@ public class BotManager {
                         }
                         if (attacked && !entry.inAir && crossRegionRetreatPos == null) return;
                     } else if (!entry.inAir
+                            && attackPlan != null
                             && BotCombatManager.isTargetJumpable(entry.movementProfile, attackPlan.isCloseRangeRoute(), botPos, tp)
                             && grindWeaponType != WeaponType.BOW && grindWeaponType != WeaponType.CROSSBOW
                             && grindWeaponType != WeaponType.WAND && grindWeaponType != WeaponType.STAFF) {
