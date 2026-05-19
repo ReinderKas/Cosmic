@@ -192,7 +192,7 @@ Workflow when a user says "make the bot use skill X":
 2. **Read the WZ entry** at `wz/Skill.wz/<prefix>.img.xml`. Note: `weapon`, `lt`/`rb`, `mobCount`, `bulletCount`, `bulletConsume`, `range`, `mpCon`, `damage`. The presence/absence of `lt/rb` determines whether the skill has a custom bbox.
 3. **Check the build plan** in `server/bots/build/*Builds.java`. The bot must learn the skill at non-zero level or `recomputeAttackSkills` will skip it. Add it to the appropriate job tree if needed.
 4. **Verify `isActiveAttackSkill` accepts it.** It needs `damage > 0`, an MP/HP cost (or beginner-skill flag), and `skillType` not 1 or 3. If the skill costs no MP and isn't a beginner skill, it'll be filtered out — add it to a whitelist or remove from the build.
-5. **Check `determineSkillRoute`.** If it's a melee skill on a bow/crossbow/claw class, add it to `FORCED_CLOSE_RANGE_SKILL_IDS` (`BotAttackExecutionProvider`). If it's a non-projectile skill that uses the ranged packet on a melee class, add it to `isRangedSkill`.
+5. **Check `determineSkillRoute`.** If it's a melee skill on a bow/crossbow/claw class, add it to `FORCED_CLOSE_RANGE_SKILL_IDS` (`BotAttackExecutionProvider`). If it's a non-projectile skill that uses the ranged packet on a melee class, add it to `isRangedSkill`. **Critical:** any skill in `FORCED_CLOSE_RANGE_SKILL_IDS` will auto-sample its action from the **degenerate** close-range spec — required so the 0xBA broadcast carries a swing body-action id and doesn't crash watching clients. Confirm the degenerate spec actually has swing actions for that weapon type before adding.
 6. **Check the hitbox path.** If `lt/rb` is missing, `fallbackSkillHitBox` runs. If you measure (see **Sampling packets** below) that the skill has a tighter/wider projectile sprite than the default 400×100, add a per-skill entry to `PIERCE_LINE_PROJECTILE_REACH`.
 7. **Add `canUseAttackSkillWithWeapon` cases** if the skill is restricted to a specific weapon subtype (spear/polearm pattern).
 8. **Add tests** in `BotCombatManagerTest` mirroring an existing skill of the same family.
@@ -239,6 +239,8 @@ To find a Y-reach / X-reach / damage threshold, capture hit packets at small pos
 6. **Real-player packet opcodes for melee vs ranged are different** — Power Knockback uses `0x2C` even though the bow is equipped. Don't infer the route from weapon alone; check the actual incoming opcode when reverse-engineering.
 7. **Strike-point hitbox is NOT a reach gate** — it's the AoE radius. Bots fired Arrow Bomb at mobs hundreds of pixels out of weapon range until we added the basic-weapon reach gate.
 8. **Bots don't own mob movement** — `MOVE_LIFE (0xBC)` for knockback or natural mob motion is the real player's broadcast. Don't add a bot path for it without a deliberate plan.
+9. **Direction byte must match the broadcast opcode — wrong combo crashes watching clients.** For a skill in `FORCED_CLOSE_RANGE_SKILL_IDS` (Power Knockback today), the 0xBA broadcast's `direction` byte must be a **swing** body-action id, NOT a ranged shoot id. `resolveSkillAttackAction` therefore samples from the **degenerate** close-range spec (`getBasicAttackSpec(weaponType, true)`) for those skills — the same spec a bow uses when point-blank. Sampling the ranged spec landed `shoot1`/`shoot2` action ids in a melee broadcast and crashed observing v83 clients mid-grind (fix `c3615a966`).
+10. **Target selection used to be AoE-blind.** `findGrindTarget` / `findFollowAttackTarget` scored by distance only, so a close lone mob beat a slightly-farther AoE-clearable cluster even with an AoE skill equipped. `grindTargetScore` now subtracts `aoeClusterBonus(entry, target, candidates)` — per-mob bonus (200) for each other live mob within `AOE_CLUSTER_RADIUS_PX (150)`, capped at `aoeSkillMobs - 1`. Heuristic, not per-anchor plan enumeration — see `kb-bot-aoe-cluster-target-bias` for trade-offs.
 
 ## Test before/after every combat edit
 
@@ -252,6 +254,6 @@ Then check `tmp\mvntest.log` for `Tests run:` and `BUILD SUCCESS / FAILURE` line
 
 ## Where authoritative knowledge lives outside this skill
 
-- Memory: `kb_bot_attack_planning_flow`, `kb_v83_client_combat_internals`, `kb_power_knockback_packet_structure`, `kb_shadow_partner_and_pierce_skills`, `kb_bot_navigation_architecture`, `kb_bot_cleric_heal_architecture`, `kb_bot_alert_stance_emulation`.
+- Memory: `kb_bot_attack_planning_flow`, `kb_v83_client_combat_internals`, `kb_power_knockback_packet_structure`, `kb_shadow_partner_and_pierce_skills`, `kb_bot_aoe_cluster_target_bias`, `kb_bot_navigation_architecture`, `kb_bot_cleric_heal_architecture`, `kb_bot_alert_stance_emulation`.
 - `D:\ReverseEngineer\` — IDB disassembly toolkit for verifying client-side facts. See `reference_reverse_engineering_toolkit`.
 - `CLAUDE.md` at the project root — general behavioral guidelines (simplicity, surgical edits, push back when warranted).
