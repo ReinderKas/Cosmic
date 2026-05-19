@@ -6,6 +6,7 @@
 
 var status;
 var listText;
+var isSelection;
 
 function start() {
     status = -1;
@@ -27,15 +28,32 @@ function action(mode, type, selection) {
             cm.dispose();
             return;
         }
-        cm.sendSimple(listText);
-    } else if (status === 1) {
-        var itemId = selection;
-        if (itemId > 0) {
-            cm.gainItem(itemId, 1);
-            cm.sendOk("You received #v" + itemId + "# #b#z" + itemId + "##k.");
+
+        isSelection = listText.indexOf("#L") >= 0;
+        if (isSelection) {
+            cm.sendSimple(listText);
         } else {
-            cm.dispose();
+            cm.sendNext(listText);
         }
+    } else if (status === 1) {
+        if (isSelection) {
+            var itemId = selection;
+            if (itemId > 0) {
+                cm.gainItem(itemId, 1);
+                cm.sendOk("You received #v" + itemId + "# #b#z" + itemId + "##k.");
+                return;
+            }
+
+            cm.dispose();
+            return;
+        }
+
+        var NPCScriptManager = Java.type("scripting.npc.NPCScriptManager");
+        var client = cm.getClient();
+
+        NPCScriptManager.getInstance().dispose(cm);
+        client.removeClickedNPC();
+        NPCScriptManager.getInstance().start(client, cm.getNpc(), cm.getPlayer());
     } else {
         cm.dispose();
     }
