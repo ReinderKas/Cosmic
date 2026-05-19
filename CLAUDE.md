@@ -2,6 +2,10 @@
 
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
+## Project skills (read before editing the relevant area)
+
+- `.claude/skills/bot-combat/SKILL.md` — bot attack pipeline, packet shapes (`0xBA`/`0xBB`/`0xBC`), `AttackRoute` selection, hitbox model, ammo/Shadow Partner gates, and the checklist for adding new bot attack skills. Read this before touching `server.bots.*` combat code or debugging bot attack packets.
+
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
 ## 1. Think Before Coding
