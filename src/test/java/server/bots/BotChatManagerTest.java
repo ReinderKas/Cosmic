@@ -115,6 +115,14 @@ class BotChatManagerTest {
     }
 
     @Test
+    void shouldParseReservedEquipTradesWithOptionalPage() {
+        assertEquals("equips:reserved:1", BotChatManager.matchTradeCategory("trade reserve"));
+        assertEquals("equips:reserved:1", BotChatManager.matchTradeCategory("trade reserved"));
+        assertEquals("equips:reserved:3", BotChatManager.matchTradeCategory("trade reserve 3"));
+        assertEquals("equips:reserved:12", BotChatManager.matchTradeCategory("trade me your reserve 12"));
+    }
+
+    @Test
     void shouldParseTrashGearTrades() {
         assertEquals("trash", BotChatManager.matchTradeCategory("trade trash"));
         assertEquals("trash", BotChatManager.matchTradeCategory("trade my trash"));

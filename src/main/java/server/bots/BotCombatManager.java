@@ -18,11 +18,13 @@ import constants.skills.Bowmaster;
 import constants.skills.Buccaneer;
 import constants.skills.Cleric;
 import constants.skills.Corsair;
+import constants.skills.Crossbowman;
 import constants.skills.Crusader;
 import constants.skills.DawnWarrior;
 import constants.skills.DragonKnight;
 import constants.skills.Fighter;
 import constants.skills.GM;
+import constants.skills.Hermit;
 import constants.skills.Hunter;
 import constants.skills.Marksman;
 import constants.skills.NightWalker;
@@ -190,6 +192,25 @@ class BotCombatManager {
     private static final int CLIENT_PROJECTILE_NEAR_INSET = 5;
     private static final int CLIENT_PROJECTILE_TOP = 50;
     private static final int CLIENT_PROJECTILE_BOTTOM = 50;
+
+    // Pierce-line projectiles do NOT use the generic ±50 px vertical band: the actual
+    // client projectile sprite is much thinner (Iron Arrow) or much taller (Avenger)
+    // and the launch height sits at ~30 px above the character's feet.
+    //   yAbove = how far the projectile box extends above the bot's feet.
+    //   yBelow = how far it extends below (can be negative when the entire box is above
+    //            the feet, e.g. a thin Iron Arrow line at player.Y - 30).
+    // Values measured 2026-05-18 from monitored-packets-{ironarrow,avenger}-*.log
+    // (Bowgurl / admin) by binary-searching the mob-Y vs. player-feet-Y delta at which
+    // the client stopped including a mob in the per-attack mob list:
+    //   Iron Arrow: hit @ Δy=17, miss @ Δy=41  → reach ≈ 30 (~thin horizontal line)
+    //   Avenger:    hit @ Δy=56, miss @ Δy=65  → reach ≈ 60 (~±30 around launch line)
+    private record ProjectileVerticalReach(int yAbove, int yBelow) { }
+
+    private static final Map<Integer, ProjectileVerticalReach> PIERCE_LINE_PROJECTILE_REACH = Map.of(
+            Crossbowman.IRON_ARROW, new ProjectileVerticalReach(32, -28),
+            Hermit.AVENGER, new ProjectileVerticalReach(60, 0),
+            NightWalker.AVENGER, new ProjectileVerticalReach(60, 0)
+    );
     private static final List<Integer> PASSIVE_PROJECTILE_RANGE_SKILL_IDS = List.of(
             Archer.EYE_OF_AMAZON,
             Rogue.KEEN_EYES,
@@ -467,7 +488,7 @@ class BotCombatManager {
             if (isActiveAttackSkill(skill, fx)) {
                 entry.attackSkillIds.add(skill.getId());
                 if (mobs >= 2) {
-                    long score = (long) Math.max(0, fx.getDamage()) * Math.max(1, atk) * Math.max(1, mobs);
+                    long score = (long) Math.max(0, fx.getDamagePercent()) * Math.max(1, atk) * Math.max(1, mobs);
                     if (score > bestAoeScore) {
                         bestAoeScore = score;
                         entry.aoeSkillId = skill.getId();
@@ -548,7 +569,7 @@ class BotCombatManager {
             return priority > bestPriority;
         }
 
-        int damage = effect != null ? effect.getDamage() : 0;
+        int damage = effect != null ? effect.getDamagePercent() : 0;
         int score = damage * attackCount;
         int bestScore = bestDamage * bestAttackCount;
         if (score != bestScore) {
@@ -845,7 +866,8 @@ class BotCombatManager {
                         && !isImmediateProjectileTarget(entry, bot, candidate)) {
                     continue;
                 }
-                long localScore = grindTargetScore(bot, botPos, botFoothold, candidate);
+                long localScore = grindTargetScore(bot, botPos, botFoothold, candidate)
+                        - aoeClusterBonus(entry, candidate, candidates);
                 localTargets.add(new ScoredGrindTarget(candidate, localScore, localScore,
                         candidate.getPosition().distanceSq(botPos)));
             }
@@ -882,7 +904,10 @@ class BotCombatManager {
                 }
             }
 
-            candidates.add(planBasicAttack(bot, target));
+            AttackPlan basicAttack = planBasicAttack(bot, target);
+            if (basicAttack != null) {
+                candidates.add(basicAttack);
+            }
             return selectBestAttackPlan(bot, candidates);
         } finally {
             BotPerformanceMonitor.record("combat-plan", System.nanoTime() - startedAt);
@@ -910,10 +935,40 @@ class BotCombatManager {
         if (effective != target) {
             basicAttackData = buildBasicAttackData(bot, effective);
         }
-        return new AttackPlan(0, 0, 1, basicAttackData.hitBox(), List.of(effective), basicAttackData.route(),
+        if (!doesHitBoxIntersectMonster(basicAttackData.hitBox(), effective)) {
+            // Original facing is dry. Try the opposite facing: resolveEffectivePrimary only
+            // scans the forward hemisphere, so a closer mob on the other side would have
+            // been ignored. If one exists, pivot to it.
+            Monster pivoted = findReachableOnOppositeFacing(bot, target);
+            if (pivoted == null) {
+                return null;
+            }
+            basicAttackData = buildBasicAttackData(bot, pivoted);
+            effective = pivoted;
+        }
+        int numDamage = shadowPartnerHitMultiplier(bot, basicAttackData.route());
+        return new AttackPlan(0, 0, numDamage, basicAttackData.hitBox(), List.of(effective), basicAttackData.route(),
                 basicAttackData.display(), basicAttackData.direction(), basicAttackData.rangedDirection(), basicAttackData.stance(),
                 basicAttackData.speed(), basicAttackData.hitDelayMs(), basicAttackData.cooldownMs(),
                 damageWeaponTypeForAction(0, BotAttackExecutionProvider.getEquippedWeaponType(bot), basicAttackData.action()));
+    }
+
+    private static Monster findReachableOnOppositeFacing(Character bot, Monster originalTarget) {
+        if (bot == null || originalTarget == null
+                || bot.getPosition() == null || originalTarget.getPosition() == null) {
+            return null;
+        }
+        Point botPos = bot.getPosition();
+        Point mirroredPos = new Point(2 * botPos.x - originalTarget.getPosition().x,
+                originalTarget.getPosition().y);
+        BotAttackExecutionProvider.BasicAttackData oppositeData =
+                BotAttackExecutionProvider.buildBasicAttackData(bot, mirroredPos);
+        Rectangle oppositeHitBox = oppositeData.hitBox();
+        if (oppositeHitBox == null) {
+            return null;
+        }
+        Monster mirrored = resolveEffectivePrimary(bot, originalTarget, oppositeHitBox);
+        return mirrored != originalTarget ? mirrored : null;
     }
 
     private static AttackPlan selectBestAttackPlan(Character bot, List<AttackPlan> candidates) {
@@ -995,6 +1050,9 @@ class BotCombatManager {
     }
 
     static boolean isTargetInAttackRange(AttackPlan attackPlan, Character bot, Monster target) {
+        if (attackPlan == null) {
+            return false;
+        }
         if (attackPlan.hasHitBox()) {
             return doesHitBoxIntersectMonster(attackPlan.hitBox, target);
         }
@@ -1138,6 +1196,18 @@ class BotCombatManager {
             return null;
         }
         AttackRoute route = BotAttackExecutionProvider.determineSkillRoute(bot, skillId);
+        // Ammo gate: ranged skills with bulletCount need that many arrows/stars/bullets in
+        // the bot's USE inventory. canPaySkillCost only covers MP/HP. countAmmo returns
+        // MAX_VALUE for non-ammo weapons and while Soul Arrow / Shadow Claw are active.
+        // Avenger / Iron Arrow set bulletConsume (e.g. 3 for Avenger) for ammo cost without
+        // changing the visible projectile count, so use the larger of the two. Shadow
+        // Partner doubles the actual consume (see RangedAttackHandler.bulletConsume *= 2).
+        int ammoCost = Math.max(effect.getBulletCount(), effect.getBulletConsume())
+                * shadowPartnerHitMultiplier(bot, route);
+        if (ammoCost > 0 && route == AttackRoute.RANGED
+                && countAmmo(bot, weaponType) < ammoCost) {
+            return null;
+        }
         if (isStrikePointAnchoredAoeSkill(skillId)) {
             primaryTarget = resolveStrikePointPrimaryByBasicWeapon(bot, primaryTarget, route);
         }
@@ -1158,7 +1228,7 @@ class BotCombatManager {
             return null;
         }
 
-        int attackCount = effectiveHitCount(effect);
+        int attackCount = effectiveHitCount(effect) * shadowPartnerHitMultiplier(bot, route);
         if (!BotAttackExecutionProvider.canUseRangedAttackRoute(route, weaponType, bot.getPosition(), primaryTarget.getPosition())) {
             return null;
         }
@@ -1256,16 +1326,19 @@ class BotCombatManager {
             return effect.calculateBoundingBox(anchor, facingLeft);
         }
 
-        return fallbackSkillHitBox(effect, bot, facingLeft, route);
+        return fallbackSkillHitBox(effect, bot, facingLeft, route, skillId);
     }
 
     static boolean isStrikePointAnchoredAoeSkill(int skillId) {
         return STRIKE_POINT_ANCHORED_AOE_SKILL_IDS.contains(skillId);
     }
 
+    // Caller (fallbackSkillHitBox) already gates on route == CLOSE; we no longer require
+    // the bot's basic route to be CLOSE so bow/crossbow Power Knockback (a melee swing on
+    // the client) gets the proper rectangular reach instead of falling through to the
+    // 400 px ranged projectile box.
     static Rectangle fallbackCloseRangeSkillHitBox(StatEffect effect, Character bot, boolean facingLeft) {
-        if (effect == null || bot == null
-                || BotAttackExecutionProvider.determineBasicAttackRoute(bot) != AttackRoute.CLOSE) {
+        if (effect == null || bot == null) {
             return null;
         }
 
@@ -1277,7 +1350,7 @@ class BotCombatManager {
         return new Rectangle(left, top, horizontalRange, height);
     }
 
-    static Rectangle fallbackSkillHitBox(StatEffect effect, Character bot, boolean facingLeft, AttackRoute route) {
+    static Rectangle fallbackSkillHitBox(StatEffect effect, Character bot, boolean facingLeft, AttackRoute route, int skillId) {
         if (route == AttackRoute.CLOSE) {
             return fallbackCloseRangeSkillHitBox(effect, bot, facingLeft);
         }
@@ -1285,10 +1358,30 @@ class BotCombatManager {
             return null;
         }
 
+        ProjectileVerticalReach reach = PIERCE_LINE_PROJECTILE_REACH.get(skillId);
+        if (reach != null) {
+            return clientProjectileHitBox(bot, facingLeft, projectileRangeScale(effect),
+                    reach.yAbove(), reach.yBelow());
+        }
         return clientProjectileHitBox(bot, facingLeft, projectileRangeScale(effect));
     }
 
     static Rectangle clientProjectileHitBox(Character bot, boolean facingLeft, float horizontalScale) {
+        return clientProjectileHitBox(bot, facingLeft, horizontalScale,
+                CLIENT_PROJECTILE_TOP, CLIENT_PROJECTILE_BOTTOM);
+    }
+
+    // Vertical extents are signed offsets from the character feet (origin.y):
+    //   yAboveOrigin >  0 → box top is yAboveOrigin px above feet.
+    //   yBelowOrigin >  0 → box bottom is yBelowOrigin px below feet.
+    //   yBelowOrigin <  0 → box bottom is |yBelowOrigin| px above feet (used for thin
+    //                       pierce-line projectiles fired from mid-body).
+    // Empirically (see kb-pierce-line-projectile-vertical) the projectile launches from
+    // approximately player.Y - 30 (mid-body) and its vertical reach is the projectile
+    // sprite half-height. The bot derives this from per-skill measurements rather than
+    // the client's WZ projectile asset because we do not yet parse those.
+    static Rectangle clientProjectileHitBox(Character bot, boolean facingLeft, float horizontalScale,
+                                            int yAboveOrigin, int yBelowOrigin) {
         if (bot == null || bot.getPosition() == null) {
             return null;
         }
@@ -1298,8 +1391,9 @@ class BotCombatManager {
         int farEdge = Math.max(CLIENT_PROJECTILE_NEAR_INSET, Math.round(projectileRange * Math.max(0f, horizontalScale)));
         int left = facingLeft ? origin.x - farEdge : origin.x + CLIENT_PROJECTILE_NEAR_INSET;
         int right = facingLeft ? origin.x - CLIENT_PROJECTILE_NEAR_INSET : origin.x + farEdge;
-        return new Rectangle(left, origin.y - CLIENT_PROJECTILE_TOP, right - left,
-                CLIENT_PROJECTILE_TOP + CLIENT_PROJECTILE_BOTTOM);
+        int top = origin.y - yAboveOrigin;
+        int height = Math.max(1, yAboveOrigin + yBelowOrigin);
+        return new Rectangle(left, top, right - left, height);
     }
 
     static float projectileRangeScale(StatEffect effect) {
@@ -1390,6 +1484,22 @@ class BotCombatManager {
         return Math.max(1, Math.max(effect.getAttackCount(), effect.getBulletCount()));
     }
 
+    // Shadow Partner (Hermit / NightWalker / DualBlade book) doubles the per-mob damage
+    // line count for ranged attacks: the client packs `numDamage * 2` into
+    // numAttackedAndDamage and the second half of each mob's lines are rolled at half
+    // damage. The server validates this in AbstractDealDamageHandler (`maxattack * 2`
+    // autoban headroom) and RangedAttackHandler (`bulletConsume * 2`). Bots inherit the
+    // multiplier automatically once the buff lands on them (future admin command).
+    // Melee and magic routes are left untouched here — Shadow Partner's melee/magic
+    // doubling for thief skills (e.g. Triple Throw is ranged-claw, so it covers itself)
+    // can be enabled per-skill later if needed.
+    private static int shadowPartnerHitMultiplier(Character bot, AttackRoute route) {
+        if (route != AttackRoute.RANGED || bot == null) {
+            return 1;
+        }
+        return bot.getBuffEffect(BuffStat.SHADOWPARTNER) != null ? 2 : 1;
+    }
+
     /**
      * True iff the AoE skill's expected total damage (damage% × hits × targets) beats
      * the bot's best single-target option (best of configured attack skill or basic 100%).
@@ -1420,27 +1530,11 @@ class BotCombatManager {
                                                              Foothold botFoothold,
                                                              List<Monster> candidates) {
         GrindGraphContext graphContext = GrindGraphContext.resolve(entry, bot, botPos);
-        List<ScoredGrindTarget> currentRegionTargets = new ArrayList<>();
-        for (Monster candidate : candidates) {
-            if (!isLocalCombatTarget(graphContext, bot, botFoothold, candidate)
-                    && !isImmediateProjectileTarget(entry, bot, candidate)) {
-                continue;
-            }
-            int targetRegionId = graphContext.available()
-                    ? BotNavigationManager.resolveTargetRegionId(graphContext.graph(), entry, graphContext.map(), candidate.getPosition())
-                    : -1;
-            long localScore = grindTargetScore(bot, botPos, botFoothold, candidate)
-                    + grindRegionOccupancyPenalty(graphContext, bot, targetRegionId);
-            currentRegionTargets.add(new ScoredGrindTarget(candidate, localScore, localScore,
-                    candidate.getPosition().distanceSq(botPos)));
-        }
-        if (!currentRegionTargets.isEmpty()) {
-            return currentRegionTargets;
+        if (!graphContext.available()) {
+            return scoreLocalTargets(entry, bot, botPos, botFoothold, candidates);
         }
 
-        return graphContext.available()
-                ? scoreTargetRegions(graphContext, bot, botPos, botFoothold, candidates)
-                : scoreLocalTargets(bot, botPos, botFoothold, candidates);
+        return scoreTargetRegions(entry, graphContext, bot, botPos, botFoothold, candidates);
     }
 
     private static List<Monster> aliveMonstersInRange(Character bot, Point botPos, double rangeSq) {
@@ -1521,20 +1615,23 @@ class BotCombatManager {
         return BotAttackExecutionProvider.canUseRangedAttackRoute(route, weaponType, bot.getPosition(), target.getPosition());
     }
 
-    private static List<ScoredGrindTarget> scoreLocalTargets(Character bot,
+    private static List<ScoredGrindTarget> scoreLocalTargets(BotEntry entry,
+                                                             Character bot,
                                                              Point botPos,
                                                              Foothold botFoothold,
                                                              List<Monster> candidates) {
         List<ScoredGrindTarget> scoredTargets = new ArrayList<>(candidates.size());
         for (Monster candidate : candidates) {
-            long localScore = grindTargetScore(bot, botPos, botFoothold, candidate);
+            long localScore = grindTargetScore(bot, botPos, botFoothold, candidate)
+                    - aoeClusterBonus(entry, candidate, candidates);
             scoredTargets.add(new ScoredGrindTarget(candidate, localScore, localScore,
                     candidate.getPosition().distanceSq(botPos)));
         }
         return scoredTargets;
     }
 
-    private static List<ScoredGrindTarget> scoreTargetRegions(GrindGraphContext context,
+    private static List<ScoredGrindTarget> scoreTargetRegions(BotEntry entry,
+                                                              GrindGraphContext context,
                                                               Character bot,
                                                               Point botPos,
                                                               Foothold botFoothold,
@@ -1548,7 +1645,8 @@ class BotCombatManager {
                 continue;
             }
 
-            long localScore = grindTargetScore(bot, botPos, botFoothold, candidate);
+            long localScore = grindTargetScore(bot, botPos, botFoothold, candidate)
+                    - aoeClusterBonus(entry, candidate, candidates);
             GrindTargetGroup group = groupsByRegionId.computeIfAbsent(targetRegionId, GrindTargetGroup::new);
             group.add(candidate, localScore, targetPos.distanceSq(botPos));
         }
@@ -1644,6 +1742,49 @@ class BotCombatManager {
             score += 1200L;
         }
         return score;
+    }
+
+    // Cluster-density bonus: when the bot has an AoE skill, bias target selection toward
+    // mobs that anchor a cluster. The single-skill DPS scorer already prefers AoE plans
+    // over basic ones on the same target (selectBestAttackPlan), but it never sees the
+    // alternative cluster if target selection passed it over for a closer/lone mob.
+    //
+    // Returns a non-negative bonus that is subtracted from the candidate's localScore
+    // (lower score wins). Capped by the AoE skill's mobCount-1 so a 6-mob skill on a
+    // pile of 10 mobs doesn't crater scores past the natural distance/foothold penalties.
+    static final int AOE_CLUSTER_RADIUS_PX = 150;
+    static final long AOE_CLUSTER_BONUS_PER_MOB = 200L;
+
+    private static long aoeClusterBonus(BotEntry entry, Monster target, List<Monster> candidates) {
+        if (entry == null || entry.aoeSkillId == 0 || entry.aoeSkillMobs <= 1
+                || target == null || candidates == null || candidates.isEmpty()) {
+            return 0L;
+        }
+        Point tp = target.getPosition();
+        if (tp == null) {
+            return 0L;
+        }
+        long radiusSq = (long) AOE_CLUSTER_RADIUS_PX * AOE_CLUSTER_RADIUS_PX;
+        int cap = entry.aoeSkillMobs - 1;
+        int neighbors = 0;
+        for (Monster other : candidates) {
+            if (other == target || other == null || !other.isAlive()) {
+                continue;
+            }
+            Point op = other.getPosition();
+            if (op == null) {
+                continue;
+            }
+            long dx = (long) op.x - tp.x;
+            long dy = (long) op.y - tp.y;
+            if (dx * dx + dy * dy <= radiusSq) {
+                neighbors++;
+                if (neighbors >= cap) {
+                    break;
+                }
+            }
+        }
+        return neighbors * AOE_CLUSTER_BONUS_PER_MOB;
     }
 
     private static long grindRegionOccupancyPenalty(GrindGraphContext context, Character bot, int targetRegionId) {
@@ -1826,19 +1967,11 @@ class BotCombatManager {
         if (bot == null || target == null || bot.getPosition() == null || target.getPosition() == null) {
             return false;
         }
-        boolean facingLeft = target.getPosition().x < bot.getPosition().x;
-        Rectangle basicReach;
-        if (route == AttackRoute.RANGED) {
-            basicReach = clientProjectileHitBox(bot, facingLeft, 1.0f);
-        } else if (route == AttackRoute.CLOSE) {
-            Point origin = bot.getPosition();
-            int left = facingLeft ? origin.x - cfg.ATTACK_RANGE_X : origin.x;
-            int top = origin.y - cfg.ATTACK_RANGE_Y;
-            int height = cfg.ATTACK_RANGE_Y + cfg.ATTACK_DOWN_MAX;
-            basicReach = new Rectangle(left, top, cfg.ATTACK_RANGE_X, height);
-        } else {
+        if (route != AttackRoute.RANGED && route != AttackRoute.CLOSE) {
             return true;
         }
+        boolean facingLeft = target.getPosition().x < bot.getPosition().x;
+        Rectangle basicReach = basicWeaponReachRect(bot, facingLeft, route);
         return basicReach != null && doesHitBoxIntersectMonster(basicReach, target);
     }
 
@@ -1846,21 +1979,37 @@ class BotCombatManager {
         if (bot == null || fallback == null || bot.getPosition() == null || fallback.getPosition() == null) {
             return fallback;
         }
-
+        if (route != AttackRoute.RANGED && route != AttackRoute.CLOSE) {
+            return fallback;
+        }
         boolean facingLeft = fallback.getPosition().x < bot.getPosition().x;
-        Rectangle basicReach;
+        Rectangle basicReach = basicWeaponReachRect(bot, facingLeft, route);
+        if (basicReach == null) {
+            return fallback;
+        }
+        return resolveEffectivePrimary(bot, fallback, basicReach);
+    }
+
+    /**
+     * Rect the bot's *basic* (un-skilled) weapon attack would cover for the given facing/route.
+     * RANGED -> projectile reach (400 px + passive bonuses); CLOSE -> ATTACK_RANGE_X/Y/DOWN_MAX
+     * around bot origin. Returns null for routes with no rect-based reach (e.g. MAGIC).
+     */
+    private static Rectangle basicWeaponReachRect(Character bot, boolean facingLeft, AttackRoute route) {
+        if (bot == null || bot.getPosition() == null) {
+            return null;
+        }
         if (route == AttackRoute.RANGED) {
-            basicReach = clientProjectileHitBox(bot, facingLeft, 1.0f);
-        } else if (route == AttackRoute.CLOSE) {
+            return clientProjectileHitBox(bot, facingLeft, 1.0f);
+        }
+        if (route == AttackRoute.CLOSE) {
             Point origin = bot.getPosition();
             int left = facingLeft ? origin.x - cfg.ATTACK_RANGE_X : origin.x;
             int top = origin.y - cfg.ATTACK_RANGE_Y;
             int height = cfg.ATTACK_RANGE_Y + cfg.ATTACK_DOWN_MAX;
-            basicReach = new Rectangle(left, top, cfg.ATTACK_RANGE_X, height);
-        } else {
-            return fallback;
+            return new Rectangle(left, top, cfg.ATTACK_RANGE_X, height);
         }
-        return resolveEffectivePrimary(bot, fallback, basicReach);
+        return null;
     }
 
     private static boolean isForwardProjectileHitBox(Rectangle hitBox, Point botPos) {
@@ -2306,7 +2455,7 @@ class BotCombatManager {
         if (NON_DAMAGE_ACTIVE_SKILL_IDS.contains(skill.getId())) {
             return false;
         }
-        if (effect.isOverTime() || effect.getDamage() <= 0) {
+        if (effect.isOverTime() || !declaresOffense(effect)) {
             return false;
         }
         if (skill.getSkillType() == 1 || skill.getSkillType() == 3) {
@@ -2315,6 +2464,20 @@ class BotCombatManager {
         // v83 attack skills often omit a top-level action node; passive damage carriers do not
         // carry a client-paid cost. Use WZ skillType for explicit passives and cost as the fallback.
         return effect.getMpCon() > 0 || effect.getHpCon() > 0 || skill.isBeginnerSkill();
+    }
+
+    // Identifies skills the WZ source declares as offensive. Three WZ shapes cover every
+    // attack skill we know of in v83; combined with isOverTime() this rejects utility skills
+    // (Teleport, Magic Guard, Haste) that would otherwise pass numeric checks because the
+    // StatEffect loader defaults "damage" to 100 and "mad" to 0 when those keys are absent.
+    //   1. "damage" key present  → physical attack skill (Power Strike, Strafe, Iron Arrow).
+    //   2. "mad" key present     → magic attack skill (Magic Claw, Cold Beam, Thunder Bolt).
+    //   3. mobCount > 1 + bbox   → bomb/explosion skill that derives damage from "x" instead
+    //                              of "damage" (Hunter.ARROW_BOMB and similar).
+    private static boolean declaresOffense(StatEffect effect) {
+        return effect.hasDamage()
+                || effect.hasMatk()
+                || (effect.getMobCount() > 1 && effect.hasBoundingBox());
     }
 
     private static boolean isActiveSupportSkill(Skill skill, StatEffect effect) {

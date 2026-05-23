@@ -6,6 +6,8 @@ import client.Skill;
 import client.inventory.InventoryType;
 import client.inventory.Item;
 import client.inventory.WeaponType;
+import constants.skills.Crossbowman;
+import constants.skills.Hunter;
 import net.server.channel.handlers.AbstractDealDamageHandler;
 import net.server.channel.handlers.CloseRangeDamageHandler;
 import net.server.channel.handlers.MagicDamageHandler;
@@ -16,6 +18,7 @@ import server.bots.combat.BotAttackTiming;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 final class BotAttackExecutionProvider {
@@ -202,7 +205,31 @@ final class BotAttackExecutionProvider {
                 return skillAction;
             }
         }
+        // Bow/crossbow skills that broadcast as melee (Power Knockback) must sample from
+        // the degenerate (close-range swing) action set, not the bow's "shoot1/2" ranged
+        // actions. A real player firing PK animates a melee swing — sending a ranged
+        // shoot action id in a 0xBA close-range broadcast can crash watching v83 clients.
+        if (skill != null && FORCED_CLOSE_RANGE_SKILL_IDS.contains(skill.getId())) {
+            return sampleDegenerateCloseRangeAction(bot, weaponType);
+        }
         return sampleWeaponAttackAction(bot, weaponType);
+    }
+
+    private static String sampleDegenerateCloseRangeAction(Character bot, WeaponType weaponType) {
+        BotAttackDataProvider provider = BotAttackDataProvider.getInstance();
+        Item weapon = bot != null ? bot.getInventory(InventoryType.EQUIPPED).getItem((short) -11) : null;
+        if (weapon != null) {
+            BotAttackDataProvider.NormalAttackProfile attackProfile =
+                    provider.getNormalAttackProfile(weapon.getItemId());
+            if (attackProfile != null) {
+                BotAttackDataProvider.AttackAnimationSpec attackSpec =
+                        provider.getBasicAttackSpec(attackProfile.getAttack(), weaponType, true);
+                return sampleAttackAction(resolveAttackActions(attackSpec, attackProfile.getSourceActions()),
+                        attackSpec.primaryAction());
+            }
+        }
+        BotAttackDataProvider.AttackAnimationSpec attackSpec = provider.getBasicAttackSpec(weaponType, true);
+        return sampleAttackAction(attackSpec.actions(), attackSpec.primaryAction());
     }
 
     static void applyAttackRoute(BotCombatManager.AttackRoute route, AbstractDealDamageHandler.AttackInfo attack, Character bot) {
@@ -221,7 +248,20 @@ final class BotAttackExecutionProvider {
         return route != BotCombatManager.AttackRoute.RANGED || !shouldDegenerateRangedAttack(weaponType, botPos, targetPos);
     }
 
+    // Skills the bow/crossbow classes cast as a melee swing on the client (opcode 0x2C,
+    // broadcast via CLOSE_RANGE_ATTACK 0xBA) even though the equipped weapon is ranged.
+    // Power Knockback fires no projectile and uses skill.range as the close-range reach
+    // (e.g. 130 px at level 20). Treat them as CLOSE so reach gating and packet route match
+    // the v83 client.
+    private static final Set<Integer> FORCED_CLOSE_RANGE_SKILL_IDS = Set.of(
+            Hunter.POWER_KNOCKBACK,
+            Crossbowman.POWER_KNOCKBACK
+    );
+
     static BotCombatManager.AttackRoute determineSkillRoute(Character bot, int skillId) {
+        if (FORCED_CLOSE_RANGE_SKILL_IDS.contains(skillId)) {
+            return BotCombatManager.AttackRoute.CLOSE;
+        }
         if (isRangedSkill(skillId)) {
             return BotCombatManager.AttackRoute.RANGED;
         }

@@ -424,6 +424,53 @@ class BotCombatManagerTest {
         assertTrue(entry.buffSkillIds.contains(DragonKnight.DRAGON_BLOOD));
     }
 
+    // Regression: Teleport's WZ omits the "damage" attribute, so StatEffect's loader
+    // defaults damage to 100. Before hasDamage() was plumbed through, isActiveAttackSkill
+    // accepted Teleport as the bot's attack skill on a mid-build I/L Wizard that hadn't
+    // learned Cold Beam yet, producing illegal 1-damage magic attacks at the WZ bbox
+    // (500x300 around the bot).
+    @Test
+    void shouldNotPickTeleportAsAttackSkillJustBecauseDamageDefaults() {
+        SkillFactory.loadAllSkills();
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.IL_WIZARD);
+        when(bot.getLevel()).thenReturn(40);
+
+        Set<Integer> skillIds = Set.of(ILWizard.TELEPORT, ILWizard.MEDITATION);
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        for (int skillId : skillIds) {
+            Skill skill = SkillFactory.getSkill(skillId);
+            assertTrue(skill != null, "missing real WZ skill " + skillId);
+            skills.put(skill, null);
+        }
+        when(bot.getSkills()).thenReturn(skills);
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skillIds.contains(skill.getId()) ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertEquals(0, entry.attackSkillId);
+        assertFalse(entry.attackSkillIds.contains(ILWizard.TELEPORT));
+    }
+
+    // Regression: Hunter.ARROW_BOMB declares no "damage" in WZ; the damage % lives in "x"
+    // (72 at level 1). getDamagePercent() must fall back to x instead of returning the
+    // loader-default 100, otherwise Arrow Bomb deals base weapon damage and the AoE
+    // scorer over-weights it as a 100% skill.
+    @Test
+    void arrowBombShouldDeriveDamagePercentFromXNotLoaderDefault() {
+        SkillFactory.loadAllSkills();
+        Skill arrowBomb = SkillFactory.getSkill(Hunter.ARROW_BOMB);
+        assertTrue(arrowBomb != null, "missing real WZ skill Hunter.ARROW_BOMB");
+        StatEffect lvl1 = arrowBomb.getEffect(1);
+        assertFalse(lvl1.hasDamage(), "Arrow Bomb WZ must not declare 'damage'");
+        assertEquals(72, lvl1.getDamagePercent(),
+                "level-1 'x' = 72 should be returned as damage %");
+    }
+
     @Test
     void shouldNotUseDragonRoarBelowTargetThresholdWithoutNearbyHealer() {
         MapleMap map = mock(MapleMap.class);
@@ -873,7 +920,7 @@ class BotCombatManagerTest {
         StatEffect effect = mock(StatEffect.class);
         when(effect.getRange()).thenReturn(0);
 
-        Rectangle hitBox = BotCombatManager.fallbackSkillHitBox(effect, bot, false, BotCombatManager.AttackRoute.RANGED);
+        Rectangle hitBox = BotCombatManager.fallbackSkillHitBox(effect, bot, false, BotCombatManager.AttackRoute.RANGED, 0);
 
         assertEquals(new Rectangle(105, 150, 395, 100), hitBox);
     }
@@ -885,7 +932,7 @@ class BotCombatManagerTest {
         StatEffect effect = mock(StatEffect.class);
         when(effect.getRange()).thenReturn(0);
 
-        Rectangle hitBox = BotCombatManager.fallbackSkillHitBox(effect, bot, true, BotCombatManager.AttackRoute.MAGIC);
+        Rectangle hitBox = BotCombatManager.fallbackSkillHitBox(effect, bot, true, BotCombatManager.AttackRoute.MAGIC, 0);
 
         assertEquals(new Rectangle(-300, 150, 395, 100), hitBox);
     }
@@ -897,9 +944,39 @@ class BotCombatManagerTest {
         StatEffect effect = mock(StatEffect.class);
         when(effect.getRange()).thenReturn(150);
 
-        Rectangle hitBox = BotCombatManager.fallbackSkillHitBox(effect, bot, false, BotCombatManager.AttackRoute.MAGIC);
+        Rectangle hitBox = BotCombatManager.fallbackSkillHitBox(effect, bot, false, BotCombatManager.AttackRoute.MAGIC, 0);
 
         assertEquals(new Rectangle(105, 150, 595, 100), hitBox);
+    }
+
+    @Test
+    void shouldUseTightVerticalReachForIronArrow() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mockBot(new Point(100, 200), map, 20_000, null);
+        StatEffect effect = mock(StatEffect.class);
+        when(effect.getRange()).thenReturn(0);
+
+        // Iron Arrow: yAbove=32, yBelow=-28 → rect from y=168 to y=172 (height 4)
+        Rectangle hitBox = BotCombatManager.fallbackSkillHitBox(effect, bot, false,
+                BotCombatManager.AttackRoute.RANGED, constants.skills.Crossbowman.IRON_ARROW);
+
+        assertEquals(168, hitBox.y);
+        assertEquals(4, hitBox.height);
+    }
+
+    @Test
+    void shouldUseWideVerticalReachForAvenger() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mockBot(new Point(100, 200), map, 20_000, null);
+        StatEffect effect = mock(StatEffect.class);
+        when(effect.getRange()).thenReturn(0);
+
+        // Avenger: yAbove=60, yBelow=0 → rect from y=140 to y=200 (height 60)
+        Rectangle hitBox = BotCombatManager.fallbackSkillHitBox(effect, bot, false,
+                BotCombatManager.AttackRoute.RANGED, constants.skills.Hermit.AVENGER);
+
+        assertEquals(140, hitBox.y);
+        assertEquals(60, hitBox.height);
     }
 
     @Test
@@ -1082,7 +1159,7 @@ class BotCombatManagerTest {
     }
 
     @Test
-    void shouldPreferCurrentFootholdTargetBeforePathScoringOtherRegions() {
+    void shouldAllowPathScoringToBeatFarCurrentFootholdTarget() {
         MapleMap map = spy(new MapleMap(910009050, 0, 0, 910009050, 1.0f));
         server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
         footholds.insert(new Foothold(new Point(0, 100), new Point(300, 100), 1));
@@ -1097,7 +1174,39 @@ class BotCombatManagerTest {
 
         Monster target = BotCombatManager.findGrindTarget(new BotEntry(bot, null, null), bot);
 
-        assertEquals(currentFootholdMob, target);
+        assertEquals(otherRegionMob, target);
+    }
+
+    @Test
+    void shouldPreferAoeClusterAnchorOverLoneCloseMobWhenBotHasAoeSkill() {
+        // bot at (100, 100). lone "low-hp" mob CLOSE in one direction, 3-mob cluster
+        // farther in the opposite direction. without an AoE skill the close lone mob
+        // wins on distance score; with an AoE skill, the cluster anchor must win so
+        // planAttack can fire an AoE plan that out-DPSes the basic single shot.
+        MapleMap map = spy(new MapleMap(910009060, 0, 0, 910009060, 1.0f));
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-2000, -2000), new Point(2000, 2000));
+        footholds.insert(new Foothold(new Point(-400, 100), new Point(400, 100), 1));
+        map.setFootholds(footholds);
+        BotNavigationGraphProvider.rebuildGraph(map);
+
+        Character bot = mockBot(new Point(100, 100), map, 20_000, null);
+        Monster loneClose = mockMob(new Point(160, 100), 100100);
+        Monster clusterAnchor = mockMob(new Point(-100, 100), 100100);
+        Monster clusterNeighbor1 = mockMob(new Point(-130, 100), 100100);
+        Monster clusterNeighbor2 = mockMob(new Point(-160, 100), 100100);
+        doReturn(List.of(loneClose, clusterAnchor, clusterNeighbor1, clusterNeighbor2))
+                .when(map).getAllMonsters();
+
+        BotEntry noAoeEntry = new BotEntry(bot, null, null);
+        // Sanity: without AoE skill, the lone close mob wins on plain distance score.
+        assertEquals(loneClose, BotCombatManager.findGrindTarget(noAoeEntry, bot));
+
+        BotEntry aoeEntry = new BotEntry(bot, null, null);
+        aoeEntry.aoeSkillId = Hunter.POWER_KNOCKBACK;
+        aoeEntry.aoeSkillMobs = 6;
+        // With AoE skill that hits up to 6, cluster anchor's bonus overcomes the lone
+        // mob's distance advantage and the bot switches target to the cluster.
+        assertEquals(clusterAnchor, BotCombatManager.findGrindTarget(aoeEntry, bot));
     }
 
     @Test
@@ -1329,6 +1438,8 @@ class BotCombatManagerTest {
         when(effect.getAttackCount()).thenReturn(attackCount);
         when(effect.getMobCount()).thenReturn(mobCount);
         when(effect.getDamage()).thenReturn(damage);
+        when(effect.getDamagePercent()).thenReturn(damage);
+        when(effect.hasDamage()).thenReturn(true);
         when(effect.getDuration()).thenReturn(0);
         when(effect.getMpCon()).thenReturn((short) 1);
         when(effect.canPaySkillCost(any(Character.class))).thenReturn(true);

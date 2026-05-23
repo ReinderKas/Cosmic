@@ -38,6 +38,8 @@ class BotInventoryManager {
     private static final Logger log = LoggerFactory.getLogger(BotInventoryManager.class);
     private static final long TRADE_COMMAND_PROFILE_WARN_NS = 50_000_000L;
     private static final int MANUAL_TRADE_TIMEOUT_MS = 60_000;
+    private static final int TRADE_WINDOW_ITEM_LIMIT = 9;
+    private static final String RESERVED_EQUIPS_CATEGORY_PREFIX = "equips:reserved:";
     private record PreparedTradeItems(List<Item> items, String errorMessage) {}
     private record EquipTradeGroups(List<Item> normal,
                                     List<Item> reservedForOther,
@@ -427,6 +429,17 @@ class BotInventoryManager {
             logSlowTradeCommand(category, "startTradeTransfer", entry, bot, startedAt);
             return;
         }
+        if (isReservedEquipsCategory(category)) {
+            List<Item> items = collectReservedEquipTradePage(category, entry, bot);
+            if (items.isEmpty()) {
+                BotManager.getInstance().botReply(entry, noItemsReply(category));
+                return;
+            }
+            startTradeSequence(category, owner, items, 0, true, entry, bot);
+            entry.pendingTradeCategoryMsg = reservedEquipsPageMessage(category, entry, bot);
+            logSlowTradeCommand(category, "startTradeTransfer", entry, bot, startedAt);
+            return;
+        }
         if ("ammo".equals(category)) {
             startAmmoGroupTradeTransfer(owner, entry, bot);
             logSlowTradeCommand(category, "startTradeTransfer", entry, bot, startedAt);
@@ -489,7 +502,7 @@ class BotInventoryManager {
     }
 
     static boolean profileTradeCategory(String category) {
-        return "trash".equals(category) || "equips".equals(category);
+        return "trash".equals(category) || "equips".equals(category) || isReservedEquipsCategory(category);
     }
 
     static void logSlowTradeCommand(String category, String phase, BotEntry entry, Character bot, long startedAt) {
@@ -558,6 +571,9 @@ class BotInventoryManager {
             case "trash" -> "trash equips";
             case "etc" -> "etc items";
             default -> {
+                if (isReservedEquipsCategory(category)) {
+                    yield "reserved equips";
+                }
                 if (category.startsWith("mesos:")) {
                     yield "mesos";
                 }
@@ -594,7 +610,9 @@ class BotInventoryManager {
             cancelTradeSequence(entry, bot, "can't trade right now, stopping");
             return;
         }
-        entry.pendingTradeItems    = items.size() > 9 ? new ArrayList<>(items.subList(0, 9)) : new ArrayList<>(items);
+        entry.pendingTradeItems = items.size() > TRADE_WINDOW_ITEM_LIMIT
+                ? new ArrayList<>(items.subList(0, TRADE_WINDOW_ITEM_LIMIT))
+                : new ArrayList<>(items);
         entry.pendingTradeMeso     = mesos;
         entry.pendingTradeIdx      = 0;
         entry.pendingTradeTimerMs  = 0;
@@ -920,8 +938,7 @@ class BotInventoryManager {
             return items;
         }
 
-        List<Item> serverSortedItems = new ArrayList<>(items);
-        serverSortedItems.sort(Comparator.comparingInt(Item::getItemId));
+        List<Item> serverSortedItems = sortItemsByItemId(items);
         if (recipient == null) {
             return serverSortedItems;
         }
@@ -956,8 +973,7 @@ class BotInventoryManager {
             return items;
         }
 
-        List<Item> sorted = new ArrayList<>(items);
-        sorted.sort(Comparator.comparingInt(Item::getItemId));
+        List<Item> sorted = sortItemsByItemId(items);
         if (recipient == null) {
             return sorted;
         }
@@ -1152,15 +1168,19 @@ class BotInventoryManager {
                 result = prioritizeEtcTradeItems(result, entry.owner);
             }
             default -> {
-                EquipsGroup eg = EquipsGroup.fromCategory(category);
-                if (eg != null) {
-                    result.addAll(classifyEquipTradeGroups(entry, bot).itemsFor(eg));
+                if (isReservedEquipsCategory(category)) {
+                    result.addAll(collectReservedEquipTradePage(category, entry, bot));
                 } else {
-                    AmmoGroup ammoGroup = AmmoGroup.fromCategory(category);
-                    if (ammoGroup != null) {
-                        result.addAll(classifyAmmoTradeGroups(bot).itemsFor(ammoGroup));
-                    } else if (category.startsWith("name:")) {
-                        result.addAll(collectNamedItems(category.substring(5), bot));
+                    EquipsGroup eg = EquipsGroup.fromCategory(category);
+                    if (eg != null) {
+                        result.addAll(classifyEquipTradeGroups(entry, bot).itemsFor(eg));
+                    } else {
+                        AmmoGroup ammoGroup = AmmoGroup.fromCategory(category);
+                        if (ammoGroup != null) {
+                            result.addAll(classifyAmmoTradeGroups(bot).itemsFor(ammoGroup));
+                        } else if (category.startsWith("name:")) {
+                            result.addAll(collectNamedItems(category.substring(5), bot));
+                        }
                     }
                 }
             }
@@ -1345,36 +1365,24 @@ class BotInventoryManager {
 
     // ─── Internals ────────────────────────────────────────────────────────────
 
-    /**
-     * Orders equips for trade: foreign-class items first (grouped by equipment type),
-     * then own-class items sorted worst-to-best so the owner receives the least useful
-     * gear early and can cancel once they have what they want.
-     *
-     * "Own class" = job requirement matches (or none) — level, stat, and fame reqs
-     * are ignored so high-level own-class gear the bot can't yet wear still sorts after
-     * foreign items rather than before them.
-     */
-    private static List<Item> sortEquipsForTrade(List<Item> items, Character bot) {
+    /** Orders equips like a plain inventory view: itemId first, then bag position. */
+    private static List<Item> sortEquipsByItemId(List<Item> items) {
         if (items.size() <= 1) return items;
-        ItemInformationProvider ii = ItemInformationProvider.getInstance();
-        List<Item> foreign = new ArrayList<>();
-        List<Item> own = new ArrayList<>();
-        for (Item item : items) {
-            if (!(item instanceof Equip equip) || !isOwnClassEquip(bot, ii, equip)) {
-                foreign.add(item);
-            } else {
-                own.add(item);
-            }
-        }
-        // Foreign: group by equipment category (itemId / 10000 gives the subtype, e.g. 100=hat, 110=cape)
-        foreign.sort(Comparator.comparingInt(i -> i.getItemId() / 10000));
-        // Own: worst-to-best so owner gets the bad stuff to discard first
+        List<Item> sorted = sortItemsByItemId(items);
+        items.clear();
+        items.addAll(sorted);
+        return items;
+    }
+
+    /** Orders own reserved equips worst-to-best using the existing trade score helper. */
+    private static List<Item> sortEquipsByTradeScore(List<Item> items, Character bot) {
+        if (items.size() <= 1) return items;
         Job job = bot.getJob();
-        own.sort(Comparator.comparingInt(i -> equipTradeScore((Equip) i, job)));
-        List<Item> result = new ArrayList<>(foreign.size() + own.size());
-        result.addAll(foreign);
-        result.addAll(own);
-        return result;
+        items.sort(Comparator
+                .comparingInt((Item item) -> item instanceof Equip equip ? equipTradeScore(equip, job) : Integer.MIN_VALUE)
+                .thenComparingInt(Item::getItemId)
+                .thenComparingInt(Item::getPosition));
+        return items;
     }
 
     private enum EquipsGroup {
@@ -1415,6 +1423,57 @@ class BotInventoryManager {
 
     private static List<Item> collectEquipsGroup(EquipsGroup group, BotEntry entry, Character bot) {
         return classifyEquipTradeGroups(entry, bot).itemsFor(group);
+    }
+
+    static String reservedEquipsCategory(int requestedPage) {
+        return RESERVED_EQUIPS_CATEGORY_PREFIX + requestedPage;
+    }
+
+    static int clampTradePage(int requestedPage, int totalItems) {
+        int maxPage = Math.max(1, (totalItems + TRADE_WINDOW_ITEM_LIMIT - 1) / TRADE_WINDOW_ITEM_LIMIT);
+        return Math.max(1, Math.min(requestedPage, maxPage));
+    }
+
+    private static boolean isReservedEquipsCategory(String category) {
+        return category != null && category.startsWith(RESERVED_EQUIPS_CATEGORY_PREFIX);
+    }
+
+    private static int requestedReservedEquipsPage(String category) {
+        if (!isReservedEquipsCategory(category)) {
+            return 1;
+        }
+        try {
+            return Integer.parseInt(category.substring(RESERVED_EQUIPS_CATEGORY_PREFIX.length()));
+        } catch (NumberFormatException ignored) {
+            return 1;
+        }
+    }
+
+    private static List<Item> collectReservedEquips(EquipTradeGroups groups) {
+        return new ArrayList<>(groups.reservedForSelf());
+    }
+
+    private static List<Item> collectReservedEquipTradePage(String category, BotEntry entry, Character bot) {
+        EquipTradeGroups groups = classifyEquipTradeGroups(entry, bot);
+        List<Item> reserved = collectReservedEquips(groups);
+        if (reserved.isEmpty()) {
+            return List.of();
+        }
+        int page = clampTradePage(requestedReservedEquipsPage(category), reserved.size());
+        int from = (page - 1) * TRADE_WINDOW_ITEM_LIMIT;
+        int to = Math.min(from + TRADE_WINDOW_ITEM_LIMIT, reserved.size());
+        return new ArrayList<>(reserved.subList(from, to));
+    }
+
+    private static String reservedEquipsPageMessage(String category, BotEntry entry, Character bot) {
+        EquipTradeGroups groups = classifyEquipTradeGroups(entry, bot);
+        List<Item> reserved = collectReservedEquips(groups);
+        if (reserved.isEmpty()) {
+            return null;
+        }
+        int page = clampTradePage(requestedReservedEquipsPage(category), reserved.size());
+        int lastPage = clampTradePage(Integer.MAX_VALUE, reserved.size());
+        return "reserved equips page " + page + "/" + lastPage;
     }
 
     private static String equipsGroupMsg(String category) {
@@ -1572,9 +1631,9 @@ class BotInventoryManager {
         }
 
         long sortStartedAt = startedAt != 0L ? System.nanoTime() : 0L;
-        List<Item> normalSorted = sortEquipsForTrade(normal, bot);
-        List<Item> reservedForOtherSorted = sortEquipsForTrade(reservedForOther, bot);
-        List<Item> reservedForSelfSorted = sortEquipsForTrade(reservedForSelf, bot);
+        List<Item> normalSorted = sortEquipsByItemId(normal);
+        List<Item> reservedForOtherSorted = sortEquipsByItemId(reservedForOther);
+        List<Item> reservedForSelfSorted = sortEquipsByTradeScore(reservedForSelf, bot);
         long sortNs = startedAt != 0L ? System.nanoTime() - sortStartedAt : 0L;
         if (startedAt != 0L) {
             long elapsedNs = System.nanoTime() - startedAt;
@@ -1675,6 +1734,15 @@ class BotInventoryManager {
             main = e.getStr(); sec = e.getDex();
         }
         return 4 * e.getWatk() + e.getMatk() + main + sec;
+    }
+
+    private static List<Item> sortItemsByItemId(List<Item> items) {
+        if (items.size() <= 1) {
+            return items;
+        }
+        List<Item> sorted = new ArrayList<>(items);
+        sorted.sort(Comparator.comparingInt(Item::getItemId).thenComparingInt(Item::getPosition));
+        return sorted;
     }
 
     private static int dropFromBag(Character bot, InventoryType type, Predicate<Item> filter) {

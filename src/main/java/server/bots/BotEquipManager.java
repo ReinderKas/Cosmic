@@ -83,6 +83,7 @@ class BotEquipManager {
     }
 
     record EquipScore(int damage, int statSum) {}
+    record WeaponScoreBreakdown(int rawMax, int preCycleDamage, int cycleMs, int normalizedDamage) {}
 
     /**
      * Pareto-frontier DP across equipment slots. Outer loop iterates each viable weapon
@@ -282,8 +283,16 @@ class BotEquipManager {
                 Branch b = branches.get(i);
                 String wName = b.weapon() == null ? "(no weapon)" : ii.getName(b.weapon().getItemId());
                 EquipScore s = b.result().score();
+                StatSnapshot branchSnap = snapshotForBranch(naked, b.weapon(), b.result().picks());
+                WeaponType wt = b.weapon() != null ? ii.getWeaponType(b.weapon().getItemId()) : null;
+                WeaponScoreBreakdown breakdown = weaponScoreBreakdown(branchSnap, b.weapon(), wt, mob);
                 String tag = i == 0 ? "*" : " ";
-                out.add(tag + " W=" + wName + " dmg=" + s.damage() + " stat=" + s.statSum());
+                out.add(tag + " W=" + wName
+                        + " dmg=" + s.damage()
+                        + " rawMax=" + breakdown.rawMax()
+                        + " preCycle=" + breakdown.preCycleDamage()
+                        + " cycle=" + breakdown.cycleMs() + "ms"
+                        + " stat=" + s.statSum());
             }
 
             // Diff vs current for the winning branch.
@@ -410,9 +419,15 @@ class BotEquipManager {
             Br b = sorted.get(i);
             String wName = b.w() == null ? "(none)" : ii.getName(b.w().getItemId());
             EquipScore s = b.r().score();
+            StatSnapshot branchSnap = snapshotForBranch(naked, b.w(), b.r().picks());
+            WeaponType wt = b.w() != null ? ii.getWeaponType(b.w().getItemId()) : null;
+            WeaponScoreBreakdown breakdown = weaponScoreBreakdown(branchSnap, b.w(), wt, mob);
             sb.append(i == 0 ? "[*] " : "[ ] ").append(wName)
               .append(" id=").append(b.w() == null ? 0 : b.w().getItemId())
               .append(" dmg=").append(s.damage())
+              .append(" rawMax=").append(breakdown.rawMax())
+              .append(" preCycle=").append(breakdown.preCycleDamage())
+              .append(" cycle=").append(breakdown.cycleMs()).append("ms")
               .append(" stat=").append(s.statSum())
               .append(b.r().paretoCapHit() ? " (pareto-cap)" : "").append('\n');
             for (Map.Entry<Short, Equip> pick : b.r().picks().entrySet()) {
@@ -993,7 +1008,10 @@ class BotEquipManager {
         for (int i = 0; i < dpSlots.size(); i++) {
             Equip p = node.picks[i];
             if (p == null) continue;
-            if (!hooks.meetsReqs(p, s.job(), s.level(), s.str(), s.dex(), s.int_(), s.luk(), s.fame())) {
+            StatSnapshot withoutSelf = s.swap(p, null);
+            if (!hooks.meetsReqs(p, withoutSelf.job(), withoutSelf.level(),
+                    withoutSelf.str(), withoutSelf.dex(), withoutSelf.int_(),
+                    withoutSelf.luk(), withoutSelf.fame())) {
                 return false;
             }
         }
@@ -1074,6 +1092,31 @@ class BotEquipManager {
         int cycleMs = weapon != null ? weaponCycleMs(weapon.getItemId()) : 0;
         if (cycleMs > 0) dmg = (int) (dmg * 1000.0 / cycleMs);
         return new EquipScore(dmg, node.statSum);
+    }
+
+    private static StatSnapshot snapshotForBranch(StatSnapshot naked, Equip weapon, Map<Short, Equip> picks) {
+        StatSnapshot snap = weapon != null ? naked.swap(null, weapon) : naked;
+        for (Equip pick : picks.values()) {
+            if (pick != null) {
+                snap = snap.swap(null, pick);
+            }
+        }
+        return snap;
+    }
+
+    private static WeaponScoreBreakdown weaponScoreBreakdown(StatSnapshot sim, Equip weapon, WeaponType wt,
+                                                             MapDamageProfile mob) {
+        if (isMageJob(sim.job()) || wt == null) {
+            return new WeaponScoreBreakdown(0, 0, 0, 0);
+        }
+        int rawMax = rawPhysicalMax(sim, wt);
+        int preCycleDamage = damageWith(sim, null, wt, mob);
+        int cycleMs = weapon != null ? weaponCycleMs(weapon.getItemId()) : 0;
+        int normalizedDamage = preCycleDamage;
+        if (cycleMs > 0) {
+            normalizedDamage = (int) (preCycleDamage * 1000.0 / cycleMs);
+        }
+        return new WeaponScoreBreakdown(rawMax, preCycleDamage, cycleMs, normalizedDamage);
     }
 
     /** Naked stat snapshot: bot totals minus all currently-equipped non-cash gear. */
