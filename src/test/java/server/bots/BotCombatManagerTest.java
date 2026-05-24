@@ -1091,6 +1091,30 @@ class BotCombatManagerTest {
     }
 
     @Test
+    void shouldRememberLeftFacingAttackForNextStandingStance() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.facingDir = 1;
+
+        BotCombatManager.rememberAttackFacing(entry, BotAttackExecutionProvider.attackPacketStance(true));
+
+        assertEquals(-1, entry.facingDir);
+        assertEquals(CharacterStance.STAND_LEFT_STANCE, bot.getStance());
+    }
+
+    @Test
+    void shouldRememberRightFacingAttackForNextStandingStance() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.facingDir = -1;
+
+        BotCombatManager.rememberAttackFacing(entry, BotAttackExecutionProvider.attackPacketStance(false));
+
+        assertEquals(1, entry.facingDir);
+        assertEquals(CharacterStance.STAND_RIGHT_STANCE, bot.getStance());
+    }
+
+    @Test
     void shouldAnchorArrowBombOnClosestMobInProjectilePath() {
         MapleMap map = mock(MapleMap.class);
         Character bot = mockBot(new Point(100, 200), map, 20_000, null);

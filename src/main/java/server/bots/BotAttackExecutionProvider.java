@@ -178,6 +178,10 @@ final class BotAttackExecutionProvider {
         return facingLeft ? 0x80 : 0x00;
     }
 
+    static int facingDirFromAttackPacketStance(int attackPacketStance) {
+        return (attackPacketStance & 0x80) != 0 ? -1 : 1;
+    }
+
     static List<String> resolveAttackActions(BotAttackDataProvider.AttackAnimationSpec attackSpec, List<String> sourceActions) {
         if (attackSpec == null || attackSpec.actions().isEmpty()) {
             return List.of("swingO1");
