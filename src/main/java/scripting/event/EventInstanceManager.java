@@ -188,12 +188,12 @@ public class EventInstanceManager {
 
         if (mapId == -1) {
             for (Character mc : players) {
-                mc.gainExp(gain * mc.getExpRate(), true, true);
+                mc.gainExpRateScaled(gain, true, true);
             }
         } else {
             for (Character mc : players) {
                 if (mc.getMapId() == mapId) {
-                    mc.gainExp(gain * mc.getExpRate(), true, true);
+                    mc.gainExpRateScaled(gain, true, true);
                 }
             }
         }
@@ -1048,7 +1048,7 @@ public class EventInstanceManager {
 
         if (rewardsSet == null || rewardsSet.isEmpty()) {
             if (rewardExp > 0) {
-                player.gainExp(rewardExp);
+                player.gainExpRateScaled(rewardExp, true, true);
             }
             return true;
         }
@@ -1062,7 +1062,7 @@ public class EventInstanceManager {
 
         api.gainItem(rewardsSet.get(rnd), rewardsQty.get(rnd).shortValue());
         if (rewardExp > 0) {
-            player.gainExp(rewardExp);
+            player.gainExpRateScaled(rewardExp, true, true);
         }
         return true;
     }

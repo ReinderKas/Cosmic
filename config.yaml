@@ -9,6 +9,15 @@ worlds:
     why_am_i_recommended: Welcome to GreenCatMSv83!
     channels: 3
     exp_rate: 2
+    level_exp_rate_multipliers:          #Applied multiplicatively on top of this world's EXP rate. Independent from USE_ADD_RATES_BY_LEVEL.
+      - level: 30
+        multiplier: 1.5
+      - level: 70
+        multiplier: 2.0
+      - level: 120
+        multiplier: 2.5
+      - level: 150
+        multiplier: 3.0
     mob_rate: 1.5                            #Mob count multiplier
     max_mob_per_spawnpoint: 2                #Must be equal or higher than mob_rate
     meso_rate: 2

@@ -1,5 +1,8 @@
 package config;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class WorldConfig {
     public int flag = 0;
     public String server_message = "Welcome!";
@@ -7,6 +10,7 @@ public class WorldConfig {
     public String why_am_i_recommended = "";
     public int channels = 1;
     public int exp_rate = 1;
+    public List<LevelExpRateConfig> level_exp_rate_multipliers = new ArrayList<>();
     public float mob_rate = 1;
     public int max_mob_per_spawnpoint = 1;
     public int meso_rate = 1;

@@ -437,13 +437,14 @@ public class Server {
         int questrate = YamlConfig.config.worlds.get(i).quest_rate;
         int travelrate = YamlConfig.config.worlds.get(i).travel_rate;
         int fishingrate = YamlConfig.config.worlds.get(i).fishing_rate;
+        List<config.LevelExpRateConfig> levelExpRateMultipliers = YamlConfig.config.worlds.get(i).level_exp_rate_multipliers;
 
         int flag = YamlConfig.config.worlds.get(i).flag;
         String event_message = YamlConfig.config.worlds.get(i).event_message;
         String why_am_i_recommended = YamlConfig.config.worlds.get(i).why_am_i_recommended;
 
         World world = new World(i, flag, event_message, exprate, droprate, bossdroprate, mesorate, questrate,
-                travelrate, fishingrate, mobrate, mobperspawnpoint);
+                travelrate, fishingrate, mobrate, mobperspawnpoint, levelExpRateMultipliers);
 
         Map<Integer, String> channelInfo = new HashMap<>();
         long bootTime = getCurrentTime();

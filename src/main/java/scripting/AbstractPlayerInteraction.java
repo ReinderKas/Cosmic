@@ -797,7 +797,7 @@ public class AbstractPlayerInteraction {
     }
 
     public void giveCharacterExp(int amount, Character chr) {
-        chr.gainExp((amount * chr.getExpRate()), true, true);
+        chr.gainExpRateScaled(amount, true, true);
     }
 
     public void givePartyExp(int amount, List<Character> party) {
@@ -847,9 +847,9 @@ public class AbstractPlayerInteraction {
             }
             int base = PartyQuest.getExp(PQ, player.getLevel());
             int exp = base * bonus / 100;
-            player.gainExp(exp, true, true);
+            player.gainExpRateScaled(exp, true, true);
             if (YamlConfig.config.server.PQ_BONUS_EXP_RATE > 0 && System.currentTimeMillis() <= YamlConfig.config.server.EVENT_END_TIMESTAMP) {
-                player.gainExp((int) (exp * YamlConfig.config.server.PQ_BONUS_EXP_RATE), true, true);
+                player.gainExpRateScaled((int) (exp * YamlConfig.config.server.PQ_BONUS_EXP_RATE), true, true);
             }
         }
     }
