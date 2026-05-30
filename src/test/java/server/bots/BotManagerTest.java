@@ -427,6 +427,91 @@ class BotManagerTest {
     }
 
     @Test
+    void shouldCommitToBreakoutDirectionWhenSurroundedDespiteTargetSwap() {
+        MapleMap map = spy(createEmptyTestMap(910000063));
+        map.getFootholds().insert(new Foothold(new Point(-500, 100), new Point(500, 100), 1));
+        BotNavigationGraphProvider.rebuildGraph(map);
+        Character bot = mock(Character.class);
+        Point botPos = new Point(100, 100);
+        when(bot.getMap()).thenReturn(map);
+        when(bot.getPosition()).thenReturn(new Point(botPos));
+        BotEntry entry = new BotEntry(bot, null, null);
+
+        // Pincer: a mob inside the retreat band on each side (dx 60 <= 80, dy 0 <= 50).
+        Monster leftMob = mockMob(new Point(40, 100), 9300600);
+        Monster rightMob = mockMob(new Point(160, 100), 9300601);
+        doReturn(List.of(leftMob, rightMob)).when(map).getAllMonsters();
+
+        try (MockedStatic<BotAttackExecutionProvider> attacks =
+                     mockStatic(BotAttackExecutionProvider.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            attacks.when(() -> BotAttackExecutionProvider.getEquippedWeaponType(bot)).thenReturn(WeaponType.BOW);
+
+            Point first = BotManager.selectGrindNavigationTarget(entry, botPos, rightMob.getPosition());
+            int dir1 = Integer.signum(first.x - botPos.x);
+            assertTrue(dir1 != 0);
+            assertTrue(entry.breakoutDirection != 0);
+
+            // Crowding-swap points the active target at the OTHER flank on later ticks; the
+            // committed breakout must not reverse (that flip is the oscillation we are fixing).
+            Point second = BotManager.selectGrindNavigationTarget(entry, botPos, leftMob.getPosition());
+            assertEquals(dir1, Integer.signum(second.x - botPos.x));
+            Point third = BotManager.selectGrindNavigationTarget(entry, botPos, rightMob.getPosition());
+            assertEquals(dir1, Integer.signum(third.x - botPos.x));
+        }
+    }
+
+    @Test
+    void shouldClearBreakoutOnceNoLongerSurrounded() {
+        MapleMap map = spy(createEmptyTestMap(910000064));
+        map.getFootholds().insert(new Foothold(new Point(-500, 100), new Point(500, 100), 1));
+        BotNavigationGraphProvider.rebuildGraph(map);
+        Character bot = mock(Character.class);
+        Point botPos = new Point(100, 100);
+        when(bot.getMap()).thenReturn(map);
+        when(bot.getPosition()).thenReturn(new Point(botPos));
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.breakoutDirection = -1;
+        entry.breakoutUntilMs = System.currentTimeMillis() + 5_000L;
+
+        // Only one flank occupied -> not surrounded -> the breakout latch must release.
+        Monster rightMob = mockMob(new Point(160, 100), 9300602);
+        doReturn(List.of(rightMob)).when(map).getAllMonsters();
+
+        try (MockedStatic<BotAttackExecutionProvider> attacks =
+                     mockStatic(BotAttackExecutionProvider.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            attacks.when(() -> BotAttackExecutionProvider.getEquippedWeaponType(bot)).thenReturn(WeaponType.BOW);
+
+            BotManager.selectGrindNavigationTarget(entry, botPos, rightMob.getPosition());
+            assertEquals(0, entry.breakoutDirection);
+        }
+    }
+
+    @Test
+    void shouldNotEngageBreakoutForSingleMobKiting() {
+        MapleMap map = spy(createEmptyTestMap(910000065));
+        map.getFootholds().insert(new Foothold(new Point(-500, 100), new Point(500, 100), 1));
+        BotNavigationGraphProvider.rebuildGraph(map);
+        Character bot = mock(Character.class);
+        Point botPos = new Point(100, 100);
+        when(bot.getMap()).thenReturn(map);
+        when(bot.getPosition()).thenReturn(new Point(botPos));
+        BotEntry entry = new BotEntry(bot, null, null);
+
+        Monster rightMob = mockMob(new Point(160, 100), 9300603);
+        doReturn(List.of(rightMob)).when(map).getAllMonsters();
+
+        try (MockedStatic<BotAttackExecutionProvider> attacks =
+                     mockStatic(BotAttackExecutionProvider.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            attacks.when(() -> BotAttackExecutionProvider.getEquippedWeaponType(bot)).thenReturn(WeaponType.BOW);
+
+            Point nav = BotManager.selectGrindNavigationTarget(entry, botPos, rightMob.getPosition());
+            // Single mob -> ordinary local kiting (retreat away from the mob), no breakout latch.
+            assertEquals(0, entry.breakoutDirection);
+            assertEquals(BotAttackExecutionProvider.retreatTargetPosition(bot, botPos, rightMob.getPosition()), nav);
+        }
+    }
+
+    @Test
     void shouldResetPhysicsWhenOnlineBotIsSpawnedAtOwnerPosition() {
         MapleMap map = createEmptyTestMap(910000023);
         map.getFootholds().insert(new Foothold(new Point(0, 100), new Point(200, 100), 1));

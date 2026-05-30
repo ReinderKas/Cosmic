@@ -1333,6 +1333,19 @@ public class BotManager {
         boolean retreatNeeded = BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(
                 BotAttackExecutionProvider.getEquippedWeaponType(bot), botPos, combatTargetPos);
 
+        // Surround-breakout commitment: once pincered, keep bursting the SAME way until the
+        // bot is no longer flanked on both sides (or a safety timeout), re-issuing a forward
+        // step each tick. A per-step local retreat here would walk into the opposite mob and
+        // flip direction every time it arrives — the swarm oscillation we are fixing.
+        if (entry.breakoutDirection != 0) {
+            if (now >= entry.breakoutUntilMs || !BotAttackExecutionProvider.isSurrounded(bot, botPos)) {
+                entry.breakoutDirection = 0;
+                entry.breakoutUntilMs = 0L;
+            } else {
+                return breakoutStep(botPos, entry.breakoutDirection);
+            }
+        }
+
         // Hysteresis: a previously committed retreat keeps its goal until either the
         // hold expires, the bot has effectively arrived, or the bot wandered too far
         // from the hold pos for it to still be the right answer.
@@ -1367,6 +1380,18 @@ public class BotManager {
             return crossRegionPos;
         }
 
+        // No separated region to flee to (e.g. one open platform). If the bot is pincered,
+        // commit to bursting out one side instead of micro-retreating into the other wall.
+        if (BotAttackExecutionProvider.isSurrounded(bot, botPos)) {
+            int dir = pickBreakoutDirection(entry, botPos, combatTargetPos);
+            entry.breakoutDirection = dir;
+            entry.breakoutUntilMs = now + BotCombatManager.cfg.BREAKOUT_MAX_MS;
+            // Drop any stale one-step hysteresis so it can't fight the committed breakout.
+            entry.retreatHoldPos = null;
+            entry.retreatHoldUntilMs = 0L;
+            return breakoutStep(botPos, dir);
+        }
+
         Point retreatPos = BotAttackExecutionProvider.retreatTargetPosition(bot, botPos, combatTargetPos);
         if (shouldUseLocalCombatRetreatTarget(entry, botPos, combatTargetPos, retreatPos)) {
             entry.retreatHoldUntilMs = now + RETREAT_HOLD_MS;
@@ -1374,6 +1399,55 @@ public class BotManager {
             return retreatPos;
         }
         return combatTargetPos;
+    }
+
+    private static Point breakoutStep(Point botPos, int dir) {
+        return new Point(botPos.x + dir * BotCombatManager.cfg.RANGED_RETREAT_DISTANCE_X, botPos.y);
+    }
+
+    /**
+     * Choose which way to burst out of a surrounding swarm. Base preference is the more open
+     * side (the flank whose nearest mob is farther). When the nav graph is available, override
+     * with the side whose reachable walkable neighbor is less crowded, so the bot runs toward
+     * an exit instead of into a dead-end wall. Ties fall back to the open-side preference.
+     */
+    private static int pickBreakoutDirection(BotEntry entry, Point botPos, Point combatTargetPos) {
+        Character bot = entry.bot;
+        int base = BotAttackExecutionProvider.pickRetreatDirection(bot, botPos, combatTargetPos);
+        MapleMap map = bot != null ? bot.getMap() : null;
+        if (map == null || map.getFootholds() == null) {
+            return base;
+        }
+        BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(map, entry.movementProfile);
+        if (graph == null) {
+            return base;
+        }
+        int botRegionId = BotNavigationManager.resolveCurrentRegionId(graph, entry, map, botPos);
+        if (botRegionId < 0) {
+            return base;
+        }
+        int leftBestMobs = Integer.MAX_VALUE;
+        int rightBestMobs = Integer.MAX_VALUE;
+        for (BotNavigationGraph.Edge edge : graph.getOutgoing(botRegionId)) {
+            if (edge.type != BotNavigationGraph.EdgeType.WALK) {
+                continue;
+            }
+            BotNavigationGraph.Region region = graph.getRegion(edge.toRegionId);
+            if (region == null || region.isRopeRegion) {
+                continue;
+            }
+            int side = Integer.signum(edge.endPoint.x - botPos.x);
+            int mobs = countMobsInRegion(graph, map, region);
+            if (side < 0) {
+                leftBestMobs = Math.min(leftBestMobs, mobs);
+            } else if (side > 0) {
+                rightBestMobs = Math.min(rightBestMobs, mobs);
+            }
+        }
+        if (leftBestMobs == rightBestMobs) {
+            return base;
+        }
+        return leftBestMobs < rightBestMobs ? -1 : 1;
     }
 
     /**

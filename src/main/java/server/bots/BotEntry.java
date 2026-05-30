@@ -134,6 +134,8 @@ public class BotEntry {
     boolean degenAttackDone = false; // force retreat after an accidental close-range hit
     long retreatHoldUntilMs = 0L; // hysteresis: lock the local retreat goal for a short window
     Point retreatHoldPos = null;  // the locked retreat target — reused while hold is active
+    int breakoutDirection = 0;    // -1/+1 committed escape side while surrounded, 0 = not breaking out
+    long breakoutUntilMs = 0L;    // hard safety timeout for the surround-breakout commitment
     int wanderDirection = 0;      // -1 left, +1 right, 0 = unset (picked when grind has no target)
 
     // Shop auto-buy (triggered once per map change)

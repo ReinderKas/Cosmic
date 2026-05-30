@@ -155,6 +155,7 @@ class BotCombatManager {
         public int   RANGED_DEGENERATE_RANGE_Y = 50;
         public int   RANGED_RETREAT_THRESHOLD_X = 80;
         public int   RANGED_RETREAT_DISTANCE_X = 100;
+        public int   BREAKOUT_MAX_MS = 3000; // cap on a committed surround-breakout run before re-deciding
 
         // Ammo
         public int   AMMO_LOW_WARN = 500;
