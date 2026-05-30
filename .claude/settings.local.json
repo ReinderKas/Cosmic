@@ -26,7 +26,11 @@
       "Bash(cd /d D:\\\\GameServers\\\\Maplestory\\\\Cosmic)",
       "Bash(\"C:\\\\apache-maven-3.9.6\\\\bin\\\\mvn.cmd\" -q -o compile -DskipTests)",
       "Bash(git -C \"D:\\\\GameServers\\\\Maplestory\\\\Cosmic\" diff --stat)",
-      "Bash(git -C \"D:\\\\GameServers\\\\Maplestory\\\\Cosmic\" log --oneline -3)"
+      "Bash(git -C \"D:\\\\GameServers\\\\Maplestory\\\\Cosmic\" log --oneline -3)",
+      "mcp__mcp_server_mysql__mysql_query",
+      "Bash(git -C \"D:/GameServers/Maplestory/Cosmic\" ls-files)",
+      "Bash(grep -rn \"wz-path\\\\|System.getProperty\\\\|WZ_PATH\\\\|Path.of\\\\|String WZ\\\\|baseDir\\\\|getPath\" src/main/java/provider/wz/WZFiles.java)",
+      "Bash(sed -n '210,235p' pom.xml)"
     ]
   }
 }
