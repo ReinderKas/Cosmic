@@ -63,6 +63,7 @@ class BotInventoryManager {
     }
 
     private static final Set<Integer> manualTradeGreetingSent = ConcurrentHashMap.newKeySet();
+    private static final Map<Integer, String> normalizedItemNameCache = new ConcurrentHashMap<>();
     private static final List<String> TRADE_INVITATION_MSGS = List.of(
             "k", "ok", "kk", "sure", "k, I inv", "k i inv",
             "omw", "inv u", "one sec", "coming", "1sec", "1 sec",
@@ -1011,15 +1012,27 @@ class BotInventoryManager {
     private static List<Item> collectNamedItems(String fragment, Character bot) {
         List<Item> result = new ArrayList<>();
         String normalizedFragment = normalizeItemQuery(fragment);
-        ItemInformationProvider ii = ItemInformationProvider.getInstance();
         for (InventoryType t : List.of(
                 InventoryType.EQUIP, InventoryType.USE, InventoryType.ETC, InventoryType.SETUP)) {
             collectFromBag(bot, result, t, item -> {
-                String name = ii.getName(item.getItemId());
-                return name != null && normalizeItemQuery(name).contains(normalizedFragment);
+                String name = normalizedItemName(item.getItemId());
+                return name != null && name.contains(normalizedFragment);
             });
         }
         return result;
+    }
+
+    private static String normalizedItemName(int itemId) {
+        return normalizedItemNameCache.computeIfAbsent(itemId, BotInventoryManager::loadNormalizedItemName);
+    }
+
+    private static String loadNormalizedItemName(int itemId) {
+        ItemInformationProvider ii = ItemInformationProvider.getInstance();
+        String name;
+        synchronized (ii) {
+            name = ii.getName(itemId);
+        }
+        return name != null ? normalizeItemQuery(name) : "";
     }
 
     static String normalizeItemQuery(String text) {
@@ -1300,14 +1313,13 @@ class BotInventoryManager {
     }
 
     static void dropByName(BotEntry entry, Character bot, String nameFragment) {
-        ItemInformationProvider ii = ItemInformationProvider.getInstance();
         String normalizedFragment = normalizeItemQuery(nameFragment);
         int total = 0;
         for (InventoryType type : List.of(
                 InventoryType.EQUIP, InventoryType.USE, InventoryType.ETC, InventoryType.SETUP)) {
             total += dropFromBag(bot, type, item -> {
-                String name = ii.getName(item.getItemId());
-                return name != null && normalizeItemQuery(name).contains(normalizedFragment);
+                String name = normalizedItemName(item.getItemId());
+                return name != null && name.contains(normalizedFragment);
             });
         }
         if (total <= 0) {

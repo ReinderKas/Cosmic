@@ -44,6 +44,7 @@ public class BotChatManager {
 
     private record LearnedSkill(int id, String name, int level) {}
     private record TransferCommandResult(boolean hasItems, int count) {}
+    private record ItemQueryResult(int count) {}
     static final class QueuedMessage {
         final String text;
         final boolean ownerDirected;
@@ -2180,17 +2181,41 @@ public class BotChatManager {
 
     private static void handleItemQuery(BotEntry entry, String itemName) {
         String category = "name:" + itemName;
-        int count = BotInventoryManager.countTransferableItems(category, entry, entry.bot);
-        if (count <= 0) {
-            BotManager.after(BotManager.randMs(500, 700), () ->
-                    BotManager.getInstance().botReply(entry, BotInventoryManager.noItemsReply(category)));
+        Character bot = entry.bot;
+        if (bot == null) {
+            return;
+        }
+
+        int requestId = nextTransferRequestId(bot);
+        long replyDelay = BotManager.randMs(500, 700);
+        long requestedAt = System.nanoTime();
+        CompletableFuture
+                .supplyAsync(() -> new ItemQueryResult(
+                        BotInventoryManager.countTransferableItems(category, entry, bot)), TRADE_COMMAND_EXECUTOR)
+                .thenAccept(result -> {
+                    long elapsedMs = (System.nanoTime() - requestedAt) / 1_000_000L;
+                    long remainingDelay = Math.max(0L, replyDelay - elapsedMs);
+                    BotManager.after(remainingDelay, () ->
+                            applyItemQueryResult(entry, category, bot, requestId, result));
+                });
+    }
+
+    private static void applyItemQueryResult(BotEntry entry,
+                                             String category,
+                                             Character bot,
+                                             int requestId,
+                                             ItemQueryResult result) {
+        if (!isLatestTransferRequest(bot, requestId)) {
+            return;
+        }
+        if (result.count() <= 0) {
+            BotManager.getInstance().botReply(entry, BotInventoryManager.noItemsReply(category));
             return;
         }
 
         entry.pendingAction = "item_choice";
         entry.pendingDropCategory = category;
-        BotManager.after(BotManager.randMs(500, 700), () ->
-                BotManager.getInstance().botReply(entry, dropOrTradePrompt(category, count)));
+        BotManager.getInstance().botReply(entry, dropOrTradePrompt(category, result.count()));
     }
 
     private static TransferCommand matchTransferCommand(String message) {
