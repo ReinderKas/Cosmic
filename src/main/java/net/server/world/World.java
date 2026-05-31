@@ -27,6 +27,7 @@ import client.BuddyList.BuddyOperation;
 import client.BuddylistEntry;
 import client.Character;
 import client.Family;
+import config.LevelExpRateConfig;
 import config.YamlConfig;
 import constants.game.GameConstants;
 import net.packet.Packet;
@@ -120,6 +121,7 @@ public class World {
     private final int id;
     private int flag;
     private int exprate;
+    private final List<LevelExpRateConfig> levelExpRateMultipliers;
     private int droprate;
     private int bossdroprate;
     private int mesorate;
@@ -203,11 +205,14 @@ public class World {
     private ScheduledFuture<?> hpDecSchedule;
 
     public World(int world, int flag, String eventmsg, int exprate, int droprate, int bossdroprate, int mesorate,
-                 int questrate, int travelrate, int fishingrate, float mobrate, int mobperspawnpoint) {
+                 int questrate, int travelrate, int fishingrate, float mobrate, int mobperspawnpoint,
+                 List<LevelExpRateConfig> levelExpRateMultipliers) {
         this.id = world;
         this.flag = flag;
         this.eventmsg = eventmsg;
         this.exprate = exprate;
+        this.levelExpRateMultipliers = levelExpRateMultipliers == null ? new ArrayList<>() : new ArrayList<>(levelExpRateMultipliers);
+        this.levelExpRateMultipliers.sort(Comparator.comparingInt(cfg -> cfg.level));
         this.droprate = droprate;
         this.bossdroprate = bossdroprate;
         this.mesorate = mesorate;
@@ -363,6 +368,10 @@ public class World {
 
     public int getExpRate() {
         return exprate;
+    }
+
+    public List<LevelExpRateConfig> getLevelExpRateMultipliers() {
+        return levelExpRateMultipliers;
     }
 
     public void setExpRate(int exp) {

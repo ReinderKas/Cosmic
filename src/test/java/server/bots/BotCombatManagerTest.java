@@ -12,6 +12,7 @@ import constants.game.CharacterStance;
 import constants.skills.Archer;
 import constants.skills.Assassin;
 import constants.skills.Beginner;
+import constants.skills.Bowmaster;
 import constants.skills.Cleric;
 import constants.skills.DragonKnight;
 import constants.skills.Hunter;
@@ -208,6 +209,35 @@ class BotCombatManagerTest {
     }
 
     @Test
+    void shouldClassifySummonIntoOwnBucketNotBuffs() {
+        SkillFactory.loadAllSkills();
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        when(bot.getJob()).thenReturn(Job.BOWMASTER);
+        when(bot.getLevel()).thenReturn(120);
+
+        // Phoenix is a CIRCLE_FOLLOW summon (SUMMON statup). Sharp Eyes is a real party buff.
+        Set<Integer> skillIds = Set.of(Bowmaster.PHOENIX, Bowmaster.SHARP_EYES);
+        Map<Skill, Character.SkillEntry> skills = new LinkedHashMap<>();
+        for (int skillId : skillIds) {
+            Skill skill = SkillFactory.getSkill(skillId);
+            assertTrue(skill != null, "missing real WZ skill " + skillId);
+            skills.put(skill, null);
+        }
+        when(bot.getSkills()).thenReturn(skills);
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skillIds.contains(skill.getId()) ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        BotCombatManager.rebuildSkillCacheIfNeeded(entry, bot);
+
+        assertTrue(entry.summonSkillIds.contains(Bowmaster.PHOENIX));
+        assertFalse(entry.buffSkillIds.contains(Bowmaster.PHOENIX));
+        assertTrue(entry.buffSkillIds.contains(Bowmaster.SHARP_EYES));
+    }
+
+    @Test
     void shouldStillCacheMagicClawAsActiveAttackSkill() {
         Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
         when(bot.getJob()).thenReturn(Job.MAGICIAN);
@@ -360,11 +390,13 @@ class BotCombatManagerTest {
     void shouldClassifyInspectedSecondJobSkillsFromRealWzData() {
         SkillFactory.loadAllSkills();
 
+        // Slow is a mob-targeting debuff (mobCount + bbox, no caster statup), not a rebuffable
+        // self-buff: the bot only casts buffs via a self/party SPECIAL_MOVE, so it is excluded.
         assertRealWzCache(Job.IL_WIZARD, 35,
                 Set.of(ILWizard.MP_EATER, ILWizard.MEDITATION, ILWizard.SLOW, ILWizard.COLD_BEAM, ILWizard.THUNDERBOLT),
                 ILWizard.COLD_BEAM, ILWizard.THUNDERBOLT,
-                Set.of(ILWizard.MEDITATION, ILWizard.SLOW),
-                Set.of(ILWizard.MP_EATER));
+                Set.of(ILWizard.MEDITATION),
+                Set.of(ILWizard.MP_EATER, ILWizard.SLOW));
         assertRealWzCache(Job.CLERIC, 35,
                 Set.of(Cleric.MP_EATER, Cleric.HEAL, Cleric.INVINCIBLE, Cleric.BLESS, Cleric.HOLY_ARROW),
                 Cleric.HOLY_ARROW, 0,
@@ -1012,7 +1044,7 @@ class BotCombatManagerTest {
         BotAttackExecutionProvider.SkillAttackTiming timing =
                 BotAttackExecutionProvider.resolveSkillAttackTiming(450, 4, 300, 590);
 
-        assertEquals(173, timing.hitDelayMs());
+        assertEquals(197, timing.hitDelayMs());
         assertEquals(590, timing.cooldownMs());
     }
 
@@ -1021,8 +1053,8 @@ class BotCombatManagerTest {
         BotAttackExecutionProvider.SkillAttackTiming timing =
                 BotAttackExecutionProvider.resolveSkillAttackTiming(520, 2, 120, 0);
 
-        assertEquals(173, timing.hitDelayMs());
-        assertEquals(347, timing.cooldownMs());
+        assertEquals(203, timing.hitDelayMs());
+        assertEquals(406, timing.cooldownMs());
     }
 
     @Test
@@ -1088,6 +1120,30 @@ class BotCombatManagerTest {
         assertFalse(BotCombatManager.canUseAttackPlanNow(entry, WeaponType.GUN, rangedBowPlan));
         assertTrue(BotCombatManager.canUseAttackPlanNow(entry, WeaponType.CLAW, rangedBowPlan));
         assertTrue(BotCombatManager.canUseAttackPlanNow(entry, WeaponType.BOW, closePlan));
+    }
+
+    @Test
+    void shouldRememberLeftFacingAttackForNextStandingStance() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.facingDir = 1;
+
+        BotCombatManager.rememberAttackFacing(entry, BotAttackExecutionProvider.attackPacketStance(true));
+
+        assertEquals(-1, entry.facingDir);
+        assertEquals(CharacterStance.STAND_LEFT_STANCE, bot.getStance());
+    }
+
+    @Test
+    void shouldRememberRightFacingAttackForNextStandingStance() {
+        Character bot = mockBot(new Point(100, 200), mock(MapleMap.class), 20_000, null);
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.facingDir = -1;
+
+        BotCombatManager.rememberAttackFacing(entry, BotAttackExecutionProvider.attackPacketStance(false));
+
+        assertEquals(1, entry.facingDir);
+        assertEquals(CharacterStance.STAND_RIGHT_STANCE, bot.getStance());
     }
 
     @Test
@@ -1496,6 +1552,10 @@ class BotCombatManagerTest {
         skill.setAction(true);
         StatEffect effect = mock(StatEffect.class);
         when(effect.isOverTime()).thenReturn(true);
+        // Real support buffs are duration-based and grant the caster a statup; isActiveSupportSkill
+        // now requires both, so the mock must mirror that.
+        when(effect.getDuration()).thenReturn(900_000);
+        when(effect.getStatups()).thenReturn(List.of(new tools.Pair<>(BuffStat.WDEF, 20)));
         skill.addLevelEffect(effect);
         return skill;
     }

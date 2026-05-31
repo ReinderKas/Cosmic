@@ -117,10 +117,16 @@ public class BotEntry {
     int aoeSkillMobs = 1;
     int healSkillId = 0;
     List<Integer> buffSkillIds = new ArrayList<>();
+    // Summon skills (Phoenix, Puppet, Beholder, ...) classified into their own bucket: they are
+    // NOT rebuffable (the bot has no summon-cast path that sends a spawn position, so casting them
+    // via the buff loop only burns MP without spawning the creature). Held here for a future
+    // place/condition-gated summon caster; the generic rebuff loop ignores this list.
+    final List<Integer> summonSkillIds = new ArrayList<>();
     final Map<Integer, Long> nextBuffAt = new HashMap<>();
     final Map<Integer, Long> nextSupportBuffAt = new HashMap<>();
     long nextSupportHealAt = 0L;
     boolean supportHealsEnabled = true;
+    boolean skillBuffsEnabled = true;
 
     // Ammo
     boolean noAmmo = false;
@@ -128,6 +134,8 @@ public class BotEntry {
     boolean degenAttackDone = false; // force retreat after an accidental close-range hit
     long retreatHoldUntilMs = 0L; // hysteresis: lock the local retreat goal for a short window
     Point retreatHoldPos = null;  // the locked retreat target — reused while hold is active
+    int breakoutDirection = 0;    // -1/+1 committed escape side while surrounded, 0 = not breaking out
+    long breakoutUntilMs = 0L;    // hard safety timeout for the surround-breakout commitment
     int wanderDirection = 0;      // -1 left, +1 right, 0 = unset (picked when grind has no target)
 
     // Shop auto-buy (triggered once per map change)

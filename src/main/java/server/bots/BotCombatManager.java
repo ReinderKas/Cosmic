@@ -8,7 +8,6 @@ import client.SkillFactory;
 import client.inventory.InventoryType;
 import client.inventory.Item;
 import client.inventory.WeaponType;
-import constants.game.CharacterStance;
 import constants.game.GameConstants;
 import constants.inventory.ItemConstants;
 import constants.skills.Archer;
@@ -55,6 +54,7 @@ import server.maps.MapObject;
 import server.maps.MapObjectType;
 import server.maps.MapleMap;
 import tools.PacketCreator;
+import tools.Pair;
 
 import java.awt.*;
 import java.util.ArrayList;
@@ -74,11 +74,11 @@ class BotCombatManager {
 
     // Skills that bots must never cast — stealth makes them untargetable by monsters,
     // breaking combat entirely.
-    private static final Set<Integer> BUFF_BLACKLIST = Set.of(
+    static final Set<Integer> BUFF_BLACKLIST = Set.of(
             Rogue.DARK_SIGHT,
             NightWalker.DARK_SIGHT
     );
-    private static final Set<Integer> NON_DAMAGE_ACTIVE_SKILL_IDS = Set.of(
+    static final Set<Integer> NON_DAMAGE_ACTIVE_SKILL_IDS = Set.of(
             Crusader.ARMOR_CRASH,
             WhiteKnight.MAGIC_CRASH,
             DragonKnight.POWER_CRASH
@@ -155,6 +155,7 @@ class BotCombatManager {
         public int   RANGED_DEGENERATE_RANGE_Y = 50;
         public int   RANGED_RETREAT_THRESHOLD_X = 80;
         public int   RANGED_RETREAT_DISTANCE_X = 100;
+        public int   BREAKOUT_MAX_MS = 3000; // cap on a committed surround-breakout run before re-deciding
 
         // Ammo
         public int   AMMO_LOW_WARN = 500;
@@ -464,6 +465,7 @@ class BotCombatManager {
         entry.attackSkillIds.clear();
         entry.healSkillId = 0;
         entry.buffSkillIds.clear();
+        entry.summonSkillIds.clear();
 
         int bestAtkHits = 0;
         int bestAtkPriority = Integer.MIN_VALUE;
@@ -504,6 +506,12 @@ class BotCombatManager {
                 continue;
             }
 
+            if (isSummonSkill(fx)) {
+                // Own bucket, not rebuffable — see BotEntry.summonSkillIds.
+                entry.summonSkillIds.add(skill.getId());
+                continue;
+            }
+
             if (!isActiveSupportSkill(skill, fx)) continue;
             if (BUFF_BLACKLIST.contains(skill.getId())) continue;
             entry.buffSkillIds.add(skill.getId());
@@ -526,6 +534,10 @@ class BotCombatManager {
 
     static void tickBuffs(BotEntry entry, Character bot) {
         if (entry.attackCooldownMs > 0) return;
+        if (!entry.skillBuffsEnabled) {
+            noteSkillBuffDecision(entry, "skill buffs disabled");
+            return;
+        }
         if (!entry.following && !entry.grinding) {
             noteSkillBuffDecision(entry, "idle (not following or grinding)");
             return;
@@ -1130,8 +1142,13 @@ class BotCombatManager {
 
         BotAttackExecutionProvider.applyAttackRoute(attackPlan.route, attack, bot);
         entry.attackCooldownMs = Math.max(entry.attackCooldownMs, attackPlan.cooldownMs);
-        entry.facingDir = CharacterStance.isFacingLeft(attackPlan.stance) ? -1 : 1;
+        rememberAttackFacing(entry, attackPlan.stance);
         markAlerted(entry);
+    }
+
+    static void rememberAttackFacing(BotEntry entry, int attackPacketStance) {
+        entry.facingDir = BotAttackExecutionProvider.facingDirFromAttackPacketStance(attackPacketStance);
+        BotPhysicsEngine.syncCharacterState(entry);
     }
 
     static void tickActionLock(BotEntry entry) {
@@ -1480,7 +1497,7 @@ class BotCombatManager {
      * Uses the larger of attackCount and bulletCount from skill data —
      * claw skills like Lucky Seven store their projectile count in bulletCount.
      */
-    private static int effectiveHitCount(StatEffect effect) {
+    static int effectiveHitCount(StatEffect effect) {
         return Math.max(1, Math.max(effect.getAttackCount(), effect.getBulletCount()));
     }
 
@@ -2444,11 +2461,11 @@ class BotCombatManager {
         return nearby;
     }
 
-    private static boolean isPartySupportSkill(int skillId) {
+    static boolean isPartySupportSkill(int skillId) {
         return PARTY_SUPPORT_SKILL_IDS.contains(skillId);
     }
 
-    private static boolean isActiveAttackSkill(Skill skill, StatEffect effect) {
+    static boolean isActiveAttackSkill(Skill skill, StatEffect effect) {
         if (skill == null || effect == null) {
             return false;
         }
@@ -2480,21 +2497,59 @@ class BotCombatManager {
                 || (effect.getMobCount() > 1 && effect.hasBoundingBox());
     }
 
-    private static boolean isActiveSupportSkill(Skill skill, StatEffect effect) {
+    static boolean isActiveSupportSkill(Skill skill, StatEffect effect) {
         if (skill == null || effect == null || !effect.isOverTime()) {
             return false;
         }
-        if (NON_DAMAGE_ACTIVE_SKILL_IDS.contains(skill.getId())) {
+        // Data-driven gate for "rebuffable self/party buff" — two WZ facts replace what used to
+        // need per-skill exclusion lists:
+        //   1. getDuration() > 0. The rebuff loop is timer-based: castSupportSkill sets
+        //      nextBuffAt = now + duration*0.9 and only recasts once that elapses. Skills with no
+        //      WZ "time" key load as duration -1000 (Dispel, Resurrection, Big Bang, MP Recovery,
+        //      Time Leap, Energy Drain), so they would never advance the timer and recast every
+        //      tick. These are one-shot / instant / charged effects, not rebuffable buffs.
+        //   2. getStatups() non-empty. A genuine buff declares at least one stat it grants the
+        //      caster/party (pad/pdd/mad/acc/eva/speed/jump/SUMMON/MORPH/...). Mob-targeting
+        //      debuffs (Threaten, Slow, Seal, Doom, Ninja Ambush) instead carry mobCount + a
+        //      bounding box and grant the caster no statup; the bot only has a self/party
+        //      SPECIAL_MOVE cast path, so firing them on a rebuff timer is wasted MP. This also
+        //      subsumes the old NON_DAMAGE_ACTIVE_SKILL_IDS exclusion here (the *Crash skills
+        //      carry no statup), so no skill-id list is needed on the support path.
+        if (effect.getDuration() <= 0 || effect.getStatups().isEmpty()) {
+            return false;
+        }
+        // Summons are classified separately (entry.summonSkillIds): their only statup is
+        // SUMMON/PUPPET, and they cannot be cast through the rebuff loop (no spawn position).
+        if (isSummonSkill(effect)) {
             return false;
         }
         return skill.getAction() || skill.getSkillType() == 2;
     }
 
-    private static boolean isActiveHealSkill(Skill skill, StatEffect effect) {
+    /**
+     * Data-driven summon test: a summon's effect grants only the SUMMON (follow/circle hawk-type)
+     * or PUPPET (stationary decoy) buffstat — the WZ marks the summoned creature, not a caster
+     * stat boost. Detecting it from the statups avoids a per-skill id list and matches the
+     * server's spawn path (StatEffect.applyTo spawns the creature only when given a position).
+     */
+    static boolean isSummonSkill(StatEffect effect) {
+        if (effect == null) {
+            return false;
+        }
+        for (Pair<BuffStat, Integer> statup : effect.getStatups()) {
+            BuffStat stat = statup.getLeft();
+            if (stat == BuffStat.SUMMON || stat == BuffStat.PUPPET) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static boolean isActiveHealSkill(Skill skill, StatEffect effect) {
         return skill != null && effect != null && skill.getAction();
     }
 
-    private static boolean isHealSkill(int skillId) {
+    static boolean isHealSkill(int skillId) {
         return skillId == Cleric.HEAL || skillId == SuperGM.HEAL_PLUS_DISPEL;
     }
 }

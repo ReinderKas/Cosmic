@@ -63,6 +63,7 @@ class BotInventoryManager {
     }
 
     private static final Set<Integer> manualTradeGreetingSent = ConcurrentHashMap.newKeySet();
+    private static final Map<Integer, String> normalizedItemNameCache = new ConcurrentHashMap<>();
     private static final List<String> TRADE_INVITATION_MSGS = List.of(
             "k", "ok", "kk", "sure", "k, I inv", "k i inv",
             "omw", "inv u", "one sec", "coming", "1sec", "1 sec",
@@ -1001,25 +1002,46 @@ class BotInventoryManager {
         return prioritized;
     }
 
-    static List<Item> prioritizeTradeUseItems(List<Item> uncategorized, List<Item> categorized, Character recipient) {
-        List<Item> ordered = new ArrayList<>(uncategorized.size() + categorized.size());
+    static List<Item> prioritizeTradeUseItems(List<Item> uncategorized,
+                                              List<Item> categorizedOther,
+                                              List<Item> potionAmmo,
+                                              Character recipient) {
+        List<Item> ordered = new ArrayList<>(
+                uncategorized.size() + categorizedOther.size() + potionAmmo.size());
         ordered.addAll(prioritizeRecipientDuplicateItemIds(uncategorized, InventoryType.USE, recipient));
-        ordered.addAll(prioritizeRecipientDuplicateItemIds(categorized, InventoryType.USE, recipient));
+        ordered.addAll(prioritizeRecipientDuplicateItemIds(categorizedOther, InventoryType.USE, recipient));
+        ordered.addAll(prioritizeRecipientDuplicateItemIds(potionAmmo, InventoryType.USE, recipient));
         return ordered;
+    }
+
+    static List<Item> prioritizeScrollTradeItems(List<Item> items, Character recipient) {
+        return prioritizeRecipientDuplicateItemIds(items, InventoryType.USE, recipient);
     }
 
     private static List<Item> collectNamedItems(String fragment, Character bot) {
         List<Item> result = new ArrayList<>();
         String normalizedFragment = normalizeItemQuery(fragment);
-        ItemInformationProvider ii = ItemInformationProvider.getInstance();
         for (InventoryType t : List.of(
                 InventoryType.EQUIP, InventoryType.USE, InventoryType.ETC, InventoryType.SETUP)) {
             collectFromBag(bot, result, t, item -> {
-                String name = ii.getName(item.getItemId());
-                return name != null && normalizeItemQuery(name).contains(normalizedFragment);
+                String name = normalizedItemName(item.getItemId());
+                return name != null && name.contains(normalizedFragment);
             });
         }
         return result;
+    }
+
+    private static String normalizedItemName(int itemId) {
+        return normalizedItemNameCache.computeIfAbsent(itemId, BotInventoryManager::loadNormalizedItemName);
+    }
+
+    private static String loadNormalizedItemName(int itemId) {
+        ItemInformationProvider ii = ItemInformationProvider.getInstance();
+        String name;
+        synchronized (ii) {
+            name = ii.getName(itemId);
+        }
+        return name != null ? normalizeItemQuery(name) : "";
     }
 
     static String normalizeItemQuery(String text) {
@@ -1142,8 +1164,11 @@ class BotInventoryManager {
                     result.addAll(BotEquipManager.collectRecommendedItems(owner, bot));
                 }
             }
-            case "scrolls" -> collectFromBag(bot, result, InventoryType.USE,
-                    item -> ItemConstants.isEquipScroll(item.getItemId()));
+            case "scrolls" -> {
+                collectFromBag(bot, result, InventoryType.USE,
+                        item -> ItemConstants.isEquipScroll(item.getItemId()));
+                result = prioritizeScrollTradeItems(result, entry.owner);
+            }
             case "pots"    -> collectFromBag(bot, result, InventoryType.USE,
                     item -> isRecoveryPotion(item.getItemId()));
             case "buff"    -> collectFromBag(bot, result, InventoryType.USE,
@@ -1300,14 +1325,13 @@ class BotInventoryManager {
     }
 
     static void dropByName(BotEntry entry, Character bot, String nameFragment) {
-        ItemInformationProvider ii = ItemInformationProvider.getInstance();
         String normalizedFragment = normalizeItemQuery(nameFragment);
         int total = 0;
         for (InventoryType type : List.of(
                 InventoryType.EQUIP, InventoryType.USE, InventoryType.ETC, InventoryType.SETUP)) {
             total += dropFromBag(bot, type, item -> {
-                String name = ii.getName(item.getItemId());
-                return name != null && normalizeItemQuery(name).contains(normalizedFragment);
+                String name = normalizedItemName(item.getItemId());
+                return name != null && name.contains(normalizedFragment);
             });
         }
         if (total <= 0) {
@@ -1535,16 +1559,21 @@ class BotInventoryManager {
 
     private static UseTradeGroups classifyUseTradeGroups(Character bot, Character recipient) {
         List<Item> uncategorized = new ArrayList<>();
-        List<Item> categorized = new ArrayList<>();
+        List<Item> categorizedOther = new ArrayList<>();
+        List<Item> potionAmmo = new ArrayList<>();
         collectFromBag(bot, uncategorized, InventoryType.USE, item -> {
             int id = item.getItemId();
-            if (isTradeAmmoItem(id) || ItemConstants.isEquipScroll(id) || isRecoveryPotion(id) || isBuffConsumable(id)) {
-                categorized.add(item);
+            if (isRecoveryPotion(id) || isTradeAmmoItem(id)) {
+                potionAmmo.add(item);
+                return false;
+            }
+            if (ItemConstants.isEquipScroll(id) || isBuffConsumable(id)) {
+                categorizedOther.add(item);
                 return false;
             }
             return true;
         });
-        List<Item> ordered = prioritizeTradeUseItems(uncategorized, categorized, recipient);
+        List<Item> ordered = prioritizeTradeUseItems(uncategorized, categorizedOther, potionAmmo, recipient);
         int uncategorizedCount = uncategorized.size();
         return new UseTradeGroups(
                 new ArrayList<>(ordered.subList(0, uncategorizedCount)),

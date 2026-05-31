@@ -283,7 +283,7 @@ public class NPCConversationManager extends AbstractPlayerInteraction {
     }
 
     public void gainExp(int gain) {
-        getPlayer().gainExp(gain, true, true);
+        getPlayer().gainExpRateScaled(gain, true, true);
     }
 
     @Override

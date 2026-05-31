@@ -24,8 +24,21 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.IntUnaryOperator;
 
 final class BotShopManager {
+
+    // Test seam: ItemInformationProvider's WZ/DB static initializer can't run in unit tests,
+    // so projectile attack / slot-max lookups go through overridable hooks (see BotShopManagerTest).
+    @FunctionalInterface
+    interface SlotMaxLookup {
+        short slotMax(Character bot, int itemId);
+    }
+
+    static IntUnaryOperator projectileWatk =
+            id -> ItemInformationProvider.getInstance().getWatkForProjectile(id);
+    static SlotMaxLookup ammoSlotMax =
+            (bot, id) -> ItemInformationProvider.getInstance().getSlotMax(bot.getClient(), id);
 
     private static final int SHOP_MANHATTAN_RADIUS = 200;
     private static final int SHOP_ARRIVE_DIST = 100;
@@ -42,6 +55,7 @@ final class BotShopManager {
     private static final int POT_TARGET_THRESHOLD = 5; // full target when buying at shop
     private static final int AMMO_TRIGGER_THRESHOLD = 8;
     private static final int AMMO_TARGET_THRESHOLD = 10; // full target when buying at shop
+    private static final int RECHARGE_MAX_SETS = 10; // cap recharge to the best N own-type stacks
 
     private BotShopManager() {}
 
@@ -151,7 +165,7 @@ final class BotShopManager {
             return false;
         }
         if (entry.shopNpcPos == null) {
-            clearShopState(entry);
+            abortShop(entry, bot, "lost track of the shop, never mind");
             return false;
         }
         long now = System.currentTimeMillis();
@@ -165,7 +179,7 @@ final class BotShopManager {
         if (entry.shopSequenceActive
                 && entry.shopSequenceStartedAtMs > 0
                 && now - entry.shopSequenceStartedAtMs > SHOP_SEQUENCE_TIMEOUT_MS) {
-            clearShopState(entry);
+            abortShop(entry, bot, "took too long at the shop, giving up");
             return false;
         }
         if (entry.shopApproachDelayMs > 0) {
@@ -259,7 +273,7 @@ final class BotShopManager {
 
     private static void executePurchases(BotEntry entry, Character bot, Point npcPos) {
         if (!isShopSequenceValid(entry, bot, npcPos)) {
-            clearShopState(entry);
+            abortShop(entry, bot, "couldn't get to the shopkeeper, never mind");
             return;
         }
 
@@ -268,7 +282,7 @@ final class BotShopManager {
 
         if (shouldRechargeWhileShopping(bot, wt)) {
             actions.add((sequence, shop) -> {
-                BuyReport recharge = doRecharge(bot, shop);
+                BuyReport recharge = doRecharge(bot, shop, wt);
                 if (recharge.quantity() > 0) {
                     int recharged = recharge.quantity();
                     String ammoName = wt == WeaponType.GUN ? "bullets" : "throwing stars";
@@ -301,26 +315,26 @@ final class BotShopManager {
 
     private static void runPurchaseStep(PurchaseSequence sequence, int index) {
         if (!isShopSequenceValid(sequence.entry(), sequence.bot(), sequence.npcPos())) {
-            clearShopState(sequence.entry());
+            abortShop(sequence.entry(), sequence.bot(), "couldn't stay at the shop to buy, never mind");
             return;
         }
         if (index >= sequence.actions().size()) {
             if (sequence.entry().shopSellTrashPending) {
                 startSellTrashSequence(sequence);
             } else {
-                finishPurchaseSequence(sequence);
+                finishPurchaseSequence(sequence, true);
             }
             return;
         }
 
         NPC npc = findNpcNear(sequence.bot(), sequence.npcPos());
         if (npc == null) {
-            clearShopState(sequence.entry());
+            abortShop(sequence.entry(), sequence.bot(), "the shopkeeper's gone, can't buy");
             return;
         }
         Shop shop = ShopFactory.getInstance().getShopForNPC(npc.getId());
         if (shop == null) {
-            clearShopState(sequence.entry());
+            abortShop(sequence.entry(), sequence.bot(), "this shop's closed, can't buy");
             return;
         }
 
@@ -328,19 +342,22 @@ final class BotShopManager {
         scheduleShopStep(sequence.entry(), () -> runPurchaseStep(next, index + 1));
     }
 
-    private static void finishPurchaseSequence(PurchaseSequence sequence) {
+    private static void finishPurchaseSequence(PurchaseSequence sequence, boolean announceIfEmpty) {
         if (!isShopSequenceValid(sequence.entry(), sequence.bot(), sequence.npcPos())) {
-            clearShopState(sequence.entry());
+            abortShop(sequence.entry(), sequence.bot(), "couldn't finish up at the shop");
             return;
         }
 
         Runnable finish = () -> {
             if (!isShopSequenceValid(sequence.entry(), sequence.bot(), sequence.npcPos())) {
-                clearShopState(sequence.entry());
+                abortShop(sequence.entry(), sequence.bot(), "couldn't finish up at the shop");
                 return;
             }
             if (sequence.firstShortfall() != null) {
                 BotManager.getInstance().botSay(sequence.bot(), buildShortfallMessage(sequence.firstShortfall()));
+            } else if (announceIfEmpty && sequence.bought().isEmpty()) {
+                // Never end a resupply visit silently: nothing was bought and nothing fell short.
+                BotManager.getInstance().botSay(sequence.bot(), "turned out I didn't need anything here");
             }
             clearShopState(sequence.entry());
         };
@@ -361,7 +378,7 @@ final class BotShopManager {
         if (items.isEmpty()) {
             sequence.entry().shopSellTrashPending = false;
             BotManager.getInstance().botSay(sequence.bot(), "no trash equips worth selling");
-            finishPurchaseSequence(sequence);
+            finishPurchaseSequence(sequence, false);
             return;
         }
 
@@ -373,12 +390,15 @@ final class BotShopManager {
                         sequence.npcPos(),
                         0,
                         Collections.newSetFromMap(new IdentityHashMap<>()),
-                        plan));
+                        plan,
+                        sequence.bought(),
+                        sequence.firstShortfall()));
     }
 
-    private static void runSellTrashStep(BotEntry entry, Character bot, Point npcPos, int soldCount, Set<Item> failedItems, List<Item> plan) {
+    private static void runSellTrashStep(BotEntry entry, Character bot, Point npcPos, int soldCount, Set<Item> failedItems, List<Item> plan,
+                                         List<String> bought, BuyReport firstShortfall) {
         if (!isShopSequenceValid(entry, bot, npcPos)) {
-            clearShopState(entry);
+            abortShop(entry, bot, "couldn't stay at the shop to sell, never mind");
             return;
         }
 
@@ -396,25 +416,25 @@ final class BotShopManager {
             } else if (soldCount == 0) {
                 BotManager.getInstance().botSay(bot, "no trash equips worth selling");
             }
-            finishPurchaseSequence(new PurchaseSequence(entry, bot, npcPos, List.of(), new ArrayList<>(), null));
+            finishPurchaseSequence(new PurchaseSequence(entry, bot, npcPos, List.of(), bought, firstShortfall), false);
             return;
         }
 
         Item item = items.get(0);
         if (!BotInventoryManager.hasItem(bot, item)) {
             scheduleShopStep(entry, SELL_TRASH_STEP_DELAY_MS,
-                    () -> runSellTrashStep(entry, bot, npcPos, soldCount, failedItems, plan));
+                    () -> runSellTrashStep(entry, bot, npcPos, soldCount, failedItems, plan, bought, firstShortfall));
             return;
         }
 
         NPC npc = findNpcNear(bot, npcPos);
         if (npc == null) {
-            clearShopState(entry);
+            abortShop(entry, bot, "the shopkeeper's gone, can't sell");
             return;
         }
         Shop shop = ShopFactory.getInstance().getShopForNPC(npc.getId());
         if (shop == null) {
-            clearShopState(entry);
+            abortShop(entry, bot, "this shop's closed, can't sell");
             return;
         }
 
@@ -422,13 +442,13 @@ final class BotShopManager {
         if (BotInventoryManager.hasItem(bot, item)) {
             failedItems.add(item);
             scheduleShopStep(entry, SELL_TRASH_STEP_DELAY_MS,
-                    () -> runSellTrashStep(entry, bot, npcPos, soldCount, failedItems, plan));
+                    () -> runSellTrashStep(entry, bot, npcPos, soldCount, failedItems, plan, bought, firstShortfall));
             return;
         }
 
         int nextSoldCount = soldCount + 1;
         scheduleShopStep(entry, SELL_TRASH_STEP_DELAY_MS,
-                () -> runSellTrashStep(entry, bot, npcPos, nextSoldCount, failedItems, plan));
+                () -> runSellTrashStep(entry, bot, npcPos, nextSoldCount, failedItems, plan, bought, firstShortfall));
     }
 
     private static String buildSellTrashFailureMessage(int failedCount) {
@@ -465,15 +485,35 @@ final class BotShopManager {
         return shop == null || findAmmoItem(shop, wt) != null;
     }
 
+    // True when the bot's BEST rechargeable ammo (highest-attack star/bullet matching the
+    // weapon) is below the threshold AND has a partial stack that can actually be refilled.
+    // Keying on the best item means a pile of weaker stars can't mask a depleted good stack,
+    // and the partial-stack check stops pointless trips/silent no-ops when nothing is refillable.
     private static boolean needsRechargeForShop(Character bot, WeaponType wt, int threshold) {
-        if (!isRechargeWeaponType(wt) || BotCombatManager.countAmmo(bot, wt) >= threshold) {
+        if (!isRechargeWeaponType(wt)) {
             return false;
         }
-        return hasRechargeableAmmo(bot);
+        int bestId = bestRechargeAmmoId(bot, wt);
+        if (bestId < 0) {
+            return false;
+        }
+        short slotMax = ammoSlotMax.slotMax(bot, bestId);
+        int count = 0;
+        boolean refillable = false;
+        for (Item item : bot.getInventory(InventoryType.USE).list()) {
+            if (item.getItemId() != bestId) {
+                continue;
+            }
+            count += item.getQuantity();
+            if (item.getQuantity() < slotMax) {
+                refillable = true;
+            }
+        }
+        return refillable && count < threshold;
     }
 
     static boolean shouldRechargeWhileShopping(Character bot, WeaponType wt) {
-        return isRechargeWeaponType(wt) && hasRechargeableAmmo(bot);
+        return needsRechargeForShop(bot, wt, ammoTriggerThreshold());
     }
 
     static boolean shouldBuyFixedAmmoWhileShopping(Character bot, WeaponType wt) {
@@ -516,29 +556,57 @@ final class BotShopManager {
         return buyFixedCostItem(bot, shop, ammo, Math.max(0, target - current), 1000);
     }
 
-    private static boolean hasRechargeableAmmo(Character bot) {
+    private static int bestRechargeAmmoId(Character bot, WeaponType wt) {
+        int bestId = -1;
+        int bestAtk = -1;
         for (Item item : bot.getInventory(InventoryType.USE).list()) {
-            if (ItemConstants.isRechargeable(item.getItemId())) {
-                return true;
+            int id = item.getItemId();
+            if (!ItemConstants.isRechargeable(id) || !matchesRechargeWeapon(id, wt)) {
+                continue;
+            }
+            int atk = projectileWatk.applyAsInt(id);
+            if (atk > bestAtk) {
+                bestAtk = atk;
+                bestId = id;
             }
         }
-        return false;
+        return bestId;
     }
 
-    private static BuyReport doRecharge(Character bot, Shop shop) {
+    private static boolean matchesRechargeWeapon(int itemId, WeaponType wt) {
+        return switch (wt) {
+            case CLAW -> ItemConstants.isThrowingStar(itemId);
+            case GUN -> ItemConstants.isBullet(itemId);
+            default -> false;
+        };
+    }
+
+    private static BuyReport doRecharge(Character bot, Shop shop, WeaponType wt) {
+        // Only recharge ammo matching the equipped weapon (claw->stars, gun->bullets) and only
+        // the best stacks by attack: recharging off-weapon or low-tier leftovers just wastes meso,
+        // and an off-weapon failure must never short-circuit the real ammo refill.
+        List<Item> refillable = new ArrayList<>();
+        for (Item item : bot.getInventory(InventoryType.USE).list()) {
+            int id = item.getItemId();
+            if (!ItemConstants.isRechargeable(id) || !matchesRechargeWeapon(id, wt)) {
+                continue;
+            }
+            if (item.getQuantity() >= ammoSlotMax.slotMax(bot, id)) {
+                continue;
+            }
+            refillable.add(item);
+        }
+        refillable.sort((a, b) -> Integer.compare(
+                projectileWatk.applyAsInt(b.getItemId()), projectileWatk.applyAsInt(a.getItemId())));
+
         int recharged = 0;
         int attempted = 0;
         int shortfallItemId = 0;
         ShortfallReason reason = ShortfallReason.NONE;
-        for (Item item : bot.getInventory(InventoryType.USE).list()) {
-            if (!ItemConstants.isRechargeable(item.getItemId())) {
-                continue;
+        for (Item item : refillable) {
+            if (recharged >= RECHARGE_MAX_SETS) {
+                break;
             }
-            short slotMax = ItemInformationProvider.getInstance().getSlotMax(bot.getClient(), item.getItemId());
-            if (item.getQuantity() >= slotMax) {
-                continue;
-            }
-
             Shop.TransactionResult result = shop.rechargeDirect(bot, item.getPosition());
             if (result == Shop.TransactionResult.SUCCESS) {
                 recharged++;
@@ -563,7 +631,11 @@ final class BotShopManager {
         int minRecover = (int) (maxStat * 0.10);
         int maxRecover = (int) (maxStat * 0.50);
 
-        ShopSlotItem best = null;
+        ShopSlotItem inBand = null;     // cheapest potion within [minRecover, maxRecover]
+        ShopSlotItem bestTooLow = null; // highest-recover potion below minRecover
+        int bestTooLowRecover = -1;
+        ShopSlotItem bestTooHigh = null; // lowest-recover potion above maxRecover
+        int bestTooHighRecover = Integer.MAX_VALUE;
         for (int i = 0; i < items.size(); i++) {
             ShopItem si = items.get(i);
             if (si.getPrice() <= 0) {
@@ -586,15 +658,30 @@ final class BotShopManager {
             }
 
             int recover = forHp ? fx.getHp() : fx.getMp();
-            if (recover <= 0 || recover < minRecover || recover > maxRecover) {
+            if (recover <= 0) {
                 continue;
             }
 
-            if (best == null || si.getPrice() < best.shopItem.getPrice()) {
-                best = new ShopSlotItem((short) i, si);
+            if (recover < minRecover) {
+                if (recover > bestTooLowRecover) {
+                    bestTooLowRecover = recover;
+                    bestTooLow = new ShopSlotItem((short) i, si);
+                }
+            } else if (recover > maxRecover) {
+                if (recover < bestTooHighRecover) {
+                    bestTooHighRecover = recover;
+                    bestTooHigh = new ShopSlotItem((short) i, si);
+                }
+            } else if (inBand == null || si.getPrice() < inBand.shopItem.getPrice()) {
+                inBand = new ShopSlotItem((short) i, si);
             }
         }
-        return best;
+        // Prefer a potion sized for this bot; otherwise fall back to the closest available:
+        // the strongest that's still too weak, or failing that the weakest that's too strong.
+        if (inBand != null) {
+            return inBand;
+        }
+        return bestTooLow != null ? bestTooLow : bestTooHigh;
     }
 
     private static BuyReport buyPotions(Character bot, Shop shop, boolean forHp) {
@@ -669,15 +756,29 @@ final class BotShopManager {
     }
 
     private static boolean isShopSequenceValid(BotEntry entry, Character bot, Point npcPos) {
-        return entry.shopVisitPending
-                && entry.shopSequenceActive
-                && npcPos != null
-                && bot.getMap() != null
-                && manhattan(bot.getPosition(), entry.shopTargetPos != null ? entry.shopTargetPos : npcPos) <= SHOP_ARRIVE_DIST
-                && findNpcNear(bot, npcPos) != null;
+        if (!entry.shopVisitPending || !entry.shopSequenceActive || npcPos == null || bot.getMap() == null) {
+            return false;
+        }
+        // Accept proximity to the approach point OR the NPC itself: the sequence can start
+        // via the stuck-at-NPC fallback, where the bot is near the NPC but not the approach point.
+        Point pos = bot.getPosition();
+        Point approach = entry.shopTargetPos != null ? entry.shopTargetPos : npcPos;
+        boolean atShop = manhattan(pos, approach) <= SHOP_ARRIVE_DIST
+                || manhattan(pos, npcPos) <= SHOP_ARRIVE_DIST;
+        return atShop && findNpcNear(bot, npcPos) != null;
     }
 
     static void cancelShopVisit(BotEntry entry) {
+        clearShopState(entry);
+    }
+
+    // Abort the shop visit and tell the owner why. Player commands cancel via
+    // cancelShopVisit (which clears shopVisitPending) and scheduleShopStep guards on
+    // that flag, so a cleared flag here means a concurrent player cancel — stay silent.
+    private static void abortShop(BotEntry entry, Character bot, String reason) {
+        if (entry.shopVisitPending) {
+            BotManager.getInstance().botSay(bot, reason);
+        }
         clearShopState(entry);
     }
 
@@ -710,7 +811,7 @@ final class BotShopManager {
             try {
                 step.run();
             } catch (RuntimeException exception) {
-                clearShopState(entry);
+                abortShop(entry, entry.bot, "ran into a problem at the shop");
                 throw exception;
             }
         });

@@ -178,6 +178,10 @@ final class BotAttackExecutionProvider {
         return facingLeft ? 0x80 : 0x00;
     }
 
+    static int facingDirFromAttackPacketStance(int attackPacketStance) {
+        return (attackPacketStance & 0x80) != 0 ? -1 : 1;
+    }
+
     static List<String> resolveAttackActions(BotAttackDataProvider.AttackAnimationSpec attackSpec, List<String> sourceActions) {
         if (attackSpec == null || attackSpec.actions().isEmpty()) {
             return List.of("swingO1");
@@ -407,15 +411,43 @@ final class BotAttackExecutionProvider {
         return new Point(bestX, botPos.y);
     }
 
-    private static int pickRetreatDirection(Character bot, Point botPos, Point targetPos) {
+    static int pickRetreatDirection(Character bot, Point botPos, Point targetPos) {
         int defaultDir = targetPos.x >= botPos.x ? -1 : 1;
         if (bot == null || bot.getMap() == null) {
             return defaultDir;
         }
+        FlankScan scan = scanFlankingMobs(bot, botPos);
+        if (scan.leftNearestSq == scan.rightNearestSq) {
+            return defaultDir;
+        }
+        return scan.leftNearestSq > scan.rightNearestSq ? -1 : 1;
+    }
+
+    /**
+     * True when live mobs breach the tight retreat band ({@code dx <= RETREAT_THRESHOLD_X},
+     * {@code dy <= DEGENERATE_RANGE_Y}) on BOTH horizontal sides — the bot is pincered and
+     * a one-step local retreat just walks it into the other wall. Bow/crossbow/claw/gun only.
+     */
+    static boolean isSurrounded(Character bot, Point botPos) {
+        if (!isDegenerateCapableRangedWeapon(getEquippedWeaponType(bot)) || botPos == null) {
+            return false;
+        }
+        FlankScan scan = scanFlankingMobs(bot, botPos);
+        return scan.leftInBand && scan.rightInBand;
+    }
+
+    /** One pass over nearby live mobs: nearest distance per side (wide scan, for retreat
+     *  direction) plus whether the tight retreat band is breached per side (for surround
+     *  detection). Mobs exactly on the bot's x are ignored, as the direction scan always has. */
+    private static FlankScan scanFlankingMobs(Character bot, Point botPos) {
+        FlankScan scan = new FlankScan();
+        if (bot == null || bot.getMap() == null || botPos == null) {
+            return scan;
+        }
         int scanWidth = BotCombatManager.cfg.ATTACK_RANGE_X * 4;
         int scanHeight = BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_Y * 2;
-        long leftNearestSq = Long.MAX_VALUE;
-        long rightNearestSq = Long.MAX_VALUE;
+        int bandX = BotCombatManager.cfg.RANGED_RETREAT_THRESHOLD_X;
+        int bandY = BotCombatManager.cfg.RANGED_DEGENERATE_RANGE_Y;
         for (server.life.Monster m : bot.getMap().getAllMonsters()) {
             if (!m.isAlive()) continue;
             Point mp = m.getPosition();
@@ -425,16 +457,23 @@ final class BotAttackExecutionProvider {
             int dxAbs = Math.abs(dx);
             if (dxAbs > scanWidth) continue;
             long distSq = (long) dx * dx + (long) dy * dy;
+            boolean inBand = dxAbs <= bandX && dy <= bandY;
             if (dx < 0) {
-                if (distSq < leftNearestSq) leftNearestSq = distSq;
+                if (distSq < scan.leftNearestSq) scan.leftNearestSq = distSq;
+                if (inBand) scan.leftInBand = true;
             } else if (dx > 0) {
-                if (distSq < rightNearestSq) rightNearestSq = distSq;
+                if (distSq < scan.rightNearestSq) scan.rightNearestSq = distSq;
+                if (inBand) scan.rightInBand = true;
             }
         }
-        if (leftNearestSq == rightNearestSq) {
-            return defaultDir;
-        }
-        return leftNearestSq > rightNearestSq ? -1 : 1;
+        return scan;
+    }
+
+    private static final class FlankScan {
+        long leftNearestSq = Long.MAX_VALUE;
+        long rightNearestSq = Long.MAX_VALUE;
+        boolean leftInBand = false;
+        boolean rightInBand = false;
     }
 
     static SkillAttackTiming resolveSkillAttackTiming(Skill skill, String action, Character bot,
@@ -661,12 +700,17 @@ final class BotAttackExecutionProvider {
             return normalizedBaseSpeed;
         }
 
+        int speedDelta = 0;
         Integer booster = bot.getBuffedValue(BuffStat.BOOSTER);
-        if (booster == null) {
-            return normalizedBaseSpeed;
+        if (booster != null) {
+            speedDelta += booster;
+        }
+        Integer speedInfusion = bot.getBuffedValue(BuffStat.SPEED_INFUSION);
+        if (speedInfusion != null) {
+            speedDelta += speedInfusion;
         }
 
-        return Math.max(2, normalizedBaseSpeed + booster);
+        return Math.max(2, normalizedBaseSpeed + speedDelta);
     }
 
     private static int adjustAttackDelayMillis(int baseDelayMillis, int effectiveAttackSpeed) {
