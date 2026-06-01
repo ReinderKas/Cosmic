@@ -11,6 +11,7 @@ import server.maps.MapleMap;
 public final class BotLootEligibility {
     public static final int KPQ_COUPON = 4001007;
     public static final int KPQ_PASS = 4001008;
+    public static final int HPQ_RICE_CAKE = 4001101;
 
     private BotLootEligibility() {
     }
@@ -29,6 +30,9 @@ public final class BotLootEligibility {
 
         int itemId = drop.getItemId();
         if (itemId == KPQ_PASS) {
+            return false;
+        }
+        if (itemId == HPQ_RICE_CAKE) {
             return false;
         }
         if (itemId == KPQ_COUPON && (BotPqHooks.shouldSkipCouponLoot(entry)

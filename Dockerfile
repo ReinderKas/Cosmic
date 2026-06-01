@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # Initial Docker support thanks to xinyifly
 # Optimisation performed by wejrox
 
@@ -20,9 +21,12 @@ COPY pom.xml ./pom.xml
 # not be resolved: io.netty:netty-tcnative:jar:${os.detected.classifier}:2.0.65.Final (absent): Could not find artifact io.netty:netty-tcnative:jar:${os.detected.classifier}:2.0.65.Final in central (https://repo.maven.apache.org/maven2) -> [Help 1]
 
 # Source code changes may not change dependencies, so it can go last.
-# Skip compiling tests since we don't want all the dependecies to be downloaded for plugins.
+# Persist Maven local repository across Docker builds to avoid re-downloading
+# all dependencies on every image rebuild.
+# Skip compiling tests since we don't want all the dependencies to be downloaded for plugins.
 COPY src ./src
-RUN mvn -f ./pom.xml clean package -Dmaven.test.skip -T 1C
+RUN --mount=type=cache,target=/root/.m2 \
+	mvn -f ./pom.xml package -Dmaven.test.skip -T 1C
 
 #
 # Server creation stage

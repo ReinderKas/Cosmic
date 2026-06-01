@@ -1465,7 +1465,7 @@ class BotCombatManager {
 
         List<Monster> secondaryTargets = new ArrayList<>();
         for (Monster monster : bot.getMap().getAllMonsters()) {
-            if (!monster.isAlive() || monster.getObjectId() == primaryTarget.getObjectId()) {
+            if (!isAttackableMonster(monster) || monster.getObjectId() == primaryTarget.getObjectId()) {
                 continue;
             }
             if (!doesHitBoxIntersectMonster(hitBox, monster)) {
@@ -1557,7 +1557,7 @@ class BotCombatManager {
     private static List<Monster> aliveMonstersInRange(Character bot, Point botPos, double rangeSq) {
         List<Monster> candidates = new ArrayList<>();
         for (Monster m : bot.getMap().getAllMonsters()) {
-            if (m.isAlive() && m.getPosition().distanceSq(botPos) <= rangeSq) {
+            if (isAttackableMonster(m) && m.getPosition().distanceSq(botPos) <= rangeSq) {
                 candidates.add(m);
             }
         }
@@ -2044,7 +2044,7 @@ class BotCombatManager {
         Monster closest = null;
         double closestDistSq = Double.MAX_VALUE;
         for (Monster m : bot.getMap().getAllMonsters()) {
-            if (!m.isAlive() || !doesHitBoxIntersectMonster(hitBox, m)) {
+            if (!isAttackableMonster(m) || !doesHitBoxIntersectMonster(hitBox, m)) {
                 continue;
             }
             double distSq = m.getPosition().distanceSq(botPos);
@@ -2061,7 +2061,7 @@ class BotCombatManager {
         Monster closest = null;
         double closestDistSq = maxRangeSq;
         for (Monster m : bot.getMap().getAllMonsters()) {
-            if (!m.isAlive()) {
+            if (!isAttackableMonster(m)) {
                 continue;
             }
             double distSq = m.getPosition().distanceSq(botPos);
@@ -2071,6 +2071,12 @@ class BotCombatManager {
             }
         }
         return closest;
+    }
+
+    private static boolean isAttackableMonster(Monster monster) {
+        return monster != null
+                && monster.isAlive()
+                && (monster.getStats() == null || !monster.getStats().isFriendly());
     }
 
     private static BotAttackExecutionProvider.BasicAttackData buildBasicAttackData(Character bot, Monster primaryTarget) {
