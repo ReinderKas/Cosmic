@@ -20,9 +20,9 @@ COPY pom.xml ./pom.xml
 # not be resolved: io.netty:netty-tcnative:jar:${os.detected.classifier}:2.0.65.Final (absent): Could not find artifact io.netty:netty-tcnative:jar:${os.detected.classifier}:2.0.65.Final in central (https://repo.maven.apache.org/maven2) -> [Help 1]
 
 # Source code changes may not change dependencies, so it can go last.
-# Skip compiling tests since we don't want all the dependencies to be downloaded for plugins.
+# Skip compiling tests since we don't want all the dependecies to be downloaded for plugins.
 COPY src ./src
-RUN mvn -f ./pom.xml package -Dmaven.test.skip -T 1C
+RUN mvn -f ./pom.xml clean package -Dmaven.test.skip -T 1C
 
 #
 # Server creation stage
