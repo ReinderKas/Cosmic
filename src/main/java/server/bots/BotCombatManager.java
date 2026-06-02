@@ -170,7 +170,7 @@ class BotCombatManager {
         // cluster centroid would let the AoE skill beat it by this DPS factor, defer the shot and
         // walk in. Bounded by distance/time so the bot never chases scattering mobs.
         public boolean AOE_REPOSITION_ENABLED = true;
-        public boolean AOE_REPOSITION_DEBUG = true; // log each reposition decision to console
+        public boolean AOE_REPOSITION_DEBUG = false; // log each reposition decision to console
         public double AOE_REPOSITION_DPS_FACTOR = 1.5d;
         public int   AOE_REPOSITION_MAX_DISTANCE_X = 150;
         public int   AOE_REPOSITION_ARRIVAL_X = 20;
