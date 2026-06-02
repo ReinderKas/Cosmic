@@ -435,6 +435,9 @@ public class BotChatManager {
     private static final Pattern SELL_TRASH_COMMAND_PATTERN = Pattern.compile(
             "^\\s*(?:sell|vendor)\\s+(?:(?:my|ur|your)\\s+)?(?:trash|junk)\\s*[?!.,]*\\s*$",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern MAKE_CRYSTALS_COMMAND_PATTERN = Pattern.compile(
+            "^\\s*(?:make|craft|create)\\s+(?:some\\s+)?(?:mob|mon|monster|monsters|mobs)\\s+crystals?\\s*[?!.,]*\\s*$",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern TRADE_USE_COMMAND_PATTERN = Pattern.compile(
             "\\b" + TRADE_CMD_VERB + "\\s+" + TRANSFER_RECIPIENT + TRANSFER_OWNER + USE_WORDS + "\\b",
             Pattern.CASE_INSENSITIVE);
@@ -1002,6 +1005,12 @@ public class BotChatManager {
         if (SELL_TRASH_COMMAND_PATTERN.matcher(message).matches()) {
             BotManager.after(BotManager.randMs(500, 700), () ->
                     BotShopManager.requestSellTrashVisit(entry, entry.bot));
+            return;
+        }
+
+        if (MAKE_CRYSTALS_COMMAND_PATTERN.matcher(message).matches()) {
+            BotManager.after(BotManager.randMs(500, 700), () ->
+                    BotMakerManager.handleMakeCrystals(entry));
             return;
         }
 
