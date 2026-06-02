@@ -894,6 +894,46 @@ class BotCombatManagerTest {
     }
 
     @Test
+    void shouldDetectAoeBotSingleTargeting() {
+        Monster mob = mockMob(new Point(140, 200), 9300560);
+        BotEntry entry = new BotEntry(mock(Character.class), null, null);
+        entry.aoeSkillId = Warrior.SLASH_BLAST;
+        entry.aoeSkillMobs = 6;
+
+        BotCombatManager.AttackPlan singleTarget = new BotCombatManager.AttackPlan(
+                Warrior.POWER_STRIKE, 1, 1, new Rectangle(0, 0, 1, 1), List.of(mob),
+                BotCombatManager.AttackRoute.CLOSE, 0, 0, 0, 0, 0, 0, 100, null);
+        assertTrue(BotCombatManager.isAoeBotSingleTargeting(entry, singleTarget));
+
+        BotCombatManager.AttackPlan aoePlan = new BotCombatManager.AttackPlan(
+                Warrior.SLASH_BLAST, 1, 1, new Rectangle(0, 0, 1, 1), List.of(mob),
+                BotCombatManager.AttackRoute.CLOSE, 0, 0, 0, 0, 0, 0, 100, null);
+        assertFalse(BotCombatManager.isAoeBotSingleTargeting(entry, aoePlan));
+
+        entry.aoeSkillId = 0;
+        assertFalse(BotCombatManager.isAoeBotSingleTargeting(entry, singleTarget));
+    }
+
+    @Test
+    void shouldCountAoeClusterSizeCappedAtSkillMobs() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mockBot(new Point(100, 200), map, 20_000, null);
+        Monster anchor = mockMob(new Point(140, 200), 9300570);
+        Monster near1 = mockMob(new Point(180, 200), 9300571);
+        Monster near2 = mockMob(new Point(220, 200), 9300572);
+        Monster far = mockMob(new Point(600, 200), 9300573); // outside AOE_CLUSTER_RADIUS_PX
+        when(map.getAllMonsters()).thenReturn(List.of(anchor, near1, near2, far));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.aoeSkillId = Warrior.SLASH_BLAST;
+        entry.aoeSkillMobs = 6;
+        assertEquals(3, BotCombatManager.aoeClusterSize(entry, bot, anchor));
+
+        entry.aoeSkillMobs = 2; // cap below cluster size
+        assertEquals(2, BotCombatManager.aoeClusterSize(entry, bot, anchor));
+    }
+
+    @Test
     void shouldTreatBasicStaffAttacksAsCloseRange() {
         assertEquals(BotCombatManager.AttackRoute.CLOSE, BotAttackExecutionProvider.determineBasicWeaponRoute(WeaponType.STAFF));
     }

@@ -676,6 +676,53 @@ class BotManagerTest {
     }
 
     @Test
+    void shouldKeepScanningForClusterWhenAoeBotSingleTargetsInRange() {
+        MapleMap map = createEmptyTestMap(910000128);
+        Character bot = mockMovingBot(new Point(100, 100), map);
+        BotEntry entry = new BotEntry(bot, mock(Character.class), null);
+        entry.nextGrindTargetSearchAtMs = 1_000L;
+        entry.aoeSkillId = constants.skills.Warrior.SLASH_BLAST;
+        entry.aoeSkillMobs = 6;
+        Monster target = mock(Monster.class);
+        when(target.getPosition()).thenReturn(new Point(140, 100));
+        BotCombatManager.AttackPlan singleTargetPlan = basicClosePlan(target);
+
+        // In range, but a multi-mob AoE bot stuck single-targeting should keep scanning for a cluster.
+        assertTrue(BotManager.shouldSearchForGrindTarget(entry, bot, target, singleTargetPlan, 1_000L));
+    }
+
+    @Test
+    void shouldAdoptSearchedTargetWhenNotCommitted() {
+        MapleMap map = createEmptyTestMap(910000129);
+        Character bot = mockMovingBot(new Point(100, 100), map);
+        BotEntry entry = new BotEntry(bot, mock(Character.class), null);
+        Monster current = mock(Monster.class);
+        when(current.getPosition()).thenReturn(new Point(300, 100)); // out of basic range
+        Monster searched = mock(Monster.class);
+        when(searched.getPosition()).thenReturn(new Point(160, 100));
+        BotCombatManager.AttackPlan plan = basicClosePlan(current);
+
+        assertTrue(BotManager.shouldSwitchToSearchedTarget(entry, bot, current, searched, plan));
+    }
+
+    @Test
+    void shouldNotSwitchInRangeTargetWhenClusterIsNotLarger() {
+        MapleMap map = createEmptyTestMap(910000130);
+        Character bot = mockMovingBot(new Point(100, 100), map);
+        BotEntry entry = new BotEntry(bot, mock(Character.class), null);
+        entry.aoeSkillId = constants.skills.Warrior.SLASH_BLAST;
+        entry.aoeSkillMobs = 6;
+        Monster current = mock(Monster.class);
+        when(current.getPosition()).thenReturn(new Point(140, 100)); // in basic range
+        Monster searched = mock(Monster.class);
+        when(searched.getPosition()).thenReturn(new Point(160, 100));
+        BotCombatManager.AttackPlan plan = basicClosePlan(current);
+
+        // Committed to an in-range target and the searched mob anchors no larger cluster (empty map).
+        assertFalse(BotManager.shouldSwitchToSearchedTarget(entry, bot, current, searched, plan));
+    }
+
+    @Test
     void shouldReuseWanderDirectionWhenGrindHasNoTarget() {
         Character bot = mockMovingBot(new Point(100, 100), createEmptyTestMap(910000030));
         BotEntry entry = new BotEntry(bot, mock(Character.class), null);

@@ -1758,9 +1758,34 @@ public class BotManager {
         if (now < entry.nextGrindTargetSearchAtMs) {
             return false;
         }
-        return bot == null
+        if (bot == null
                 || currentAttackPlan == null
-                || !BotCombatManager.isTargetInAttackRange(currentAttackPlan, bot, currentTarget);
+                || !BotCombatManager.isTargetInAttackRange(currentAttackPlan, bot, currentTarget)) {
+            return true;
+        }
+        // In range we normally stay committed (avoids flip-flop). Exception: an AoE bot stuck
+        // single-targeting keeps scanning for a better cluster — the switch itself is gated by
+        // cluster-size hysteresis in shouldSwitchToSearchedTarget.
+        return BotCombatManager.isAoeBotSingleTargeting(entry, currentAttackPlan);
+    }
+
+    /**
+     * Decide whether to adopt a freshly searched grind target over the current one. Always adopts
+     * when not committed (current null, no plan, or current out of attack range). When committed to
+     * an in-range target, only switches if the searched target anchors a strictly larger AoE cluster
+     * — hysteresis that prevents flip-flop between near-equal targets.
+     */
+    static boolean shouldSwitchToSearchedTarget(BotEntry entry, Character bot, Monster current,
+                                                Monster searched, BotCombatManager.AttackPlan currentPlan) {
+        if (searched == null || searched == current) {
+            return false;
+        }
+        if (current == null || bot == null || currentPlan == null
+                || !BotCombatManager.isTargetInAttackRange(currentPlan, bot, current)) {
+            return true;
+        }
+        return BotCombatManager.aoeClusterSize(entry, bot, searched)
+                > BotCombatManager.aoeClusterSize(entry, bot, current);
     }
 
     static Point resolveNoGrindTargetPosition(BotEntry entry, Point botPos, MapleMap map) {
@@ -2202,7 +2227,7 @@ public class BotManager {
                 Monster searchedTarget = entry.patrolRegionId >= 0
                         ? BotCombatManager.findPatrolTarget(entry, bot)
                         : BotCombatManager.findGrindTarget(entry, bot);
-                if (searchedTarget != null || target == null) {
+                if (shouldSwitchToSearchedTarget(entry, bot, target, searchedTarget, attackPlan)) {
                     target = searchedTarget;
                     attackPlan = null;
                 }
@@ -2376,7 +2401,7 @@ public class BotManager {
                     Monster searchedTarget = entry.patrolRegionId >= 0
                             ? BotCombatManager.findPatrolTarget(entry, bot)
                             : BotCombatManager.findGrindTarget(entry, bot);
-                    if (searchedTarget != null || target == null) {
+                    if (shouldSwitchToSearchedTarget(entry, bot, target, searchedTarget, attackPlan)) {
                         target = searchedTarget;
                         attackPlan = null;
                     }
