@@ -55,7 +55,6 @@ public class MakerProcessor {
             try {
                 int type = p.readInt();
                 int toCreate = p.readInt();
-                int toDisassemble = -1, pos = -1;
                 boolean makerSucceeded = true;
 
                 MakerItemCreateEntry recipe;
@@ -67,25 +66,8 @@ public class MakerProcessor {
                     return;
                 } else if (type == 4) {  // disassembling
                     p.readInt(); // 1... probably inventory type
-                    pos = p.readInt();
-
-                    Item it = c.getPlayer().getInventory(InventoryType.EQUIP).getItem((short) pos);
-                    if (it != null && it.getItemId() == toCreate) {
-                        toDisassemble = toCreate;
-
-                        Pair<Integer, List<Pair<Integer, Integer>>> pair = generateDisassemblyInfo(toDisassemble);
-                        if (pair != null) {
-                            recipe = MakerItemFactory.generateDisassemblyCrystalEntry(toDisassemble, pair.getLeft(), pair.getRight());
-                        } else {
-                            c.sendPacket(PacketCreator.serverNotice(1, ii.getName(toCreate) + " is unavailable for Monster Crystal disassembly."));
-                            c.sendPacket(PacketCreator.makerEnableActions());
-                            return;
-                        }
-                    } else {
-                        c.sendPacket(PacketCreator.serverNotice(1, "An unknown error occurred when trying to apply that item for disassembly."));
-                        c.sendPacket(PacketCreator.makerEnableActions());
-                        return;
-                    }
+                    disassembleEquip(c, (short) p.readInt());
+                    return;
                 } else {
                     if (ItemConstants.isEquipment(toCreate)) {   // only equips uses stimulant and reagents
                         if (p.readByte() != 0) {  // stimulant
@@ -146,12 +128,8 @@ public class MakerProcessor {
                     return;
                 }
 
-                if (toDisassemble != -1) {
-                    InventoryManipulator.removeFromSlot(c, InventoryType.EQUIP, (short) pos, (short) 1, false);
-                } else {
-                    for (Pair<Integer, Integer> pair : recipe.getReqItems()) {
-                        c.getAbstractPlayerInteraction().gainItem(pair.getLeft(), (short) -pair.getRight(), false);
-                    }
+                for (Pair<Integer, Integer> pair : recipe.getReqItems()) {
+                    c.getAbstractPlayerInteraction().gainItem(pair.getLeft(), (short) -pair.getRight(), false);
                 }
 
                 int cost = recipe.getCost();
@@ -184,11 +162,7 @@ public class MakerProcessor {
                 }
 
                 // thanks inhyuk for noticing missing MAKER_RESULT packets
-                if (type == 4) {
-                    c.sendPacket(PacketCreator.makerResultDesynth(recipe.getReqItems().get(0).getLeft(), recipe.getCost(), recipe.getGainItems()));
-                } else {
-                    c.sendPacket(PacketCreator.makerResult(makerSucceeded, recipe.getGainItems().get(0).getLeft(), recipe.getGainItems().get(0).getRight(), recipe.getCost(), recipe.getReqItems(), stimulantid, new LinkedList<>(reagentids.keySet())));
-                }
+                c.sendPacket(PacketCreator.makerResult(makerSucceeded, recipe.getGainItems().get(0).getLeft(), recipe.getGainItems().get(0).getRight(), recipe.getCost(), recipe.getReqItems(), stimulantid, new LinkedList<>(reagentids.keySet())));
 
                 c.sendPacket(PacketCreator.showMakerEffect(makerSucceeded));
                 c.getPlayer().getMap().broadcastMessage(c.getPlayer(), PacketCreator.showForeignMakerEffect(c.getPlayer().getId(), makerSucceeded), false);
@@ -246,6 +220,56 @@ public class MakerProcessor {
             c.getAbstractPlayerInteraction().setQuestProgress(6033, 1);
         }
 
+        return 0;
+    }
+
+    /**
+     * Disassembles one equip (from the EQUIP bag at {@code pos}) into Monster Crystals,
+     * sharing the player Maker type-4 path. Used by both the Maker UI handler and bots.
+     * Assumes the caller already holds the client lock.
+     *
+     * @return 0 on success, otherwise the failure status already noticed to the client.
+     */
+    public static short disassembleEquip(Client c, short pos) {
+        Item it = c.getPlayer().getInventory(InventoryType.EQUIP).getItem(pos);
+        if (it == null) {
+            c.sendPacket(PacketCreator.serverNotice(1, "An unknown error occurred when trying to apply that item for disassembly."));
+            c.sendPacket(PacketCreator.makerEnableActions());
+            return -1;
+        }
+
+        int toDisassemble = it.getItemId();
+        Pair<Integer, List<Pair<Integer, Integer>>> info = generateDisassemblyInfo(toDisassemble);
+        if (info == null) {
+            c.sendPacket(PacketCreator.serverNotice(1, ii.getName(toDisassemble) + " is unavailable for Monster Crystal disassembly."));
+            c.sendPacket(PacketCreator.makerEnableActions());
+            return -1;
+        }
+
+        MakerItemCreateEntry recipe = MakerItemFactory.generateDisassemblyCrystalEntry(toDisassemble, info.getLeft(), info.getRight());
+
+        short createStatus = getCreateStatus(c, recipe);
+        if (createStatus != 0) {
+            sendMakerCreateFailure(c, createStatus, recipe, toDisassemble);
+            return createStatus;
+        }
+
+        InventoryManipulator.removeFromSlot(c, InventoryType.EQUIP, pos, (short) 1, false);
+
+        int cost = recipe.getCost();
+        if (cost > 0) {
+            c.getPlayer().gainMeso(-cost, false);
+        }
+
+        for (Pair<Integer, Integer> pair : recipe.getGainItems()) {
+            c.getPlayer().setCS(true);
+            c.getAbstractPlayerInteraction().gainItem(pair.getLeft(), pair.getRight().shortValue(), false);
+            c.getPlayer().setCS(false);
+        }
+
+        c.sendPacket(PacketCreator.makerResultDesynth(recipe.getReqItems().get(0).getLeft(), recipe.getCost(), recipe.getGainItems()));
+        c.sendPacket(PacketCreator.showMakerEffect(true));
+        c.getPlayer().getMap().broadcastMessage(c.getPlayer(), PacketCreator.showForeignMakerEffect(c.getPlayer().getId(), true), false);
         return 0;
     }
 
@@ -325,6 +349,11 @@ public class MakerProcessor {
         } catch (NullPointerException npe) {
             return 0;
         }
+    }
+
+    /** Whether an equip has a Monster Crystal disassembly recipe (fee + crystal yields). */
+    public static boolean canDisassemble(int itemId) {
+        return generateDisassemblyInfo(itemId) != null;
     }
 
     private static Pair<Integer, List<Pair<Integer, Integer>>> generateDisassemblyInfo(int itemId) {

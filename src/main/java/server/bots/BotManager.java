@@ -3212,6 +3212,7 @@ public class BotManager {
         if (entry == null) {
             return;
         }
+        entry.activityEpoch++;   // signal background batches (Maker craft/disassembly) to self-interrupt
         entry.scriptTasks.clear();
         entry.activeScriptTask = null;
     }

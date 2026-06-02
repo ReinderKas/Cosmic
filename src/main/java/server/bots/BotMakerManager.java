@@ -2,6 +2,7 @@ package server.bots;
 
 import client.Character;
 import client.Client;
+import client.inventory.Equip;
 import client.inventory.Inventory;
 import client.inventory.InventoryType;
 import client.inventory.Item;
@@ -10,65 +11,108 @@ import server.ItemInformationProvider;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Handles the "make monster crystals" bot command: scans for eligible monster-leftover
- * etc stacks and converts them through the shared {@link MakerProcessor} Maker path,
- * one craft every {@link #CRAFT_INTERVAL_MS} ms.
+ * Handles the bot Maker batch commands: "make monster crystals" (convert monster-leftover
+ * etc stacks) and "disassemble trash" (break down trash equips). Both run through the shared
+ * {@link MakerProcessor} player path, one operation per {@link #STEP_INTERVAL_MS} ms, and
+ * self-interrupt when the player issues a new directive (follow/stop/move/...): see
+ * {@link BotEntry#activityEpoch}.
  */
 final class BotMakerManager {
     private static final ItemInformationProvider ii = ItemInformationProvider.getInstance();
     private static final int LEFTOVERS_PER_CRYSTAL = 100;   // Maker type-3 recipe req count
-    private static final long CRAFT_INTERVAL_MS = 5000L;    // 5 seconds per craft
-    private static final int LONG_BATCH_THRESHOLD = 10;     // "will take a while" past this many crafts
+    private static final long STEP_INTERVAL_MS = 5000L;     // 5 seconds per operation
+    private static final int LONG_BATCH_THRESHOLD = 10;     // "will take a while" past this many ops
+    private static final int NO_MORE = Integer.MIN_VALUE;   // batch step sentinel: nothing left to do
     private static final Set<Integer> ACTIVE = ConcurrentHashMap.newKeySet();
 
-    private static final String[] START_VERBS = {"creating", "making", "crafting"};
+    private static final String[] CRYSTAL_VERBS = {"creating", "making", "crafting"};
+    private static final String[] DISASSEMBLE_VERBS = {"disassembling", "breaking down", "scrapping"};
+
+    /** One Maker operation under a held client lock. Returns 0 on success, {@link #NO_MORE}
+     *  when nothing remains, otherwise a {@link MakerProcessor} failure status. */
+    @FunctionalInterface
+    private interface BatchStep {
+        int run(Client c);
+    }
 
     private BotMakerManager() {
     }
 
     static void handleMakeCrystals(BotEntry entry) {
         Character bot = entry.bot;
-        if (bot == null) {
+        if (bot == null || !guardStart(entry, bot)) {
             return;
         }
 
-        if (ACTIVE.contains(bot.getId())) {
-            BotManager.getInstance().botReply(entry, "still working on the last batch, hang on");
-            return;
-        }
-
-        if (MakerProcessor.getMakerSkillLevel(bot) < 1) {
-            BotManager.getInstance().botReply(entry, "I can't — I don't have the Maker skill");
-            return;
-        }
-
-        List<Integer> queue = collectCraftQueue(bot);   // one entry per craft, holding the leftover itemid
-        if (queue.isEmpty()) {
+        Queue<Integer> leftovers = collectLeftoverQueue(bot);   // one entry per craft, holding the leftover itemid
+        if (leftovers.isEmpty()) {
             BotManager.getInstance().botReply(entry,
                     "I don't have any leftovers I can turn into monster crystals (need 100+ of a drop)");
             return;
         }
 
-        int total = queue.size();
-        String verb = START_VERBS[ThreadLocalRandom.current().nextInt(START_VERBS.length)];
-        String msg = "ok " + verb + " " + total + " crystal" + (total == 1 ? "" : "s");
-        if (total > LONG_BATCH_THRESHOLD) {
-            msg += ", will take a while";
-        }
-        BotManager.getInstance().botReply(entry, msg);
-
-        ACTIVE.add(bot.getId());
-        BotManager.after(BotManager.randMs(900, 1100), () -> craftNext(entry, queue, 0));
+        startBatch(entry, leftovers.size(), CRYSTAL_VERBS, "crystal",
+                c -> {
+                    Integer leftover = leftovers.poll();
+                    return leftover == null ? NO_MORE : MakerProcessor.makeLeftoverCrystal(c, leftover);
+                });
     }
 
-    private static List<Integer> collectCraftQueue(Character bot) {
-        List<Integer> queue = new ArrayList<>();
+    static void handleDisassembleTrash(BotEntry entry) {
+        Character bot = entry.bot;
+        if (bot == null || !guardStart(entry, bot)) {
+            return;
+        }
+
+        int total = collectDisassemblableTrash(entry, bot).size();
+        if (total == 0) {
+            BotManager.getInstance().botReply(entry, "no trash equips I can disassemble");
+            return;
+        }
+
+        // Re-scan each step rather than caching slots: a freed EQUIP slot can be refilled by
+        // looted gear during the 5s gaps, so always disassemble a currently-trash equip.
+        startBatch(entry, total, DISASSEMBLE_VERBS, "trash equip",
+                c -> {
+                    List<Equip> trash = collectDisassemblableTrash(entry, bot);
+                    return trash.isEmpty() ? NO_MORE : MakerProcessor.disassembleEquip(c, trash.get(0).getPosition());
+                });
+    }
+
+    /** Trash equips (SSOT: {@link BotInventoryManager#collectSellTrashEquips}) that actually
+     *  have a Maker disassembly recipe — others would just abort the batch. */
+    private static List<Equip> collectDisassemblableTrash(BotEntry entry, Character bot) {
+        List<Equip> out = new ArrayList<>();
+        for (Item item : BotInventoryManager.collectSellTrashEquips(entry, bot)) {
+            if (item instanceof Equip equip && MakerProcessor.canDisassemble(equip.getItemId())) {
+                out.add(equip);
+            }
+        }
+        return out;
+    }
+
+    private static boolean guardStart(BotEntry entry, Character bot) {
+        if (ACTIVE.contains(bot.getId())) {
+            BotManager.getInstance().botReply(entry, "still working on the last batch, hang on");
+            return false;
+        }
+        if (MakerProcessor.getMakerSkillLevel(bot) < 1) {
+            BotManager.getInstance().botReply(entry, "I can't — I don't have the Maker skill");
+            return false;
+        }
+        return true;
+    }
+
+    private static Queue<Integer> collectLeftoverQueue(Character bot) {
+        Queue<Integer> queue = new LinkedList<>();
         Inventory etc = bot.getInventory(InventoryType.ETC);
         etc.lockInventory();
         try {
@@ -92,7 +136,21 @@ final class BotMakerManager {
         return queue;
     }
 
-    private static void craftNext(BotEntry entry, List<Integer> queue, int index) {
+    private static void startBatch(BotEntry entry, int total, String[] verbs, String noun, BatchStep step) {
+        Character bot = entry.bot;
+        String verb = verbs[ThreadLocalRandom.current().nextInt(verbs.length)];
+        String msg = "ok " + verb + " " + total + " " + plural(noun, total);
+        if (total > LONG_BATCH_THRESHOLD) {
+            msg += ", will take a while";
+        }
+        BotManager.getInstance().botReply(entry, msg);
+
+        ACTIVE.add(bot.getId());
+        int epoch = entry.activityEpoch;
+        BotManager.after(BotManager.randMs(900, 1100), () -> runStep(entry, step, noun, epoch, 0));
+    }
+
+    private static void runStep(BotEntry entry, BatchStep step, String noun, int epoch, int done) {
         Character bot = entry.bot;
         if (bot == null || !bot.isLoggedin()) {
             if (bot != null) {
@@ -101,42 +159,55 @@ final class BotMakerManager {
             return;
         }
 
-        if (index >= queue.size()) {
+        if (entry.activityEpoch != epoch) {   // player issued a new command — disrupt
             ACTIVE.remove(bot.getId());
-            int total = queue.size();
-            BotManager.getInstance().botReply(entry,
-                    "done — " + total + " crystal" + (total == 1 ? "" : "s") + " made");
+            BotManager.getInstance().botReply(entry, "ok, stopping — " + done + " " + plural(noun, done) + " done");
             return;
         }
 
         Client c = bot.getClient();
-        short status;
-        if (c == null || !c.tryacquireClient()) {
+        if (c == null) {
             ACTIVE.remove(bot.getId());
-            BotManager.getInstance().botReply(entry, "had to stop crafting, I'm busy with something else");
             return;
         }
+        if (!c.tryacquireClient()) {
+            // transient contention (a trade/packet in flight) — retry without consuming the step.
+            // The bot keeps doing whatever it's doing; crafting just slots into the next free moment.
+            BotManager.after(BotManager.randMs(600, 900), () -> runStep(entry, step, noun, epoch, done));
+            return;
+        }
+        int status;
         try {
-            status = MakerProcessor.makeLeftoverCrystal(c, queue.get(index));
+            status = step.run(c);
         } finally {
             c.releaseClient();
         }
 
+        if (status == NO_MORE) {
+            ACTIVE.remove(bot.getId());
+            BotManager.getInstance().botReply(entry, "done — " + done + " " + plural(noun, done));
+            return;
+        }
         if (status != 0) {
             ACTIVE.remove(bot.getId());
-            BotManager.getInstance().botReply(entry, abortReason(status));
+            BotManager.getInstance().botReply(entry, abortReason((short) status, noun, done));
             return;
         }
 
-        BotManager.after(CRAFT_INTERVAL_MS, () -> craftNext(entry, queue, index + 1));
+        BotManager.after(STEP_INTERVAL_MS, () -> runStep(entry, step, noun, epoch, done + 1));
     }
 
-    private static String abortReason(short status) {
-        return switch (status) {
-            case 1 -> "ran out of leftovers, stopping there";
-            case 2 -> "I don't have enough mesos to keep going, stopping";
-            case 5 -> "my inventory's full, stopping";
-            default -> "couldn't finish that crystal, stopping";
+    private static String abortReason(short status, String noun, int done) {
+        String reason = switch (status) {
+            case 1 -> "ran out of materials";
+            case 2 -> "ran out of mesos";
+            case 5 -> "my inventory's full";
+            default -> "hit a snag";
         };
+        return reason + ", stopping — " + done + " " + plural(noun, done) + " done";
+    }
+
+    private static String plural(String noun, int count) {
+        return count == 1 ? noun : noun + "s";
     }
 }

@@ -149,6 +149,9 @@ public class BotEntry {
     long shopVisitStartedAtMs = 0L;
     long shopSequenceStartedAtMs = 0L;
     boolean shopSellTrashPending = false;
+    // bumped whenever a new player directive resets scripted state (follow/stop/move/farm/patrol/grind);
+    // background batches (Maker crafting / disassembly) capture it and self-interrupt when it changes
+    volatile int activityEpoch = 0;
     Point shopStuckCheckPos = null;
     long shopStuckCheckAtMs = 0L;
 
