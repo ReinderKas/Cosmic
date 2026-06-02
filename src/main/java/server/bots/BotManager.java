@@ -4033,27 +4033,17 @@ public class BotManager {
 
     /**
      * Bots can't drive mob AI (BotClient.sendPacket is a no-op), so any monster
-     * assigned to a bot as controller would freeze. Hand off immediately to the
-     * nearest real player, or release control if no real player is in the map.
+     * assigned to a bot as controller would freeze. Release it from the bot and
+     * let the upstream controller-selection SSOT ({@link Monster#aggroUpdateController})
+     * pick an eligible real player, or leave it released if none is eligible.
+     * Bots and hidden GMs are excluded by that SSOT, so neither is ever handed control.
      */
     private static void tickReleaseMonsterControl(Character bot) {
         java.util.Collection<Monster> controlled = bot.getControlledMonsters();
         if (controlled.isEmpty()) return;
 
-        Character realPlayer = null;
-        for (Character chr : bot.getMap().getAllPlayers()) {
-            if (!(chr.getClient() instanceof BotClient)) {
-                realPlayer = chr;
-                break;
-            }
-        }
-
         for (Monster monster : controlled) {
-            if (realPlayer != null) {
-                monster.aggroSwitchController(realPlayer, false);
-            } else {
-                monster.aggroRemoveController();
-            }
+            monster.aggroRedirectController();
         }
     }
 
