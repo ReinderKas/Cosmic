@@ -11,6 +11,8 @@ import server.maps.MapleMap;
 public final class BotLootEligibility {
     public static final int KPQ_COUPON = 4001007;
     public static final int KPQ_PASS = 4001008;
+    public static final long MIN_TARGET_LOOT_AGE_MS = 3_000L;
+    public static final long BOT_INVENTORY_DROP_TARGET_LOOT_AGE_MS = 15_000L;
 
     private BotLootEligibility() {
     }
@@ -49,6 +51,23 @@ public final class BotLootEligibility {
     public static boolean canBotTargetLoot(BotEntry entry, Character bot, MapleMap map, MapItem drop, long now) {
         return isPresent(map, drop)
                 && canBotLoot(entry, bot, drop)
-                && now - drop.getDropTime() >= 3_000;
+                && now - drop.getDropTime() >= requiredTargetLootAgeMs(bot, drop);
+    }
+
+    static long requiredTargetLootAgeMs(Character bot, MapItem drop) {
+        if (bot == null || drop == null) {
+            return MIN_TARGET_LOOT_AGE_MS;
+        }
+        if (isBotInventoryDrop(drop)) {
+            return BOT_INVENTORY_DROP_TARGET_LOOT_AGE_MS;
+        }
+        return MIN_TARGET_LOOT_AGE_MS;
+    }
+
+    private static boolean isBotInventoryDrop(MapItem drop) {
+        int ownerId = drop.getOwnerId();
+        return drop.isPlayerDrop()
+                && ownerId > 0
+                && BotManager.getInstance().getActiveOwnerByBotCharId(ownerId) != null;
     }
 }

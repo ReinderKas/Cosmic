@@ -767,6 +767,55 @@ class BotManagerTest {
     }
 
     @Test
+    void shouldNotActivelySeekFreshGrindBotInventoryDrop() {
+        MapleMap map = spy(createEmptyTestMap(910000131));
+        Character bot = mockMovingBot(new Point(100, 100), map);
+        BotEntry entry = new BotEntry(bot, mock(Character.class), null);
+        MapItem loot = mockLoot(1, new Point(100 + BotManager.cfg.LOOT_RADIUS + 1, 100));
+        int lootObjectId = loot.getObjectId();
+        BotManager manager = mock(BotManager.class);
+        Character dropBotOwner = mock(Character.class);
+
+        when(loot.getOwnerId()).thenReturn(99);
+        when(loot.isPlayerDrop()).thenReturn(true);
+        when(loot.getDropTime()).thenReturn(System.currentTimeMillis() - 14_000L);
+        when(manager.getActiveOwnerByBotCharId(99)).thenReturn(dropBotOwner);
+        doReturn(List.of(loot)).when(map).getDroppedItems();
+        doReturn(loot).when(map).getMapObject(lootObjectId);
+
+        try (MockedStatic<BotManager> botManagers = mockStatic(BotManager.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            botManagers.when(BotManager::getInstance).thenReturn(manager);
+
+            assertNull(BotInventoryManager.findNearestGrindLootTarget(entry, bot));
+        }
+    }
+
+    @Test
+    void shouldClearFreshCachedGrindBotInventoryDrop() {
+        MapleMap map = spy(createEmptyTestMap(910000132));
+        Character bot = mockMovingBot(new Point(100, 100), map);
+        BotEntry entry = new BotEntry(bot, mock(Character.class), null);
+        MapItem loot = mockLoot(1, new Point(100 + BotManager.cfg.LOOT_RADIUS + 21, 100));
+        int lootObjectId = loot.getObjectId();
+        BotManager manager = mock(BotManager.class);
+        Character dropBotOwner = mock(Character.class);
+
+        entry.grindLootTarget = loot;
+        when(loot.getOwnerId()).thenReturn(99);
+        when(loot.isPlayerDrop()).thenReturn(true);
+        when(loot.getDropTime()).thenReturn(System.currentTimeMillis() - 14_000L);
+        when(manager.getActiveOwnerByBotCharId(99)).thenReturn(dropBotOwner);
+        doReturn(loot).when(map).getMapObject(lootObjectId);
+
+        try (MockedStatic<BotManager> botManagers = mockStatic(BotManager.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            botManagers.when(BotManager::getInstance).thenReturn(manager);
+
+            assertNull(BotManager.convenientLootTarget(entry, bot.getPosition(), new Point(500, 100)));
+            assertNull(entry.grindLootTarget);
+        }
+    }
+
+    @Test
     void shouldTemporarilyIgnoreGrindLootThatRemainsAfterEnteringPassiveLootRadius() {
         MapleMap map = spy(createEmptyTestMap(910000037));
         Character bot = mockMovingBot(new Point(100, 100), map);

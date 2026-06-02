@@ -292,6 +292,59 @@ class BotInventoryManagerTest {
         }
     }
 
+    @Test
+    void shouldPatrolTowardMobLootWhenBasePickupEligibilityAllowsIt() {
+        MapleMap map = spy(new MapleMap(910000053, 0, 0, 910000053, 1.0f));
+        Foothold foothold = new Foothold(new Point(0, 100), new Point(500, 100), 1);
+        server.maps.FootholdTree footholds = new server.maps.FootholdTree(new Point(-1000, -1000), new Point(1000, 2000));
+        footholds.insert(foothold);
+        map.setFootholds(footholds);
+
+        BotNavigationGraph.Region region = new BotNavigationGraph.Region(
+                1, List.of(new BotNavigationGraph.Segment(foothold)));
+        BotNavigationGraph graph = new BotNavigationGraph(
+                map.getId(),
+                1,
+                BotMovementProfile.base(),
+                List.of(region),
+                Map.of(1, region),
+                Map.of(1, 1),
+                Map.of(),
+                Set.of());
+
+        Character bot = mock(Character.class);
+        when(bot.getId()).thenReturn(88);
+        when(bot.getMap()).thenReturn(map);
+        when(bot.getPosition()).thenReturn(new Point(50, 100));
+        when(bot.getInventory(any())).thenReturn((Inventory) null);
+        BotEntry entry = new BotEntry(bot, null, null);
+
+        MapItem loot = mock(MapItem.class);
+        when(loot.getObjectId()).thenReturn(1);
+        when(loot.getPosition()).thenReturn(new Point(240, 100));
+        when(loot.isPickedUp()).thenReturn(false);
+        when(loot.canBePickedBy(any(Character.class))).thenReturn(true);
+        when(loot.getDropTime()).thenReturn(System.currentTimeMillis() - 16_000L);
+        when(loot.getOwnerId()).thenReturn(99);
+        when(loot.isPlayerDrop()).thenReturn(false);
+        when(loot.getItemId()).thenReturn(0);
+        when(loot.getMeso()).thenReturn(1);
+        doReturn(List.of(loot)).when(map).getDroppedItems();
+        doReturn(loot).when(map).getMapObject(1);
+
+        BotManager manager = mock(BotManager.class);
+
+        try (MockedStatic<BotNavigationGraphProvider> graphProvider =
+                     mockStatic(BotNavigationGraphProvider.class, org.mockito.Mockito.CALLS_REAL_METHODS);
+             MockedStatic<BotManager> botManagers =
+                     mockStatic(BotManager.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            graphProvider.when(() -> BotNavigationGraphProvider.peekGraph(map)).thenReturn(graph);
+            botManagers.when(BotManager::getInstance).thenReturn(manager);
+
+            assertEquals(new Point(240, 100), BotInventoryManager.findNearestPatrolLootTarget(entry, 1));
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private static List<String> listField(String name) throws Exception {
         return (List<String>) field(BotInventoryManager.class, name).get(null);

@@ -126,12 +126,10 @@ class BotInventoryManager {
 
         entry.invFullWarnCooldownMs = BotMovementManager.tickDown(entry.invFullWarnCooldownMs);
         Point botPos = bot.getPosition();
+        long now = System.currentTimeMillis();
         for (MapItem drop : bot.getMap().getDroppedItems()) {
             if (!BotLootEligibility.isPresent(bot.getMap(), drop)) {
                 cleanupBotLootGhostDrop(bot, drop);
-                continue;
-            }
-            if (System.currentTimeMillis() - drop.getDropTime() < 3000) {
                 continue;
             }
 
@@ -141,7 +139,10 @@ class BotInventoryManager {
                 continue;
             }
 
-            if (!BotLootEligibility.canBotLoot(entry, bot, drop)) {
+            if (!BotLootEligibility.canBotTargetLoot(entry, bot, bot.getMap(), drop, now)) {
+                if (BotLootEligibility.canBotLoot(entry, bot, drop)) {
+                    continue;
+                }
                 if (drop.getMeso() <= 0 && drop.getItemId() > 0) {
                     InventoryType type = ItemConstants.getInventoryType(drop.getItemId());
                     Inventory inventory = bot.getInventory(type);

@@ -1837,7 +1837,7 @@ public class BotManager {
             entry.grindLootTarget = null;
             return null;
         }
-        if (!BotLootEligibility.canBotLoot(entry, bot, loot)) {
+        if (!BotLootEligibility.canBotTargetLoot(entry, bot, bot.getMap(), loot, System.currentTimeMillis())) {
             entry.grindLootTarget = null;
             return null;
         }
