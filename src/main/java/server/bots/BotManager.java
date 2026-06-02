@@ -95,6 +95,11 @@ public class BotManager {
 
     public static BotManager getInstance() { return instance; }
 
+    // Public facade for the !botcfg GM command (BotCombatManager is package-private).
+    public static List<String> botCombatConfigLines() { return BotCombatManager.configFieldLines(); }
+    public static String botCombatConfigLine(String name) { return BotCombatManager.configFieldLine(name); }
+    public static String setBotCombatConfig(String name, String value) { return BotCombatManager.setConfigField(name, value); }
+
     // ownerCharId → list of owned bot entries (1:N)
     private final Map<Integer, List<BotEntry>> bots = new ConcurrentHashMap<>();
     // ownerCharId → current formation (in-memory only, defaults to stagger)
