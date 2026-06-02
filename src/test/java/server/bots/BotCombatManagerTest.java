@@ -790,6 +790,40 @@ class BotCombatManagerTest {
     }
 
     @Test
+    void shouldNotRepositionWhenToggleDisabled() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mockBot(new Point(100, 200), map, 20_000, null);
+        Skill powerStrike = skillWithAttack(Warrior.POWER_STRIKE, 1, 1, 260);
+        Skill slashBlast = skillWithAttackBox(Warrior.SLASH_BLAST, 4, 6, 50,
+                new Rectangle(20, 170, 160, 60));
+        Monster primary = mockMob(new Point(140, 200), 9300540);
+        Monster mid = mockMob(new Point(200, 200), 9300541);
+        Monster far = mockMob(new Point(260, 200), 9300542);
+        when(map.getAllMonsters()).thenReturn(List.of(primary, mid, far));
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skill.getId() == powerStrike.getId() || skill.getId() == slashBlast.getId() ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.attackSkillId = powerStrike.getId();
+        entry.aoeSkillId = slashBlast.getId();
+        entry.aoeSkillMobs = 6;
+
+        boolean original = BotCombatManager.cfg.AOE_REPOSITION_ENABLED;
+        BotCombatManager.cfg.AOE_REPOSITION_ENABLED = false;
+        try (MockedStatic<SkillFactory> skillFactory = Mockito.mockStatic(SkillFactory.class)) {
+            skillFactory.when(() -> SkillFactory.getSkill(powerStrike.getId())).thenReturn(powerStrike);
+            skillFactory.when(() -> SkillFactory.getSkill(slashBlast.getId())).thenReturn(slashBlast);
+
+            BotCombatManager.AttackPlan fireNow = BotCombatManager.planAttack(entry, bot, primary);
+            assertNull(BotCombatManager.aoeRepositionTarget(entry, bot, primary, fireNow));
+        } finally {
+            BotCombatManager.cfg.AOE_REPOSITION_ENABLED = original;
+        }
+    }
+
+    @Test
     void shouldNotRepositionWhenNoAoeSkill() {
         MapleMap map = mock(MapleMap.class);
         Character bot = mockBot(new Point(100, 200), map, 20_000, null);

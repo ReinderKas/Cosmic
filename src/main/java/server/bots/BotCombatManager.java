@@ -48,6 +48,8 @@ import server.bots.combat.BotAttackDataProvider;
 import server.bots.combat.BotDefenseDataProvider;
 import server.bots.combat.BotMobHitboxProvider;
 import server.combat.CombatFormulaProvider;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import server.life.Monster;
 import server.maps.Foothold;
 import server.maps.MapObject;
@@ -70,6 +72,7 @@ import java.util.StringJoiner;
 import java.util.concurrent.ThreadLocalRandom;
 
 class BotCombatManager {
+    private static final Logger log = LoggerFactory.getLogger(BotCombatManager.class);
     private static final long UNREACHABLE_GRAPH_COST = Long.MAX_VALUE / 4;
 
     // Skills that bots must never cast — stealth makes them untargetable by monsters,
@@ -167,6 +170,8 @@ class BotCombatManager {
         // AoE repositioning: when the best fire-now plan is single-target but stepping into the
         // cluster centroid would let the AoE skill beat it by this DPS factor, defer the shot and
         // walk in. Bounded by distance/time so the bot never chases scattering mobs.
+        public boolean AOE_REPOSITION_ENABLED = true;
+        public boolean AOE_REPOSITION_DEBUG = false; // log each reposition decision to console
         public double AOE_REPOSITION_DPS_FACTOR = 1.5d;
         public int   AOE_REPOSITION_MAX_DISTANCE_X = 150;
         public int   AOE_REPOSITION_ARRIVAL_X = 20;
@@ -1833,7 +1838,7 @@ class BotCombatManager {
     // from there would beat the fire-now plan's DPS by cfg.AOE_REPOSITION_DPS_FACTOR, else null
     // (fire now). Bounded by AOE_REPOSITION_MAX_DISTANCE_X so it never chases scattering mobs.
     static Point aoeRepositionTarget(BotEntry entry, Character bot, Monster primaryTarget, AttackPlan fireNowBest) {
-        if (entry == null || bot == null || primaryTarget == null
+        if (!cfg.AOE_REPOSITION_ENABLED || entry == null || bot == null || primaryTarget == null
                 || entry.aoeSkillId == 0 || entry.aoeSkillMobs <= 1) {
             return null;
         }
@@ -1897,6 +1902,13 @@ class BotCombatManager {
                 aoeNow.stance, aoeNow.speed, aoeNow.hitDelayMs, aoeNow.cooldownMs, aoeNow.damageWeaponType);
         PlanScore sweetScore = scoreAttackPlan(bot, sweetPlan);
         if (sweetScore.rawDps >= fireNowScore.rawDps * cfg.AOE_REPOSITION_DPS_FACTOR) {
+            if (cfg.AOE_REPOSITION_DEBUG) {
+                double pct = fireNowScore.rawDps > 0 ? sweetScore.rawDps / fireNowScore.rawDps * 100.0d : 0.0d;
+                log.info("AoE reposition[{}]: stepping {}px {} to hit {} mobs (vs {}) with {} for {}% DPS ({} vs {} dps)",
+                        bot.getName(), Math.abs(dx), dx < 0 ? "left" : "right",
+                        sweetTargets.size(), fireNowBest.targets.size(), skillLabel(entry.aoeSkillId),
+                        Math.round(pct), Math.round(sweetScore.rawDps), Math.round(fireNowScore.rawDps));
+            }
             return new Point(centroidX, botPos.y);
         }
         return null;
