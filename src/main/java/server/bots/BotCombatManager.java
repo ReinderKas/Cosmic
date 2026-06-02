@@ -277,7 +277,7 @@ class BotCombatManager {
             if (bot.getHp() <= 0) return;
 
             for (Monster mob : bot.getMap().getAllMonsters()) {
-                if (!mob.isAlive()) continue;
+                if (!isAttackableMonster(mob)) continue;
                 if (isMobTouchingBot(entry, bot, mob)) {
                     applyMobHit(entry, bot, mob);
                     return;
