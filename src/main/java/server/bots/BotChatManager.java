@@ -190,6 +190,8 @@ public class BotChatManager {
             Pattern.CASE_INSENSITIVE);
     private static final Pattern REQUEST_UPGRADE_PATTERN = Pattern.compile(
             "\\brequest\\s*\\?|\\bneed\\s+anything\\b|\\bdo\\s+you\\s+need\\s+(anything|something)\\b"
+            + "|\\bdo\\s+you\\s+need\\s+(?:any\\s+)?(?:gear|equips?|equipment)\\s*(?:from\\s+me)?\\b"
+            + "|\\bneed\\s+(?:any\\s+)?(?:gear|equips?|equipment)\\s+from\\s+me\\b"
             + "|\\bwhat\\s+do\\s+you\\s+need\\b|\\bwhat.?s\\s+(on\\s+your\\s+)?wish\\s*list\\b",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern NEED_HP_POT_PATTERN = Pattern.compile(
@@ -1036,7 +1038,7 @@ public class BotChatManager {
         }
 
         // Info commands
-        if (matchesWholeCommand(REQUEST_UPGRADE_PATTERN, message)) {
+        if (isRequestUpgradeCommand(message)) {
             BotManager.after(BotManager.randMs(500, 700), () -> handleRequestUpgradeCommand(entry, entry.bot));
             return;
         }
@@ -1844,6 +1846,10 @@ public class BotChatManager {
         return NEED_AMMO_PATTERN.matcher(message).find();
     }
 
+    static boolean isRequestUpgradeCommand(String message) {
+        return matchesWholeCommand(REQUEST_UPGRADE_PATTERN, message);
+    }
+
     /**
      * Group-wide supply requests ("need pots", "anyone have hp pots", "need arrows"
      * etc.) trigger a single response from the bot group. Broadcasting these to
@@ -1858,6 +1864,10 @@ public class BotChatManager {
     }
 
     private static void handleRequestUpgradeCommand(BotEntry entry, Character bot) {
+        BotOfferManager.clearPendingOfferForOwnerAsk(entry);
+        if (BotPotionManager.requestLowSuppliesFromOwnerAsk(entry, bot)) {
+            return;
+        }
         BotOfferManager.requestBestUpgradeFromOwner(entry, bot);
     }
 
