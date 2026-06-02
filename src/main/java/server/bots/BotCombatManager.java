@@ -277,7 +277,7 @@ class BotCombatManager {
             if (bot.getHp() <= 0) return;
 
             for (Monster mob : bot.getMap().getAllMonsters()) {
-                if (!isAttackableMonster(mob)) continue;
+                if (isFriendlyMonster(mob)) continue;
                 if (isMobTouchingBot(entry, bot, mob)) {
                     applyMobHit(entry, bot, mob);
                     return;
@@ -1465,7 +1465,7 @@ class BotCombatManager {
 
         List<Monster> secondaryTargets = new ArrayList<>();
         for (Monster monster : bot.getMap().getAllMonsters()) {
-            if (!isAttackableMonster(monster) || monster.getObjectId() == primaryTarget.getObjectId()) {
+            if (!isFriendlyMonster(monster) || monster.getObjectId() == primaryTarget.getObjectId()) {
                 continue;
             }
             if (!doesHitBoxIntersectMonster(hitBox, monster)) {
@@ -1557,7 +1557,7 @@ class BotCombatManager {
     private static List<Monster> aliveMonstersInRange(Character bot, Point botPos, double rangeSq) {
         List<Monster> candidates = new ArrayList<>();
         for (Monster m : bot.getMap().getAllMonsters()) {
-            if (isAttackableMonster(m) && m.getPosition().distanceSq(botPos) <= rangeSq) {
+            if (isFriendlyMonster(m) && m.getPosition().distanceSq(botPos) <= rangeSq) {
                 candidates.add(m);
             }
         }
@@ -2044,7 +2044,7 @@ class BotCombatManager {
         Monster closest = null;
         double closestDistSq = Double.MAX_VALUE;
         for (Monster m : bot.getMap().getAllMonsters()) {
-            if (!isAttackableMonster(m) || !doesHitBoxIntersectMonster(hitBox, m)) {
+            if (!isFriendlyMonster(m) || !doesHitBoxIntersectMonster(hitBox, m)) {
                 continue;
             }
             double distSq = m.getPosition().distanceSq(botPos);
@@ -2061,7 +2061,7 @@ class BotCombatManager {
         Monster closest = null;
         double closestDistSq = maxRangeSq;
         for (Monster m : bot.getMap().getAllMonsters()) {
-            if (!isAttackableMonster(m)) {
+            if (isFriendlyMonster(m)) {
                 continue;
             }
             double distSq = m.getPosition().distanceSq(botPos);
@@ -2073,7 +2073,7 @@ class BotCombatManager {
         return closest;
     }
 
-    private static boolean isAttackableMonster(Monster monster) {
+    private static boolean isFriendlyMonster(Monster monster) {
         return monster != null
                 && monster.isAlive()
                 && (monster.getStats() == null || !monster.getStats().isFriendly());
