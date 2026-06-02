@@ -164,6 +164,13 @@ class BotCombatManager {
         public int   GRIND_SEEK_RANGE  = 800;
         public int   GRIND_RETARGET_INTERVAL_MS = 400;
         public int   AOE_MOB_THRESHOLD = 2;
+        // AoE repositioning: when the best fire-now plan is single-target but stepping into the
+        // cluster centroid would let the AoE skill beat it by this DPS factor, defer the shot and
+        // walk in. Bounded by distance/time so the bot never chases scattering mobs.
+        public double AOE_REPOSITION_DPS_FACTOR = 1.5d;
+        public int   AOE_REPOSITION_MAX_DISTANCE_X = 150;
+        public int   AOE_REPOSITION_ARRIVAL_X = 20;
+        public long  AOE_REPOSITION_MAX_MS = 800L;
         public int   GRIND_REGION_OCCUPANCY_PENALTY = 1200;
         public int   GRIND_REGION_OCCUPANCY_PENALTY_CAP = 3600;
 
@@ -1817,6 +1824,119 @@ class BotCombatManager {
             }
         }
         return neighbors * AOE_CLUSTER_BONUS_PER_MOB;
+    }
+
+    // AoE positioning: target selection (aoeClusterBonus) steers the bot toward a cluster, but the
+    // fire site still throws the single-target skill the instant one mob is in range — the AoE box
+    // at the cluster *edge* catches only that mob, so it ties the denominator and loses on per-hit
+    // damage. This returns a sweet-spot Point (the cluster centroid) to walk to when an AoE thrown
+    // from there would beat the fire-now plan's DPS by cfg.AOE_REPOSITION_DPS_FACTOR, else null
+    // (fire now). Bounded by AOE_REPOSITION_MAX_DISTANCE_X so it never chases scattering mobs.
+    static Point aoeRepositionTarget(BotEntry entry, Character bot, Monster primaryTarget, AttackPlan fireNowBest) {
+        if (entry == null || bot == null || primaryTarget == null
+                || entry.aoeSkillId == 0 || entry.aoeSkillMobs <= 1) {
+            return null;
+        }
+        // Only when the chosen plan is single-target with room to hit more — skip when the AoE is
+        // already the pick or the in-range cluster already maxes the skill's mobCount.
+        if (fireNowBest == null
+                || fireNowBest.skillId == entry.aoeSkillId
+                || fireNowBest.targets.size() >= entry.aoeSkillMobs) {
+            return null;
+        }
+        Point botPos = bot.getPosition();
+        Point tp = primaryTarget.getPosition();
+        if (botPos == null || tp == null) {
+            return null;
+        }
+        // Cheap geometry gates first (no scoring): sweet spot = centroid X of live mobs within the
+        // AoE cluster radius of the primary, clamped to the bounded-chase distance.
+        List<Monster> cluster = clusterMonsters(bot, primaryTarget);
+        if (cluster.size() <= fireNowBest.targets.size()) {
+            return null; // nothing more to gather than the fire-now plan already hits
+        }
+        long sumX = 0L;
+        for (Monster m : cluster) {
+            sumX += m.getPosition().x;
+        }
+        int centroidX = (int) (sumX / cluster.size());
+        int dx = centroidX - botPos.x;
+        if (Math.abs(dx) > cfg.AOE_REPOSITION_MAX_DISTANCE_X) {
+            dx = Integer.signum(dx) * cfg.AOE_REPOSITION_MAX_DISTANCE_X;
+            centroidX = botPos.x + dx;
+        }
+        if (Math.abs(dx) <= cfg.AOE_REPOSITION_ARRIVAL_X) {
+            return null; // already centered — let the normal flow pick the AoE
+        }
+        // Rebuild the AoE candidate at the current position (the plan planAttack discards),
+        // translate its hitbox to the sweet spot, and re-collect targets. Bail before any scoring
+        // if the sweet spot wouldn't actually catch more mobs than firing now.
+        AttackPlan aoeNow = planSkillAttack(entry, bot, primaryTarget, entry.aoeSkillId);
+        if (aoeNow == null || aoeNow.hitBox == null) {
+            return null;
+        }
+        Rectangle shifted = new Rectangle(aoeNow.hitBox);
+        shifted.translate(dx, 0);
+        Monster sweetPrimary = nearestMonster(cluster, centroidX, tp.y);
+        if (sweetPrimary == null) {
+            return null;
+        }
+        List<Monster> sweetTargets = collectTargetsInHitBox(bot, sweetPrimary, shifted, entry.aoeSkillMobs);
+        if (sweetTargets.size() <= fireNowBest.targets.size()) {
+            return null; // repositioning wouldn't actually catch more mobs
+        }
+        // Geometry is promising — now pay for scoring. scoreAttackPlan is position-independent
+        // (target HP + damage profile), so the translated plan scores validly.
+        PlanScore fireNowScore = scoreAttackPlan(bot, fireNowBest);
+        // Preserve kill priority: if the fire-now plan already one-shots a full-HP target, just fire.
+        if (fireNowScore.minimumKillsFullHpTargets) {
+            return null;
+        }
+        AttackPlan sweetPlan = new AttackPlan(aoeNow.skillId, aoeNow.skillLevel, aoeNow.numDamage, shifted,
+                sweetTargets, aoeNow.route, aoeNow.display, aoeNow.direction, aoeNow.rangedDirection,
+                aoeNow.stance, aoeNow.speed, aoeNow.hitDelayMs, aoeNow.cooldownMs, aoeNow.damageWeaponType);
+        PlanScore sweetScore = scoreAttackPlan(bot, sweetPlan);
+        if (sweetScore.rawDps >= fireNowScore.rawDps * cfg.AOE_REPOSITION_DPS_FACTOR) {
+            return new Point(centroidX, botPos.y);
+        }
+        return null;
+    }
+
+    private static List<Monster> clusterMonsters(Character bot, Monster primaryTarget) {
+        List<Monster> cluster = new ArrayList<>();
+        cluster.add(primaryTarget);
+        Point tp = primaryTarget.getPosition();
+        long radiusSq = (long) AOE_CLUSTER_RADIUS_PX * AOE_CLUSTER_RADIUS_PX;
+        for (Monster other : bot.getMap().getAllMonsters()) {
+            if (other == primaryTarget || !other.isAlive() || other.getPosition() == null) {
+                continue;
+            }
+            long dx = (long) other.getPosition().x - tp.x;
+            long dy = (long) other.getPosition().y - tp.y;
+            if (dx * dx + dy * dy <= radiusSq) {
+                cluster.add(other);
+            }
+        }
+        return cluster;
+    }
+
+    private static Monster nearestMonster(List<Monster> monsters, int x, int y) {
+        Monster best = null;
+        long bestDistSq = Long.MAX_VALUE;
+        for (Monster m : monsters) {
+            Point p = m.getPosition();
+            if (p == null) {
+                continue;
+            }
+            long dx = (long) p.x - x;
+            long dy = (long) p.y - y;
+            long distSq = dx * dx + dy * dy;
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                best = m;
+            }
+        }
+        return best;
     }
 
     private static long grindRegionOccupancyPenalty(GrindGraphContext context, Character bot, int targetRegionId) {

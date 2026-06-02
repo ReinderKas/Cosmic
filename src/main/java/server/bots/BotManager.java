@@ -1312,6 +1312,32 @@ public class BotManager {
     private static final int RETREAT_HOLD_MS = 600;
     private static final int RETREAT_ARRIVAL_TOLERANCE_X = 25; // 50ms tick can't land on an exact pixel
 
+    // AoE reposition commitment: returns the sweet-spot Point to walk to before firing, or null to
+    // fire now. Scores once when a commitment starts (BotCombatManager.aoeRepositionTarget); while
+    // committed it just returns the stored anchor — no further scoring — until the bot arrives, the
+    // bounded-chase deadline expires, or the target dies/clears.
+    private static Point resolveAoeReposition(BotEntry entry, Character bot, Monster target,
+                                              BotCombatManager.AttackPlan attackPlan, Point botPos) {
+        long now = System.currentTimeMillis();
+        if (entry.aoeRepositionAnchor != null) {
+            boolean done = now > entry.aoeRepositionDeadlineMs
+                    || target == null || !target.isAlive()
+                    || Math.abs(entry.aoeRepositionAnchor.x - botPos.x) <= BotCombatManager.cfg.AOE_REPOSITION_ARRIVAL_X;
+            if (done) {
+                entry.aoeRepositionAnchor = null;
+                entry.aoeRepositionDeadlineMs = 0L;
+                return null;
+            }
+            return entry.aoeRepositionAnchor;
+        }
+        Point anchor = BotCombatManager.aoeRepositionTarget(entry, bot, target, attackPlan);
+        if (anchor != null) {
+            entry.aoeRepositionAnchor = anchor;
+            entry.aoeRepositionDeadlineMs = now + BotCombatManager.cfg.AOE_REPOSITION_MAX_MS;
+        }
+        return anchor;
+    }
+
     static Point selectGrindNavigationTarget(BotEntry entry, Point botPos, Point combatTargetPos) {
         return selectGrindNavigationTarget(entry, botPos, combatTargetPos, false);
     }
@@ -2250,10 +2276,18 @@ public class BotManager {
             Point crossRegionRetreatPos = shouldRetreatForRangedSpacing
                     ? selectCrossRegionRetreatTarget(entry, botPos, tp)
                     : null;
+            // AoE positioning: when in range but the chosen plan is single-target, defer the shot
+            // and walk into the cluster centroid if the AoE would beat it on DPS there (bounded).
+            // Suppressed during ranged-spacing/cross-region retreats — spacing takes priority.
+            Point aoeRepositionPos = (!shouldRetreatForRangedSpacing && crossRegionRetreatPos == null
+                    && attackGateOpen && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target))
+                    ? resolveAoeReposition(entry, bot, target, attackPlan, botPos)
+                    : null;
 
             boolean attackAttemptedInRange = false;
             if (!entry.climbing) {
-                if (attackGateOpen && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)
+                if (aoeRepositionPos == null
+                        && attackGateOpen && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)
                         && BotCombatManager.canUseAttackPlanNow(entry, grindWeaponType, attackPlan)) {
                     attackAttemptedInRange = true;
                     // In range — attack if grounded, or during ascent of a jump
@@ -2284,6 +2318,7 @@ public class BotManager {
             // already in firing position.
             if (target != null && !entry.inAir && !entry.climbing
                     && !shouldRetreatForRangedSpacing && crossRegionRetreatPos == null
+                    && aoeRepositionPos == null
                     && !attackAttemptedInRange
                     && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)) {
                 BotPhysicsEngine.idleOnGround(entry, bot);
@@ -2296,6 +2331,8 @@ public class BotManager {
             // the monster's actual region.
             targetPos = crossRegionRetreatPos != null
                     ? crossRegionRetreatPos
+                    : aoeRepositionPos != null
+                    ? selectGrindNavigationTarget(entry, botPos, aoeRepositionPos)
                     : selectGrindNavigationTarget(entry, botPos, tp, shouldRetreatForRangedSpacing);
             // Clear only once the bot has physically left the retreat zone, not after the
             // first retreat tick — otherwise the flag resets while the bot is still overlapping
@@ -2305,7 +2342,8 @@ public class BotManager {
                 entry.degenAttackDone = false;
             }
             // Small detour: take a very close loot drop on the way when not retreating.
-            if (crossRegionRetreatPos == null && !shouldRetreatForRangedSpacing && entry.patrolRegionId < 0) {
+            if (crossRegionRetreatPos == null && !shouldRetreatForRangedSpacing
+                    && aoeRepositionPos == null && entry.patrolRegionId < 0) {
                 Point lootPos = convenientLootTarget(entry, botPos, tp);
                 if (lootPos != null) targetPos = lootPos;
             }
@@ -2399,10 +2437,17 @@ public class BotManager {
                 Point crossRegionRetreatPos = shouldRetreatForRangedSpacing
                         ? selectCrossRegionRetreatTarget(entry, botPos, tp)
                         : null;
+                // AoE positioning: defer a single-target shot to step into the cluster centroid when
+                // the AoE would beat it on DPS there (bounded). Suppressed during retreats.
+                Point aoeRepositionPos = (!shouldRetreatForRangedSpacing && crossRegionRetreatPos == null
+                        && attackGateOpen && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target))
+                        ? resolveAoeReposition(entry, bot, target, attackPlan, botPos)
+                        : null;
 
                 boolean attackAttemptedInRange = false;
                 if (!entry.climbing) {
-                    if (attackGateOpen && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)
+                    if (aoeRepositionPos == null
+                            && attackGateOpen && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)
                             && BotCombatManager.canUseAttackPlanNow(entry, grindWeaponType, attackPlan)) {
                         attackAttemptedInRange = true;
                         int prevCooldown = entry.attackCooldownMs;
@@ -2424,6 +2469,7 @@ public class BotManager {
                 }
                 if (target != null && !entry.inAir && !entry.climbing
                         && !shouldRetreatForRangedSpacing && crossRegionRetreatPos == null
+                        && aoeRepositionPos == null
                         && !attackAttemptedInRange
                         && BotCombatManager.isTargetInAttackRange(attackPlan, bot, target)) {
                     BotPhysicsEngine.idleOnGround(entry, bot);
@@ -2432,12 +2478,15 @@ public class BotManager {
                 }
                 targetPos = crossRegionRetreatPos != null
                         ? crossRegionRetreatPos
+                        : aoeRepositionPos != null
+                        ? selectGrindNavigationTarget(entry, botPos, aoeRepositionPos)
                         : selectGrindNavigationTarget(entry, botPos, tp, shouldRetreatForRangedSpacing);
                 if (entry.degenAttackDone
                         && !BotAttackExecutionProvider.shouldRetreatFromNearbyTarget(grindWeaponType, botPos, tp)) {
                     entry.degenAttackDone = false;
                 }
-                if (crossRegionRetreatPos == null && !shouldRetreatForRangedSpacing && entry.patrolRegionId < 0) {
+                if (crossRegionRetreatPos == null && !shouldRetreatForRangedSpacing
+                        && aoeRepositionPos == null && entry.patrolRegionId < 0) {
                     Point lootPos = convenientLootTarget(entry, botPos, tp);
                     if (lootPos != null) targetPos = lootPos;
                 }

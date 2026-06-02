@@ -47,6 +47,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -745,6 +747,115 @@ class BotCombatManagerTest {
 
             assertEquals(Warrior.POWER_STRIKE, plan.skillId);
             assertEquals(List.of(primary), plan.targets);
+        }
+    }
+
+    @Test
+    void shouldRepositionToClusterCentroidWhenAoeDpsBeatsSingleTarget() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mockBot(new Point(100, 200), map, 20_000, null);
+        Skill powerStrike = skillWithAttack(Warrior.POWER_STRIKE, 1, 1, 260);
+        // AoE box authored bot-relative: at the bot (x=100) it covers x[20,180], catching only the
+        // edge mob; after the bot steps to the centroid the same box (translated) catches all three.
+        Skill slashBlast = skillWithAttackBox(Warrior.SLASH_BLAST, 4, 6, 50,
+                new Rectangle(20, 170, 160, 60));
+        Monster primary = mockMob(new Point(140, 200), 9300500);
+        Monster mid = mockMob(new Point(200, 200), 9300501);
+        Monster far = mockMob(new Point(260, 200), 9300502);
+        when(map.getAllMonsters()).thenReturn(List.of(primary, mid, far));
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skill.getId() == powerStrike.getId() || skill.getId() == slashBlast.getId() ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.attackSkillId = powerStrike.getId();
+        entry.aoeSkillId = slashBlast.getId();
+        entry.aoeSkillMobs = 6;
+
+        try (MockedStatic<SkillFactory> skillFactory = Mockito.mockStatic(SkillFactory.class)) {
+            skillFactory.when(() -> SkillFactory.getSkill(powerStrike.getId())).thenReturn(powerStrike);
+            skillFactory.when(() -> SkillFactory.getSkill(slashBlast.getId())).thenReturn(slashBlast);
+
+            // At the bot's current position the AoE catches only the edge mob, so the single-target
+            // skill wins on DPS — this is the fire-now plan that would otherwise trigger immediately.
+            BotCombatManager.AttackPlan fireNow = BotCombatManager.planAttack(entry, bot, primary);
+            assertEquals(Warrior.POWER_STRIKE, fireNow.skillId);
+            assertEquals(List.of(primary), fireNow.targets);
+
+            Point reposition = BotCombatManager.aoeRepositionTarget(entry, bot, primary, fireNow);
+            assertNotNull(reposition, "should defer the single-target shot to step into the cluster");
+            assertEquals(200, reposition.x, "should walk to the 3-mob centroid (140+200+260)/3");
+        }
+    }
+
+    @Test
+    void shouldNotRepositionWhenNoAoeSkill() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mockBot(new Point(100, 200), map, 20_000, null);
+        Skill powerStrike = skillWithAttack(Warrior.POWER_STRIKE, 1, 1, 260);
+        Monster primary = mockMob(new Point(140, 200), 9300510);
+        Monster mid = mockMob(new Point(200, 200), 9300511);
+        Monster far = mockMob(new Point(260, 200), 9300512);
+        when(map.getAllMonsters()).thenReturn(List.of(primary, mid, far));
+        when(bot.getSkillLevel(any(Skill.class))).thenReturn((byte) 1);
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.attackSkillId = powerStrike.getId();
+        // No aoeSkillId / aoeSkillMobs left at default 1.
+
+        try (MockedStatic<SkillFactory> skillFactory = Mockito.mockStatic(SkillFactory.class)) {
+            skillFactory.when(() -> SkillFactory.getSkill(powerStrike.getId())).thenReturn(powerStrike);
+
+            BotCombatManager.AttackPlan fireNow = BotCombatManager.planAttack(entry, bot, primary);
+            assertNull(BotCombatManager.aoeRepositionTarget(entry, bot, primary, fireNow));
+        }
+    }
+
+    @Test
+    void shouldNotRepositionWhenFireNowPlanIsAlreadyAoe() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mockBot(new Point(100, 200), map, 20_000, null);
+        Monster primary = mockMob(new Point(140, 200), 9300520);
+        Monster mid = mockMob(new Point(200, 200), 9300521);
+        when(map.getAllMonsters()).thenReturn(List.of(primary, mid));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.aoeSkillId = Warrior.SLASH_BLAST;
+        entry.aoeSkillMobs = 6;
+
+        // Fire-now plan is the AoE itself — nothing to upgrade by repositioning.
+        BotCombatManager.AttackPlan aoePlan = new BotCombatManager.AttackPlan(
+                Warrior.SLASH_BLAST, 1, 1, new Rectangle(20, 170, 160, 60), List.of(primary),
+                BotCombatManager.AttackRoute.CLOSE, 0, 0, 0, 0, 0, 0, 100, null);
+        assertNull(BotCombatManager.aoeRepositionTarget(entry, bot, primary, aoePlan));
+    }
+
+    @Test
+    void shouldNotRepositionForLoneMob() {
+        MapleMap map = mock(MapleMap.class);
+        Character bot = mockBot(new Point(100, 200), map, 20_000, null);
+        Skill powerStrike = skillWithAttack(Warrior.POWER_STRIKE, 1, 1, 260);
+        Skill slashBlast = skillWithAttackBox(Warrior.SLASH_BLAST, 4, 6, 50,
+                new Rectangle(20, 170, 160, 60));
+        Monster primary = mockMob(new Point(140, 200), 9300530);
+        when(map.getAllMonsters()).thenReturn(List.of(primary));
+        doAnswer(invocation -> {
+            Skill skill = invocation.getArgument(0);
+            return (byte) (skill.getId() == powerStrike.getId() || skill.getId() == slashBlast.getId() ? 1 : 0);
+        }).when(bot).getSkillLevel(any(Skill.class));
+
+        BotEntry entry = new BotEntry(bot, null, null);
+        entry.attackSkillId = powerStrike.getId();
+        entry.aoeSkillId = slashBlast.getId();
+        entry.aoeSkillMobs = 6;
+
+        try (MockedStatic<SkillFactory> skillFactory = Mockito.mockStatic(SkillFactory.class)) {
+            skillFactory.when(() -> SkillFactory.getSkill(powerStrike.getId())).thenReturn(powerStrike);
+            skillFactory.when(() -> SkillFactory.getSkill(slashBlast.getId())).thenReturn(slashBlast);
+
+            BotCombatManager.AttackPlan fireNow = BotCombatManager.planAttack(entry, bot, primary);
+            assertNull(BotCombatManager.aoeRepositionTarget(entry, bot, primary, fireNow));
         }
     }
 
