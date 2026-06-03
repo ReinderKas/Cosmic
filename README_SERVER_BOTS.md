@@ -1,5 +1,7 @@
 # Bot System — Quick Start Guide
 
+[Patch Notes](docs/bot/patch-notes/README.md)
+
 ## Features
 
 - follow, trade, loot
