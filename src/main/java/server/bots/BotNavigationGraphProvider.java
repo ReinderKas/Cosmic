@@ -1803,6 +1803,10 @@ final class BotNavigationGraphProvider {
 
         Point start = from.pointAt(portal.getPosition().x);
         Point end = to.pointAt(targetPortal.getPosition().x);
+        // A single portal is instantaneous, so its base edge cost is 0. The only real time a
+        // portal costs is the post-use cooldown the bot pays when it chains straight into another
+        // portal; that is modelled path-dependently in BotNavigationManager's A* (the viaPortal
+        // state flag), not as a flat per-edge cost. See PORTAL_USE_COOLDOWN_MS.
         addEdge(from.id, to.id, BotNavigationGraph.EdgeType.PORTAL, start, end, 0, portal.getId(), 0, outgoing, edgeKeys);
     }
 

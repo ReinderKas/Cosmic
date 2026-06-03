@@ -24,6 +24,10 @@ final class BotNavigationManager {
     private static final int JUMP_READY_X_TOLERANCE = 10;
     private static final int EDGE_READY_X_TOLERANCE = 14;
     private static final int NO_MOVEMENT_WALK_TOLERANCE = 4;
+    // After a bot takes a portal, suppress further portal usage for this long. Prevents a bot from
+    // immediately re-entering a portal (e.g. bouncing back through the return portal). Gates ONLY
+    // portal execution — movement, attacks and every other action continue unaffected.
+    private static final long PORTAL_USE_COOLDOWN_MS = 250L;
     private static final long SLOW_PATHFIND_WARN_NS = 50_000_000L;
 
     /** Throttle warmup notifications per (ownerId -> mapId -> lastNotifyMs). */
@@ -51,7 +55,11 @@ final class BotNavigationManager {
         }
     }
 
-    private record SearchState(int regionId, Point point) {
+    // viaPortal: true when this state was reached by a PORTAL edge. It distinguishes "arrived here
+    // by teleport" from "arrived by walk/jump/etc." so the search can charge the portal cooldown to
+    // a portal that chains straight off another portal (see runSearch). The flag is part of the
+    // dedup key, so a region reachable both ways is explored under both costs.
+    private record SearchState(int regionId, Point point, boolean viaPortal) {
     }
 
     private record PathfindProfile(long elapsedNs,
@@ -589,10 +597,14 @@ final class BotNavigationManager {
                                                         Character bot,
                                                         Point rawTargetPos,
                                                         BotNavigationGraph.Edge edge) {
+        if (System.currentTimeMillis() < entry.portalUseCooldownUntilMs) {
+            return null;
+        }
         if (!usePortal(bot, edge.portalId)) {
             return null;
         }
 
+        entry.portalUseCooldownUntilMs = System.currentTimeMillis() + PORTAL_USE_COOLDOWN_MS;
         clearNavigation(entry);
         BotMovementManager.resetEntryState(entry);
         return new NavigationDirective(rawTargetPos, true);
@@ -839,7 +851,7 @@ final class BotNavigationManager {
             Map<SearchState, Integer> gScore = new HashMap<>();
             Map<SearchState, SearchState> cameFrom = new HashMap<>();
             Map<SearchState, BotNavigationGraph.Edge> cameByEdge = new HashMap<>();
-            SearchState startState = new SearchState(startRegionId, new Point(startPos));
+            SearchState startState = new SearchState(startRegionId, new Point(startPos), false);
             SearchState bestGoalState = null;
             int bestGoalCost = Integer.MAX_VALUE;
             int expandedNodes = 0;
@@ -878,8 +890,19 @@ final class BotNavigationManager {
                     }
                     usableEdges++;
 
-                    int tentativeCost = current.cost + intraRegionTravelCost(graph, current.state.regionId, current.state.point, edge.startPoint) + edge.cost;
-                    SearchState nextState = new SearchState(edge.toRegionId, edge.endPoint);
+                    boolean isPortal = edge.type == BotNavigationGraph.EdgeType.PORTAL;
+                    // Portals are free on their own (edge.cost == 0). Charge PORTAL_USE_COOLDOWN_MS
+                    // only when the bot enters a portal *through the exit* of the one it just took —
+                    // i.e. it landed on a portal and immediately re-enters without walking. A
+                    // viaPortal state's point IS the previous portal's exit, so this is exactly when
+                    // that exit coincides with this portal's entry. That covers the "return to old
+                    // position" round-trip and co-located A>B>C hops, but NOT A>B>walk>C>D (the bot
+                    // walked off the exit first, so the entry points differ and it stays free).
+                    boolean enteredThroughExit = current.state.viaPortal
+                            && current.state.point.equals(edge.startPoint);
+                    int edgeCost = isPortal && enteredThroughExit ? (int) PORTAL_USE_COOLDOWN_MS : edge.cost;
+                    int tentativeCost = current.cost + intraRegionTravelCost(graph, current.state.regionId, current.state.point, edge.startPoint) + edgeCost;
+                    SearchState nextState = new SearchState(edge.toRegionId, edge.endPoint, isPortal);
                     if (tentativeCost >= gScore.getOrDefault(nextState, Integer.MAX_VALUE)) {
                         continue;
                     }
