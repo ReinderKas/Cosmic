@@ -9,7 +9,9 @@
 - auto equip and optimize own gear loadout - including chaining stats bonus to unlock higher requirement equips and weapons, allowing dexless/strless/lukless builds
 - auto share equipment upgrades with owner and other sibling bots (auto compare stats directly against recipient's inventory)
 - auto sort equipment from junk equip so selling trash equips become manageable. (sell trash command available)
+- automation command for maker skill disassemble gear / craft monster crystals
 - auto complete any quest the owner turn in (with rewards)
+- AI LLM support (reply to chat, no effect on gameplay whatsoever)
 - Party Quest Automation(currently only KPQ 1st stage + auto accept rewards 5th stage)
 - Each bot is a real character you can log in as, can spawn your alts as bots
 
