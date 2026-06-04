@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.6
+
 # Initial Docker support thanks to xinyifly
 # Optimisation performed by wejrox
 
@@ -22,7 +24,8 @@ COPY pom.xml ./pom.xml
 # Source code changes may not change dependencies, so it can go last.
 # Skip compiling tests since we don't want all the dependecies to be downloaded for plugins.
 COPY src ./src
-RUN mvn -f ./pom.xml clean package -Dmaven.test.skip -T 1C
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -f ./pom.xml clean package -Dmaven.test.skip -T 1C
 
 #
 # Server creation stage
