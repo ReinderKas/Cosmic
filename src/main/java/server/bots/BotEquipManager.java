@@ -56,6 +56,10 @@ class BotEquipManager {
     /** Hard cap on Pareto-frontier size per DP step to bound worst-case runtime. */
     private static final int MAX_PARETO_STATES = 2000;
     private static final long AUTOEQUIP_THROTTLE_MS = 30_000L;
+    private static final int NEAR_FUTURE_LEVEL_WINDOW = 30;
+    private static final int NEAR_FUTURE_SINGLE_STAT_AP_WINDOW = 20;
+    private static final int NEAR_FUTURE_TOTAL_AP_WINDOW = 35;
+    private static final int NEAR_FUTURE_FAME_WINDOW = 10;
     private static final Map<Integer, Long> LAST_AUTOEQUIP_MS = new java.util.concurrent.ConcurrentHashMap<>();
 
     static final class EquipRecommendation {
@@ -1537,7 +1541,8 @@ class BotEquipManager {
         for (Equip equip : ownedItems) {
             if (equip == null || hooks.isCash(equip.getItemId())) continue;
             if (!isFutureOwnClassEquip(bot, hooks, equip)) continue;
-            if (!hasPositiveRelevant(relevant, equip)) continue;
+            boolean nearFuture = isNearFutureWearable(bot, hooks, equip);
+            if (!nearFuture && !hasPositiveRelevant(relevant, equip)) continue;
             String track = selfReserveTrackKey(bot, hooks, equip);
             if (track == null) continue;
             byTrack.computeIfAbsent(track, ignored -> new ArrayList<>()).add(equip);
@@ -1546,6 +1551,11 @@ class BotEquipManager {
         Set<Equip> keep = Collections.newSetFromMap(new IdentityHashMap<>());
         for (List<Equip> trackItems : byTrack.values()) {
             for (Equip candidate : trackItems) {
+                if (isNearFutureWearable(bot, hooks, candidate)) {
+                    keep.add(candidate);
+                    continue;
+                }
+
                 boolean dominated = false;
                 for (Equip other : trackItems) {
                     if (other == candidate) continue;
@@ -1650,6 +1660,44 @@ class BotEquipManager {
         return hooks.meetsReqs(equip, bot.getJob(), Short.MAX_VALUE,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4,
                 Integer.MAX_VALUE / 4, Integer.MAX_VALUE / 4, Short.MAX_VALUE);
+    }
+
+    private static boolean isNearFutureWearable(Character bot, SelfReserveHooks hooks, Equip equip) {
+        if (bot == null || hooks == null || equip == null) {
+            return false;
+        }
+        if (!isFutureOwnClassEquip(bot, hooks, equip)) {
+            return false;
+        }
+
+        int reqLevel = hooks.getEquipLevelReq(equip.getItemId());
+        if (reqLevel > 0 && reqLevel - bot.getLevel() > NEAR_FUTURE_LEVEL_WINDOW) {
+            return false;
+        }
+
+        Map<String, Integer> req = hooks.getEquipStats(equip.getItemId());
+        if (req == null) {
+            return false;
+        }
+
+        int dStr = Math.max(0, req.getOrDefault("reqSTR", 0) - bot.getStr());
+        int dDex = Math.max(0, req.getOrDefault("reqDEX", 0) - bot.getDex());
+        int dInt = Math.max(0, req.getOrDefault("reqINT", 0) - bot.getInt());
+        int dLuk = Math.max(0, req.getOrDefault("reqLUK", 0) - bot.getLuk());
+        int dPop = Math.max(0, req.getOrDefault("reqPOP", 0) - bot.getFame());
+
+        if (dPop > NEAR_FUTURE_FAME_WINDOW) {
+            return false;
+        }
+        if (dStr > NEAR_FUTURE_SINGLE_STAT_AP_WINDOW
+                || dDex > NEAR_FUTURE_SINGLE_STAT_AP_WINDOW
+                || dInt > NEAR_FUTURE_SINGLE_STAT_AP_WINDOW
+                || dLuk > NEAR_FUTURE_SINGLE_STAT_AP_WINDOW) {
+            return false;
+        }
+
+        int totalApDeficit = dStr + dDex + dInt + dLuk;
+        return totalApDeficit <= NEAR_FUTURE_TOTAL_AP_WINDOW;
     }
 
     private static String textSlotKey(EquipUsefulnessHooks hooks, Equip equip) {
