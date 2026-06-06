@@ -33,14 +33,77 @@ profiles:
 
   magician:
     levels:
+      8:
+        apTargets:
+          STR: 4
+          DEX: 4
+          INT: 20
+          LUK: 0
+        spTargets: {}
+        equipItemIds: [Beginner Magician's Staff]
+        optimizeEquip: true
       10:
         apTargets:
           STR: 4
           DEX: 4
-          INT: 35
+          INT: 32
+          LUK: 13
+        spTargets: {}
+        equipItemIds: [Blue Apprentice Hat]
+        optimizeEquip: true
+      15:
+        apTargets:
+          STR: 4
+          DEX: 4
+          INT: 48
+          LUK: 18
+        spTargets: {}
+        equipItemIds: [1382005, 1002102, 1050009, 1082019]
+        optimizeEquip: true
+      20:
+        apTargets:
+          STR: 4
+          DEX: 4
+          INT: 62
+          LUK: 23
+        spTargets: {}
+        equipItemIds: [1382004, 1002072, 1082020]
+        optimizeEquip: true
+      23:
+        apTargets:
+          STR: 4
+          DEX: 4
+          INT: 70
           LUK: 25
         spTargets: {}
-        equipItemIds: []
+        equipItemIds: [1050023]
+        optimizeEquip: true
+      25:
+        apTargets:
+          STR: 4
+          DEX: 4
+          INT: 78
+          LUK: 28
+        spTargets: {}
+        equipItemIds: [1382002, 1082026]
+        optimizeEquip: true
+      28:
+        apTargets:
+          STR: 4
+          DEX: 4
+          INT: 85
+          LUK: 30
+        spTargets: {}
+        equipItemIds: [1050003]
+        optimizeEquip: true
+      30:
+        apTargets:
+          STR: 4
+          DEX: 4
+          INT: 92
+          LUK: 33
+        spTargets: {}
+        equipItemIds: [1382017, 1002013, 1082052]
         optimizeEquip: true
 
   bowman:

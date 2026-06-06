@@ -4,12 +4,15 @@ import client.Character;
 import client.Job;
 import client.Skill;
 import client.SkillFactory;
+import client.Stat;
 import client.inventory.Equip;
 import client.inventory.Inventory;
 import client.inventory.InventoryType;
 import client.inventory.Item;
 import client.inventory.manipulator.InventoryManipulator;
+import client.processor.stat.AssignAPProcessor;
 import com.esotericsoftware.yamlbeans.YamlReader;
+import config.YamlConfig;
 import constants.game.GameConstants;
 import constants.inventory.EquipSlot;
 import constants.string.CharsetConstants;
@@ -74,9 +77,24 @@ final class BotMaximizeProfileManager {
         if (targets == null || targets.isEmpty()) {
             return 0;
         }
+
+        int apBefore = bot.getRemainingAp();
+
+        // If we cannot satisfy all configured level minima using current remaining AP,
+        // reset AP distribution back to job floors first.
+        if (!canReachAllTargets(bot, targets, apBefore)) {
+            resetApToJobFloors(bot);
+        }
+
+        spendApTowardTargets(bot, targets);
+        dumpRemainingApToPrimaryStat(bot);
+        return Math.max(0, apBefore - bot.getRemainingAp());
+    }
+
+    private static void spendApTowardTargets(Character bot, Map<BotBuildManager.StatType, Integer> targets) {
         int remaining = bot.getRemainingAp();
         if (remaining < 1) {
-            return 0;
+            return;
         }
 
         int gainStr = 0;
@@ -119,7 +137,89 @@ final class BotMaximizeProfileManager {
         if (spent > 0) {
             bot.assignStrDexIntLuk(gainStr, gainDex, gainInt, gainLuk);
         }
-        return spent;
+    }
+
+    private static boolean canReachAllTargets(Character bot,
+                                              Map<BotBuildManager.StatType, Integer> targets,
+                                              int remainingAp) {
+        int need = 0;
+        for (Map.Entry<BotBuildManager.StatType, Integer> e : targets.entrySet()) {
+            if (e.getValue() == null) {
+                continue;
+            }
+            int target = Math.max(0, e.getValue());
+            int current = currentStat(bot, e.getKey());
+            need += Math.max(0, target - current);
+            if (need > remainingAp) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void resetApToJobFloors(Character bot) {
+        int minStr = AssignAPProcessor.getMinStatFloor(bot.getJob(), Stat.STR);
+        int minDex = AssignAPProcessor.getMinStatFloor(bot.getJob(), Stat.DEX);
+        int minInt = AssignAPProcessor.getMinStatFloor(bot.getJob(), Stat.INT);
+        int minLuk = AssignAPProcessor.getMinStatFloor(bot.getJob(), Stat.LUK);
+
+        bot.assignStrDexIntLuk(
+                minStr - bot.getStr(),
+                minDex - bot.getDex(),
+                minInt - bot.getInt(),
+                minLuk - bot.getLuk());
+    }
+
+    private static void dumpRemainingApToPrimaryStat(Character bot) {
+        int remaining = bot.getRemainingAp();
+        if (remaining < 1) {
+            return;
+        }
+
+        BotBuildManager.StatType primary = primaryStatForJob(bot.getJob());
+        int current = currentStat(bot, primary);
+        int cap = Math.max(0, YamlConfig.config.server.MAX_AP - current);
+        int gain = Math.min(remaining, cap);
+        if (gain < 1) {
+            return;
+        }
+
+        int gainStr = 0;
+        int gainDex = 0;
+        int gainInt = 0;
+        int gainLuk = 0;
+        switch (primary) {
+            case STR -> gainStr = gain;
+            case DEX -> gainDex = gain;
+            case INT -> gainInt = gain;
+            case LUK -> gainLuk = gain;
+        }
+        bot.assignStrDexIntLuk(gainStr, gainDex, gainInt, gainLuk);
+    }
+
+    private static BotBuildManager.StatType primaryStatForJob(Job job) {
+        if (job == null) {
+            return BotBuildManager.StatType.STR;
+        }
+        if (job.isA(Job.MAGICIAN) || job.isA(Job.BLAZEWIZARD1)) {
+            return BotBuildManager.StatType.INT;
+        }
+        if (job.isA(Job.THIEF) || job.isA(Job.NIGHTWALKER1)) {
+            return BotBuildManager.StatType.LUK;
+        }
+        if (job.isA(Job.BOWMAN) || job.isA(Job.WINDARCHER1)) {
+            return BotBuildManager.StatType.DEX;
+        }
+        return BotBuildManager.StatType.STR;
+    }
+
+    private static int currentStat(Character bot, BotBuildManager.StatType stat) {
+        return switch (stat) {
+            case STR -> bot.getStr();
+            case DEX -> bot.getDex();
+            case INT -> bot.getInt();
+            case LUK -> bot.getLuk();
+        };
     }
 
     private static int applySpTargets(Character bot, Map<Integer, Integer> targets) {
