@@ -53,6 +53,7 @@ class BotBuildManager {
      * or the bot is not on a supported branch.
      */
     static String buildApPrompt(BotEntry entry, Character bot) {
+        if (entry.maximizeProfileEnabled) return null;
         String prompt = apPromptForJob(bot.getJob());
         if (prompt == null) return null;
         if (entry.apBuild != null || entry.apPromptSent || bot.getRemainingAp() < 1) return null;
@@ -60,6 +61,7 @@ class BotBuildManager {
     }
 
     static String requestApBuildPrompt(BotEntry entry, Character bot) {
+        if (entry.maximizeProfileEnabled) return null;
         String prompt = apPromptForJob(bot.getJob());
         if (prompt == null) return null;
         entry.apPromptSent = true;
@@ -68,7 +70,13 @@ class BotBuildManager {
 
     /** Spends all remaining AP according to the stored build. */
     static void autoAssignAp(BotEntry entry, Character bot) {
+        if (entry.maximizeProfileEnabled) {
+            BotMaximizeProfileManager.applyForCurrentLevel(entry, bot, false);
+            return;
+        }
         if (entry.apBuild == null || bot.getRemainingAp() < 1) return;
+
+        // TODO: ASsign if maximal.
 
         int ap = bot.getRemainingAp();
         int[] gains = new int[StatType.values().length];
@@ -92,6 +100,9 @@ class BotBuildManager {
     }
 
     static String respecAp(BotEntry entry, Character bot) {
+        if (entry.maximizeProfileEnabled) {
+            return "maximize profile mode is on; turn it off to use ap respec";
+        }
         if (apPromptForJob(bot.getJob()) == null) {
             return "dont have an ap build for my job yet";
         }
@@ -109,6 +120,10 @@ class BotBuildManager {
     }
 
     static void handleJobAdvance(BotEntry entry, Character bot, Job oldJob, Job newJob) {
+        if (entry.maximizeProfileEnabled) {
+            BotMaximizeProfileManager.applyForCurrentLevel(entry, bot, true);
+            return;
+        }
         if (oldJob == Job.BEGINNER && oldJob != newJob && entry.apBuild != null) {
             reallocateAp(entry, bot);
         }
@@ -136,6 +151,7 @@ class BotBuildManager {
      * Currently only Hero has two documented builds.
      */
     static String buildSpVariantPrompt(BotEntry entry, Character bot) {
+        if (entry.maximizeProfileEnabled) return null;
         if (bot.getJob() != Job.HERO) return null;
         if (entry.spVariant != null || entry.spVariantPromptSent || bot.getRemainingSps()[3] < 1) return null;
         entry.spVariantPromptSent = true;
@@ -147,6 +163,10 @@ class BotBuildManager {
      * Hero SP is held until the owner chooses a variant.
      */
     static void autoAssignSp(BotEntry entry, Character bot) {
+        if (entry.maximizeProfileEnabled) {
+            BotMaximizeProfileManager.applyForCurrentLevel(entry, bot, false);
+            return;
+        }
         if (bot.getJob() == Job.HERO && entry.spVariant == null) return;
 
         List<BuildStep> steps = getBuildOrder(bot.getJob(), entry.spVariant);
@@ -156,6 +176,9 @@ class BotBuildManager {
     }
 
     static String respecSp(BotEntry entry, Character bot) {
+        if (entry.maximizeProfileEnabled) {
+            return "maximize profile mode is on; turn it off to use sp respec";
+        }
         if (bot.getJob() == Job.HERO && entry.spVariant == null) {
             return "need your hero build first. say '1h' or '2h'";
         }
@@ -229,9 +252,35 @@ class BotBuildManager {
         }
     }
 
-    private static boolean canLevelSkill(Character bot, Skill skill, int currentLevel) {
+    static boolean canLevelSkill(Character bot, Skill skill, int currentLevel) {
         int cap = skill.isFourthJob() ? bot.getMasterLevel(skill) : skill.getMaxLevel();
         return currentLevel < cap;
+    }
+
+    static String setMaximizeProfileMode(BotEntry entry, Character bot, boolean enabled) {
+        entry.maximizeProfileEnabled = enabled;
+        if (!enabled) {
+            return "maximize profile mode off";
+        }
+
+        entry.apBuild = null;
+        entry.apPromptSent = false;
+        entry.spVariant = null;
+        entry.spVariantPromptSent = false;
+
+        BotMaximizeProfileManager.ApplyResult result = BotMaximizeProfileManager.applyForCurrentLevel(entry, bot, true);
+        if (result.noPlanForLevel()) {
+            return "maximize profile mode on, but no level plan for lv"
+                    + result.level() + " in " + BotMaximizeProfileManager.profilePath();
+        }
+        if (!result.applied()) {
+            return "maximize profile mode on, but no profile loaded ("
+                    + BotMaximizeProfileManager.profilePath() + ")";
+        }
+        return "maximize profile mode on (ap " + result.apSpent()
+                + ", sp " + result.spSpent()
+                + ", equips " + result.forcedEquips()
+                + (result.optimized() ? ", optimized" : "") + ")";
     }
 
     private static List<Job> getSupportedBuildPath(Job job) {
@@ -322,6 +371,11 @@ class BotBuildManager {
         if (lvl == 8 || lvl == 10 || lvl == 30 || lvl == 70 || lvl == 120) {
             BotManager.getInstance().issueFollowOwner(entry);
             BotChatManager.checkBotStatus(entry, bot);
+        }
+
+        if (entry.maximizeProfileEnabled) {
+            BotMaximizeProfileManager.applyForCurrentLevel(entry, bot, true);
+            return;
         }
 
         autoAssignSp(entry, bot);

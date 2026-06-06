@@ -162,6 +162,14 @@ public class BotChatManager {
             + "|^\\s*skills\\s*\\??\\s*$",
             Pattern.CASE_INSENSITIVE);
 
+    private static final Pattern MAXIMIZE_EQUIP_PATTERN = Pattern.compile(
+            // "maximize gear/equipment/equips/build/profile"
+            "\\bmaximi[sz]e\\s+(?:gear|equip(?:ment)?|equips?|build|profile)\\b",
+            Pattern.CASE_INSENSITIVE);
+        private static final Pattern MAXIMIZE_PROFILE_OFF_PATTERN = Pattern.compile(
+            "\\b(?:maximi[sz]e\\s+(?:build|profile)\\s+(?:off|disable)|disable\\s+maximi[sz]e\\s+(?:build|profile))\\b",
+            Pattern.CASE_INSENSITIVE);
+
     private static final Pattern INVENTORY_PATTERN = Pattern.compile(
             INFO_PFX + "(inv(entory)?|bag|items?|equips?|equipment)\\b"
             + "|\\bwhat.?s\\s+in\\s+(your|ur)\\s+(inv(entory)?|bag)\\b"
@@ -900,6 +908,13 @@ public class BotChatManager {
             return;
         }
 
+        if (MAXIMIZE_PROFILE_OFF_PATTERN.matcher(message).find()) {
+            BotManager.after(BotManager.randMs(500, 700), () ->
+                    BotManager.getInstance().botReply(entry,
+                            BotBuildManager.setMaximizeProfileMode(entry, entry.bot, false)));
+            return;
+        }
+
         if (isFarmHereCommand(message)) {
             Point dest = entry.owner != null ? new Point(entry.owner.getPosition()) : null;
             if (dest != null) {
@@ -983,6 +998,10 @@ public class BotChatManager {
         // AP build selection — "change build" always triggers a re-prompt;
         // "dexless" / "X dex" only apply when bot is actively waiting for the answer (apPromptSent=true)
         if (AP_CHANGE_BUILD_PATTERN.matcher(message).find()) {
+            if (entry.maximizeProfileEnabled) {
+                BotManager.getInstance().botReply(entry, "maximize profile mode is on; disable it first");
+                return;
+            }
             entry.apBuild      = null;
             entry.apPromptSent = false;
             String prompt = BotBuildManager.requestApBuildPrompt(entry, entry.bot);
@@ -1091,6 +1110,17 @@ public class BotChatManager {
                 BotManager.getInstance().botReply(entry, BotManager.randomReply(replies));
                 BotManager.after(BotManager.randMs(900, 1100), () -> BotStarterKitManager.advanceJob(entry, advJob));
             }
+        }
+
+        if(matchesWholeCommand(MAXIMIZE_EQUIP_PATTERN, message)) {
+            BotManager.after(BotManager.randMs(500, 700), () -> {
+                BotManager.getInstance().issueStop(entry);
+            String status = BotBuildManager.setMaximizeProfileMode(entry, entry.bot, true);
+            BotManager.getInstance().botReply(entry, status);
+                BotManager.after(BotManager.randMs(1400, 1600), () ->
+                        BotManager.getInstance().botReply(entry, "ok, gear optimized"));
+            });
+            return;
         }
         LAST_CHAT_HANDLED.set(false);
     }
@@ -1214,17 +1244,21 @@ public class BotChatManager {
     static void checkBotStatus(BotEntry entry, Character bot) {
         String jobPrompt = BotBuildManager.buildJobPrompt(entry, bot);
         if (jobPrompt != null) queueBotReply(entry, jobPrompt);
-        String spPrompt = BotBuildManager.buildSpVariantPrompt(entry, bot);
-        if (spPrompt != null) {
-            queueBotReply(entry, spPrompt);
+        if (entry.maximizeProfileEnabled) {
+            BotMaximizeProfileManager.applyForCurrentLevel(entry, bot, false);
         } else {
-            BotBuildManager.autoAssignSp(entry, bot);
-        }
-        String apPrompt = BotBuildManager.buildApPrompt(entry, bot);
-        if (apPrompt != null) {
-            queueBotReply(entry, apPrompt);
-        } else {
-            BotBuildManager.autoAssignAp(entry, bot);
+            String spPrompt = BotBuildManager.buildSpVariantPrompt(entry, bot);
+            if (spPrompt != null) {
+                queueBotReply(entry, spPrompt);
+            } else {
+                BotBuildManager.autoAssignSp(entry, bot);
+            }
+            String apPrompt = BotBuildManager.buildApPrompt(entry, bot);
+            if (apPrompt != null) {
+                queueBotReply(entry, apPrompt);
+            } else {
+                BotBuildManager.autoAssignAp(entry, bot);
+            }
         }
         maybeSuggestRecommendedGear(entry, bot);
         maybeSuggestGearToSiblings(entry, bot);
@@ -1358,9 +1392,12 @@ public class BotChatManager {
     }
 
     private static void reportBuild(BotEntry entry, Character bot) {
-        queueBotReply(entry, String.format("build: str %d / dex %d / int %d / luk %d, %d ap left",
-                bot.getStr(), bot.getDex(), bot.getInt(), bot.getLuk(),
-                bot.getRemainingAp()));
+        String mode = entry.maximizeProfileEnabled
+            ? "maximize profile on (" + BotMaximizeProfileManager.profilePath() + ")"
+            : "bot build mode";
+        queueBotReply(entry, String.format("build: str %d / dex %d / int %d / luk %d, %d ap left | %s",
+            bot.getStr(), bot.getDex(), bot.getInt(), bot.getLuk(),
+            bot.getRemainingAp(), mode));
     }
 
     private static void reportSkills(BotEntry entry, Character bot) {
@@ -1603,6 +1640,7 @@ public class BotChatManager {
 
     private static void reportHelp(BotEntry entry) {
         queueBotReply(entry, "commands: follow, stop, move here, fidget, grind, stats, speed, skills, inventory, mesos, exp, slots, scrolls, pots, debug stats, crit, respec, respec ap");
+        queueBotReply(entry, "maximize profile: 'maximize build' to enable, 'maximize profile off' to disable");
         queueBotReply(entry, "support: skill buffs on/off (= support on/off), heals on/off, buff on/off, buff cheap/max, proactive offers on/off, buff debug, skill buff debug");
         queueBotReply(entry, "gear: ask 'any upgrades?' or say 'trade recommended gear'");
         queueBotReply(entry, "supplies: need hp pot, need mp pot, need pot, need ammo");

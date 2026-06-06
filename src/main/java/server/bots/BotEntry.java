@@ -202,6 +202,7 @@ public class BotEntry {
     boolean apPromptSent = false;
     String spVariant = null;
     boolean spVariantPromptSent = false;
+    boolean maximizeProfileEnabled = false;
 
     // Reply channel — tracks the chat channel the last owner command arrived on.
     // Bot replies are routed to this channel until the next command changes it.

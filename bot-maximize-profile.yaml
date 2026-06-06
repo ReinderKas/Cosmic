@@ -1,0 +1,83 @@
+# Level-based maximize profile for bots.
+#
+# When a bot is put in maximize profile mode (chat: "maximize build"), AP/SP
+# allocation and level-up equip behavior are driven by this file only.
+#
+# Each class has its own profile under "profiles".
+# Profile lookup order: exact job key (for example "fighter") -> class key
+# (warrior/magician/bowman/thief/pirate/beginner) -> default.
+#
+# Per-level keys are optional. Missing keys simply do nothing for that level.
+# - apTargets: absolute stat goals for that level. AP is spent toward these in
+#   STR, DEX, INT, LUK order only.
+# - spTargets: skillId -> target level. SP is spent until each listed skill
+#   reaches its target (respecting normal skill caps/master level).
+# - equipItemIds: preferred equip item ids to attempt first (if present in bag
+#   and currently wearable).
+# - optimizeEquip: if true, run bot auto-equip optimizer after preferred equips.
+
+profiles:
+  warrior:
+    levels:
+      10:
+        apTargets:
+          STR: 35
+          DEX: 25
+          INT: 4
+          LUK: 4
+        spTargets:
+          1000001: 5
+          1000002: 3
+        equipItemIds: []
+        optimizeEquip: true
+
+  magician:
+    levels:
+      10:
+        apTargets:
+          STR: 4
+          DEX: 4
+          INT: 35
+          LUK: 25
+        spTargets: {}
+        equipItemIds: []
+        optimizeEquip: true
+
+  bowman:
+    levels:
+      10:
+        apTargets:
+          STR: 25
+          DEX: 35
+          INT: 4
+          LUK: 4
+        spTargets: {}
+        equipItemIds: []
+        optimizeEquip: true
+
+  thief:
+    levels:
+      10:
+        apTargets:
+          STR: 4
+          DEX: 25
+          INT: 4
+          LUK: 35
+        spTargets: {}
+        equipItemIds: []
+        optimizeEquip: true
+
+  pirate:
+    levels:
+      10:
+        apTargets:
+          STR: 35
+          DEX: 20
+          INT: 4
+          LUK: 4
+        spTargets: {}
+        equipItemIds: []
+        optimizeEquip: true
+
+  default:
+    levels: {}

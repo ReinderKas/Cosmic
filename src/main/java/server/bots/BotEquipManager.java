@@ -56,6 +56,10 @@ class BotEquipManager {
     /** Hard cap on Pareto-frontier size per DP step to bound worst-case runtime. */
     private static final int MAX_PARETO_STATES = 2000;
     private static final long AUTOEQUIP_THROTTLE_MS = 30_000L;
+    private static final int NEAR_FUTURE_LEVEL_WINDOW = 30;
+    private static final int NEAR_FUTURE_SINGLE_STAT_AP_WINDOW = 100;
+    private static final int NEAR_FUTURE_TOTAL_AP_WINDOW = 35;
+    private static final int NEAR_FUTURE_FAME_WINDOW = 10;
     private static final Map<Integer, Long> LAST_AUTOEQUIP_MS = new java.util.concurrent.ConcurrentHashMap<>();
 
     static final class EquipRecommendation {
@@ -84,6 +88,13 @@ class BotEquipManager {
 
     record EquipScore(int damage, int statSum) {}
     record WeaponScoreBreakdown(int rawMax, int preCycleDamage, int cycleMs, int normalizedDamage) {}
+
+
+    static void maximizeEquip(Character bot) {
+        BotEquipManager.autoEquip(bot, null, null, true);
+    }
+
+
 
     /**
      * Pareto-frontier DP across equipment slots. Outer loop iterates each viable weapon
@@ -197,6 +208,8 @@ class BotEquipManager {
         LAST_AUTOEQUIP_MS.put(botId, nowMs);
         return true;
     }
+
+
 
     /**
      * Builds the ordered DP slot list from the merged candidate + currently-equipped slot
