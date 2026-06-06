@@ -277,6 +277,9 @@ final class BotMaximizeProfileManager {
             if (targetSlot == 0 || !ii.canWearEquipment(bot, equip, targetSlot)) {
                 continue;
             }
+            if (!isPreferredEquipUpgrade(bot, equip, targetSlot)) {
+                continue;
+            }
             short from = equip.getPosition();
             if (from <= 0) {
                 continue;
@@ -285,6 +288,17 @@ final class BotMaximizeProfileManager {
             moved++;
         }
         return moved;
+    }
+
+    private static boolean isPreferredEquipUpgrade(Character bot, Equip equip, short targetSlot) {
+        List<BotEquipManager.EquipRecommendation> recs =
+                BotEquipManager.findRecommendedEquipsFromItems(bot, List.of(equip));
+        for (BotEquipManager.EquipRecommendation rec : recs) {
+            if (rec.targetSlot() == targetSlot && rec.candidate() == equip) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Equip findEquipInBagByItemId(Inventory eqpInv, int itemId) {

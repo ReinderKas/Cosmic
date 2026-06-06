@@ -51,7 +51,7 @@ profiles:
         spTargets: {}
         equipItemIds: [Blue Apprentice Hat]
         optimizeEquip: true
-      15:
+      16:
         apTargets:
           STR: 4
           DEX: 4
