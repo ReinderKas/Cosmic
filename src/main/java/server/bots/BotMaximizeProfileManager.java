@@ -39,7 +39,7 @@ import java.util.Map;
  */
 final class BotMaximizeProfileManager {
     private static final Logger log = LoggerFactory.getLogger(BotMaximizeProfileManager.class);
-    private static final Path PROFILE_PATH = Path.of("scripts/bot-maximize-profile.yaml");
+    private static final Path PROFILE_PATH = Path.of("bot-maximize-profile.yaml");
 
     private static final Object lock = new Object();
     private static volatile ProfileSnapshot snapshot = ProfileSnapshot.empty();
