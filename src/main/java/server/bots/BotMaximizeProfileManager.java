@@ -409,18 +409,14 @@ final class BotMaximizeProfileManager {
                     if (!(e.getValue() instanceof Map<?, ?> profileMapRaw)) {
                         continue;
                     }
-                    Map<Integer, LevelPlan> levels = parseLevelsMap(profileMapRaw);
+                    Object levelsObj = profileMapRaw.get("levels");
+                    if (!(levelsObj instanceof Map<?, ?> levelsMapRaw)) {
+                        continue;
+                    }
+                    Map<Integer, LevelPlan> levels = parseLevelsMap(levelsMapRaw);
                     if (!levels.isEmpty()) {
                         profiles.put(key, new JobProfile(levels));
                     }
-                }
-            }
-
-            // Backward compatibility: allow old top-level "levels" format as default profile.
-            if (profiles.isEmpty() && root.get("levels") instanceof Map<?, ?> levelsMap) {
-                Map<Integer, LevelPlan> levels = parseLevelsMap(levelsMap);
-                if (!levels.isEmpty()) {
-                    profiles.put("default", new JobProfile(levels));
                 }
             }
             return new ProfileSnapshot(profiles);
