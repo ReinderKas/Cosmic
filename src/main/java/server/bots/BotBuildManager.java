@@ -268,7 +268,7 @@ class BotBuildManager {
         entry.spVariant = null;
         entry.spVariantPromptSent = false;
 
-        BotMaximizeProfileManager.ApplyResult result = BotMaximizeProfileManager.applyForCurrentLevel(entry, bot, true);
+        BotMaximizeProfileManager.ApplyResult result = BotMaximizeProfileManager.applyForCurrentLevel(entry, bot, true, true);
         if (result.noPlanForLevel()) {
             return "maximize profile mode on, but no level plan for lv"
                     + result.level() + " in " + BotMaximizeProfileManager.profilePath();

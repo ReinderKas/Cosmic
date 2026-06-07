@@ -53,11 +53,19 @@ final class BotMaximizeProfileManager {
     }
 
     static ApplyResult applyForCurrentLevel(BotEntry entry, Character bot, boolean forceEquip) {
+        return applyForCurrentLevel(entry, bot, forceEquip, false);
+    }
+
+    static ApplyResult applyForCurrentLevel(BotEntry entry, Character bot, boolean forceEquip, boolean forceReload) {
         if (entry == null || bot == null || !entry.maximizeProfileEnabled) {
             return ApplyResult.disabled();
         }
 
-        reloadIfChanged();
+        if (forceReload) {
+            reloadNow();
+        } else {
+            reloadIfChanged();
+        }
         LevelPlan plan = snapshot.resolvePlan(bot.getJob(), bot.getLevel());
         if (plan == null) {
             return ApplyResult.noLevelPlan(bot.getLevel());
@@ -361,6 +369,25 @@ final class BotMaximizeProfileManager {
             }
         } catch (IOException e) {
             log.warn("failed to load maximize profile {}", PROFILE_PATH, e);
+        }
+    }
+
+    private static void reloadNow() {
+        try {
+            if (!Files.exists(PROFILE_PATH)) {
+                synchronized (lock) {
+                    snapshot = ProfileSnapshot.empty();
+                    lastLoadedMtime = null;
+                }
+                return;
+            }
+
+            synchronized (lock) {
+                snapshot = loadSnapshot(PROFILE_PATH);
+                lastLoadedMtime = Files.getLastModifiedTime(PROFILE_PATH);
+            }
+        } catch (IOException e) {
+            log.warn("failed to force-load maximize profile {}", PROFILE_PATH, e);
         }
     }
 
