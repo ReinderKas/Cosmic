@@ -15,6 +15,7 @@ import com.esotericsoftware.yamlbeans.YamlReader;
 import config.YamlConfig;
 import constants.game.GameConstants;
 import constants.inventory.EquipSlot;
+import constants.inventory.ItemConstants;
 import constants.string.CharsetConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -262,6 +263,10 @@ final class BotMaximizeProfileManager {
 
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
         Inventory eqpInv = bot.getInventory(InventoryType.EQUIP);
+        Inventory eqdInv = bot.getInventory(InventoryType.EQUIPPED);
+
+        grantMissingProfileEquips(bot, equipItemIds, eqpInv, eqdInv);
+
         int moved = 0;
 
         for (int itemId : equipItemIds) {
@@ -290,6 +295,19 @@ final class BotMaximizeProfileManager {
         return moved;
     }
 
+    private static void grantMissingProfileEquips(Character bot, List<Integer> equipItemIds,
+                                                  Inventory eqpInv, Inventory eqdInv) {
+        for (int itemId : equipItemIds) {
+            if (ItemConstants.getInventoryType(itemId) != InventoryType.EQUIP) {
+                continue;
+            }
+            if (hasEquipByItemId(eqpInv, itemId) || hasEquipByItemId(eqdInv, itemId)) {
+                continue;
+            }
+            InventoryManipulator.addById(bot.getClient(), itemId, (short) 1);
+        }
+    }
+
     private static boolean isPreferredEquipUpgrade(Character bot, Equip equip, short targetSlot) {
         List<BotEquipManager.EquipRecommendation> recs =
                 BotEquipManager.findRecommendedEquipsFromItems(bot, List.of(equip));
@@ -308,6 +326,15 @@ final class BotMaximizeProfileManager {
             }
         }
         return null;
+    }
+
+    private static boolean hasEquipByItemId(Inventory inv, int itemId) {
+        for (Item item : inv.list()) {
+            if (item instanceof Equip && item.getItemId() == itemId) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void reloadIfChanged() {

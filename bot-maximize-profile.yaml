@@ -40,7 +40,7 @@ profiles:
           INT: 20
           LUK: 0
         spTargets: {}
-        equipItemIds: [Beginner Magician's Staff]
+        equipItemIds: [1372043]
         optimizeEquip: true
       10:
         apTargets:
@@ -49,9 +49,27 @@ profiles:
           INT: 32
           LUK: 13
         spTargets: {}
-        equipItemIds: [Blue Apprentice Hat]
+        equipItemIds: [1002074]
         optimizeEquip: true
       16:
+        apTargets:
+          STR: 4
+          DEX: 4
+          INT: 48
+          LUK: 18
+        spTargets: {}
+        equipItemIds: [1382005, 1002102, 1050009, 1082019]
+        optimizeEquip: true
+      17:
+        apTargets:
+          STR: 4
+          DEX: 4
+          INT: 48
+          LUK: 18
+        spTargets: {}
+        equipItemIds: [1382005, 1002102, 1050009, 1082019]
+        optimizeEquip: true
+      18:
         apTargets:
           STR: 4
           DEX: 4
