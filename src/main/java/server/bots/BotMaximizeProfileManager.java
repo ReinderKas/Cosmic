@@ -544,10 +544,23 @@ final class BotMaximizeProfileManager {
                 if (job.isA(Job.BOWMAN)) order.add("bowman");
                 if (job.isA(Job.THIEF)) order.add("thief");
                 if (job.isA(Job.PIRATE)) order.add("pirate");
+                switch (job.getJobNiche()) {
+                    case 1 -> addIfMissing(order, "warrior");
+                    case 2 -> addIfMissing(order, "magician");
+                    case 3 -> addIfMissing(order, "bowman");
+                    case 4 -> addIfMissing(order, "thief");
+                    case 5 -> addIfMissing(order, "pirate");
+                }
                 if (job == Job.BEGINNER) order.add("beginner");
             }
             order.add("default");
             return order;
+        }
+
+        private static void addIfMissing(List<String> order, String key) {
+            if (!order.contains(key)) {
+                order.add(key);
+            }
         }
     }
 
