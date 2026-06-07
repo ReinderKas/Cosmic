@@ -49,7 +49,15 @@ final class BotMaximizeProfileManager {
     }
 
     static String profilePath() {
-        return PROFILE_PATH.toString();
+        return PROFILE_PATH.toAbsolutePath().normalize().toString();
+    }
+
+    static String debugLookup(Character bot) {
+        if (bot == null) {
+            return "debug: bot null";
+        }
+        reloadNow();
+        return snapshot.debugSummary(bot.getJob(), bot.getLevel());
     }
 
     static ApplyResult applyForCurrentLevel(BotEntry entry, Character bot, boolean forceEquip) {
@@ -516,6 +524,25 @@ final class BotMaximizeProfileManager {
     private record ProfileSnapshot(Map<String, JobProfile> profiles) {
         static ProfileSnapshot empty() {
             return new ProfileSnapshot(Map.of());
+        }
+
+        String debugSummary(Job job, int level) {
+            List<String> order = profileLookupOrder(job);
+            List<String> details = new ArrayList<>();
+            for (String key : order) {
+                JobProfile profile = profiles.get(key);
+                if (profile == null) {
+                    details.add(key + "=missing");
+                    continue;
+                }
+                details.add(key + "=" + profile.levels().keySet());
+            }
+            return "debug: job=" + (job != null ? job.name() : "null")
+                    + " lvl=" + level
+                    + " path=" + PROFILE_PATH.toAbsolutePath().normalize()
+                    + " exists=" + Files.exists(PROFILE_PATH)
+                    + " keys=" + profiles.keySet()
+                    + " tried=" + details;
         }
 
         LevelPlan resolvePlan(Job job, int level) {

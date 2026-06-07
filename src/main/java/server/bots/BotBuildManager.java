@@ -271,7 +271,8 @@ class BotBuildManager {
         BotMaximizeProfileManager.ApplyResult result = BotMaximizeProfileManager.applyForCurrentLevel(entry, bot, true, true);
         if (result.noPlanForLevel()) {
             return "maximize profile mode on, but no level plan for lv"
-                    + result.level() + " in " + BotMaximizeProfileManager.profilePath();
+                    + result.level() + " in " + BotMaximizeProfileManager.profilePath()
+                    + " | " + BotMaximizeProfileManager.debugLookup(bot);
         }
         if (!result.applied()) {
             return "maximize profile mode on, but no profile loaded ("
