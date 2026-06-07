@@ -86,7 +86,7 @@ class BotEquipManager {
         }
     }
 
-    record EquipScore(int damage, int statSum) {}
+    record EquipScore(int attack, int defense, int statSum) {}
     record WeaponScoreBreakdown(int rawMax, int preCycleDamage, int cycleMs, int normalizedDamage) {}
 
 
@@ -301,7 +301,8 @@ class BotEquipManager {
                 WeaponScoreBreakdown breakdown = weaponScoreBreakdown(branchSnap, b.weapon(), wt, mob);
                 String tag = i == 0 ? "*" : " ";
                 out.add(tag + " W=" + wName
-                        + " dmg=" + s.damage()
+                    + " atk=" + s.attack()
+                    + " def=" + s.defense()
                         + " rawMax=" + breakdown.rawMax()
                         + " preCycle=" + breakdown.preCycleDamage()
                         + " cycle=" + breakdown.cycleMs() + "ms"
@@ -437,7 +438,8 @@ class BotEquipManager {
             WeaponScoreBreakdown breakdown = weaponScoreBreakdown(branchSnap, b.w(), wt, mob);
             sb.append(i == 0 ? "[*] " : "[ ] ").append(wName)
               .append(" id=").append(b.w() == null ? 0 : b.w().getItemId())
-              .append(" dmg=").append(s.damage())
+                            .append(" atk=").append(s.attack())
+                            .append(" def=").append(s.defense())
               .append(" rawMax=").append(breakdown.rawMax())
               .append(" preCycle=").append(breakdown.preCycleDamage())
               .append(" cycle=").append(breakdown.cycleMs()).append("ms")
@@ -822,10 +824,11 @@ class BotEquipManager {
                     StatSnapshot ns = prev.snap.swap(null, cand);
                     int nHp = prev.hp + cand.getHp();
                     int nMp = prev.mp + cand.getMp();
+                    int nDef = prev.defense + defScore(cand);
                     int nStat = prev.statSum + usefulStatSum(cand, ns.job());
                     Equip[] picks = prev.picks.clone();
                     picks[i] = cand;
-                    next.add(new DpNode(ns, nHp, nMp, nStat, picks));
+                    next.add(new DpNode(ns, nHp, nMp, nDef, nStat, picks));
                 }
             }
             frontier = paretoPruneNodes(next, capHit, hooks, dpSlots, wt, reqRel);
@@ -871,7 +874,7 @@ class BotEquipManager {
                                                 List<Short> dpSlots, Map<Short, List<Equip>> bySlot,
                                                 int n) {
         StatSnapshot snap = init;
-        int hp = 0, mp = 0, statSum = 0;
+        int hp = 0, mp = 0, defense = 0, statSum = 0;
         Equip[] picks = new Equip[n];
         for (int i = 0; i < n; i++) {
             short slot = dpSlots.get(i);
@@ -885,10 +888,11 @@ class BotEquipManager {
             snap = snap.swap(null, cand);
             hp += cand.getHp();
             mp += cand.getMp();
+            defense += defScore(cand);
             statSum += usefulStatSum(cand, snap.job());
             picks[i] = cand;
         }
-        return new DpNode(snap, hp, mp, statSum, picks);
+        return new DpNode(snap, hp, mp, defense, statSum, picks);
     }
 
     private static boolean canPinSingletonSlot(short slot) {
@@ -900,10 +904,11 @@ class BotEquipManager {
 
     private static final class DpNode {
         final StatSnapshot snap;
-        final int hp, mp, statSum;
+        final int hp, mp, defense, statSum;
         final Equip[] picks;
-        DpNode(StatSnapshot snap, int hp, int mp, int statSum, Equip[] picks) {
+        DpNode(StatSnapshot snap, int hp, int mp, int defense, int statSum, Equip[] picks) {
             this.snap = snap; this.hp = hp; this.mp = mp;
+            this.defense = defense;
             this.statSum = statSum; this.picks = picks;
         }
     }
@@ -964,7 +969,8 @@ class BotEquipManager {
                     ? bestValidBySignature
                     : bestSpeculativeBySignature;
             DpNode existing = bucket.get(signature);
-            if (existing == null || node.statSum > existing.statSum) {
+            if (existing == null
+                    || compareScores(scoreNode(node, null, wt, null), scoreNode(existing, null, wt, null)) > 0) {
                 bucket.put(signature, node);
             }
         }
@@ -976,11 +982,12 @@ class BotEquipManager {
         return kept;
     }
 
-    private record DpSignature(int damage, int acc, int str, int dex, int int_, int luk) {
+    private record DpSignature(int attack, int defense, int acc, int str, int dex, int int_, int luk) {
         static DpSignature from(DpNode node, WeaponType wt, boolean[] reqRel) {
             StatSnapshot s = node.snap;
             return new DpSignature(
                     damagePotential(node, wt),
+                    node.defense,
                     isMageJob(s.job()) ? 0 : s.totalAcc(),
                     reqRel != null && reqRel[0] ? s.str() : 0,
                     reqRel != null && reqRel[1] ? s.dex() : 0,
@@ -995,9 +1002,10 @@ class BotEquipManager {
         StatSnapshot s = n.snap;
         int reqCount = 0;
         if (reqRel != null) for (boolean b : reqRel) if (b) reqCount++;
-        int[] vec = new int[2 + reqCount];
+        int[] vec = new int[3 + reqCount];
         int k = 0;
         vec[k++] = damagePotential(n, wt);
+        vec[k++] = n.defense;
         vec[k++] = isMageJob(s.job()) ? 0 : s.totalAcc();
         if (reqRel != null) {
             for (int i = 0; i < reqRel.length; i++) {
@@ -1064,7 +1072,7 @@ class BotEquipManager {
     private static DpNode relaxToFeasible(OptimizerHooks hooks, DpNode node,
                                            List<Short> dpSlots, Equip weapon) {
         StatSnapshot s = node.snap;
-        int hp = node.hp, mp = node.mp, statSum = node.statSum;
+        int hp = node.hp, mp = node.mp, defense = node.defense, statSum = node.statSum;
         Equip[] picks = node.picks.clone();
         boolean changed = true;
         while (changed) {
@@ -1081,6 +1089,7 @@ class BotEquipManager {
                     s = withoutSelf;
                     hp -= p.getHp();
                     mp -= p.getMp();
+                    defense -= defScore(p);
                     statSum -= usefulStatSum(p, s.job());
                     picks[i] = null;
                     changed = true;
@@ -1093,18 +1102,13 @@ class BotEquipManager {
                     withoutWeapon.str(), withoutWeapon.dex(), withoutWeapon.int_(),
                     withoutWeapon.luk(), withoutWeapon.fame())) return null;
         }
-        return new DpNode(s, hp, mp, statSum, picks);
+        return new DpNode(s, hp, mp, defense, statSum, picks);
     }
 
     private static EquipScore scoreNode(DpNode node, Equip weapon, WeaponType wt, MapDamageProfile mob) {
-        if (isMageJob(node.snap.job())) {
-            return new EquipScore(magicScore(node.snap), node.statSum);
-        }
-        if (wt == null) return new EquipScore(0, node.statSum);
-        int dmg = damageWith(node.snap, null, wt, mob);
-        int cycleMs = weapon != null ? weaponCycleMs(weapon.getItemId()) : 0;
-        if (cycleMs > 0) dmg = (int) (dmg * 1000.0 / cycleMs);
-        return new EquipScore(dmg, node.statSum);
+        int attack = isMageJob(node.snap.job()) ? magicScore(node.snap)
+                : (wt == null ? 0 : rawPhysicalMax(node.snap, wt));
+        return new EquipScore(attack, node.defense, node.statSum);
     }
 
     private static StatSnapshot snapshotForBranch(StatSnapshot naked, Equip weapon, Map<Short, Equip> picks) {
@@ -1819,7 +1823,9 @@ class BotEquipManager {
     }
 
     private static int compareScores(EquipScore left, EquipScore right) {
-        int cmp = Integer.compare(left.damage(), right.damage());
+        int cmp = Integer.compare(left.attack(), right.attack());
+        if (cmp != 0) return cmp;
+        cmp = Integer.compare(left.defense(), right.defense());
         if (cmp != 0) return cmp;
         return Integer.compare(left.statSum(), right.statSum());
     }
