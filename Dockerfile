@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.6
-
 # Initial Docker support thanks to xinyifly
 # Optimisation performed by wejrox
 
@@ -24,9 +22,7 @@ COPY pom.xml ./pom.xml
 # Source code changes may not change dependencies, so it can go last.
 # Skip compiling tests since we don't want all the dependecies to be downloaded for plugins.
 COPY src ./src
-RUN --mount=type=cache,target=/root/.m2 \
-	MAVEN_OPTS="-XX:TieredStopAtLevel=1" mvn -f ./pom.xml clean package -Dmaven.test.skip -T 1C
-
+RUN mvn -f ./pom.xml clean package -Dmaven.test.skip -T 1C
 #
 # Server creation stage
 #
@@ -48,6 +44,6 @@ COPY bot-configured-profile.yaml ./
 # This exposes the login server, and channels.
 # Format for channels: WWCC, where WW is 75 plus the world number and CC is 75 plus the channel number (both zero indexed).
 EXPOSE 8484 7575 7576 7577
-ENTRYPOINT ["java", "-XX:UseAVX=0", "-jar", "./Server.jar"]
+ENTRYPOINT ["java", "-jar", "./Server.jar"]
 
 
