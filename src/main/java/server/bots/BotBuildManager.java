@@ -53,7 +53,7 @@ class BotBuildManager {
      * or the bot is not on a supported branch.
      */
     static String buildApPrompt(BotEntry entry, Character bot) {
-        if (entry.maximizeProfileEnabled) return null;
+        if (entry.configuredProfileEnabled) return null;
         String prompt = apPromptForJob(bot.getJob());
         if (prompt == null) return null;
         if (entry.apBuild != null || entry.apPromptSent || bot.getRemainingAp() < 1) return null;
@@ -61,7 +61,7 @@ class BotBuildManager {
     }
 
     static String requestApBuildPrompt(BotEntry entry, Character bot) {
-        if (entry.maximizeProfileEnabled) return null;
+        if (entry.configuredProfileEnabled) return null;
         String prompt = apPromptForJob(bot.getJob());
         if (prompt == null) return null;
         entry.apPromptSent = true;
@@ -70,8 +70,8 @@ class BotBuildManager {
 
     /** Spends all remaining AP according to the stored build. */
     static void autoAssignAp(BotEntry entry, Character bot) {
-        if (entry.maximizeProfileEnabled) {
-            BotMaximizeProfileManager.applyForCurrentLevel(entry, bot, false);
+        if (entry.configuredProfileEnabled) {
+            BotConfiguredProfileManager.applyForCurrentLevel(entry, bot, false);
             return;
         }
         if (entry.apBuild == null || bot.getRemainingAp() < 1) return;
@@ -100,8 +100,8 @@ class BotBuildManager {
     }
 
     static String respecAp(BotEntry entry, Character bot) {
-        if (entry.maximizeProfileEnabled) {
-            return "maximize profile mode is on; turn it off to use ap respec";
+        if (entry.configuredProfileEnabled) {
+            return "configured profile mode is on; turn it off to use ap respec";
         }
         if (apPromptForJob(bot.getJob()) == null) {
             return "dont have an ap build for my job yet";
@@ -120,8 +120,8 @@ class BotBuildManager {
     }
 
     static void handleJobAdvance(BotEntry entry, Character bot, Job oldJob, Job newJob) {
-        if (entry.maximizeProfileEnabled) {
-            BotMaximizeProfileManager.applyForCurrentLevel(entry, bot, true);
+        if (entry.configuredProfileEnabled) {
+            BotConfiguredProfileManager.applyForCurrentLevel(entry, bot, true);
             return;
         }
         if (oldJob == Job.BEGINNER && oldJob != newJob && entry.apBuild != null) {
@@ -151,7 +151,7 @@ class BotBuildManager {
      * Currently only Hero has two documented builds.
      */
     static String buildSpVariantPrompt(BotEntry entry, Character bot) {
-        if (entry.maximizeProfileEnabled) return null;
+        if (entry.configuredProfileEnabled) return null;
         if (bot.getJob() != Job.HERO) return null;
         if (entry.spVariant != null || entry.spVariantPromptSent || bot.getRemainingSps()[3] < 1) return null;
         entry.spVariantPromptSent = true;
@@ -163,8 +163,8 @@ class BotBuildManager {
      * Hero SP is held until the owner chooses a variant.
      */
     static void autoAssignSp(BotEntry entry, Character bot) {
-        if (entry.maximizeProfileEnabled) {
-            BotMaximizeProfileManager.applyForCurrentLevel(entry, bot, false);
+        if (entry.configuredProfileEnabled) {
+            BotConfiguredProfileManager.applyForCurrentLevel(entry, bot, false);
             return;
         }
         if (bot.getJob() == Job.HERO && entry.spVariant == null) return;
@@ -176,8 +176,8 @@ class BotBuildManager {
     }
 
     static String respecSp(BotEntry entry, Character bot) {
-        if (entry.maximizeProfileEnabled) {
-            return "maximize profile mode is on; turn it off to use sp respec";
+        if (entry.configuredProfileEnabled) {
+            return "configured profile mode is on; turn it off to use sp respec";
         }
         if (bot.getJob() == Job.HERO && entry.spVariant == null) {
             return "need your hero build first. say '1h' or '2h'";
@@ -257,10 +257,10 @@ class BotBuildManager {
         return currentLevel < cap;
     }
 
-    static String setMaximizeProfileMode(BotEntry entry, Character bot, boolean enabled) {
-        entry.maximizeProfileEnabled = enabled;
+    static String setConfiguredProfileMode(BotEntry entry, Character bot, boolean enabled) {
+        entry.configuredProfileEnabled = enabled;
         if (!enabled) {
-            return "maximize profile mode off";
+            return "configured profile mode off";
         }
 
         entry.apBuild = null;
@@ -268,20 +268,17 @@ class BotBuildManager {
         entry.spVariant = null;
         entry.spVariantPromptSent = false;
 
-        BotMaximizeProfileManager.ApplyResult result = BotMaximizeProfileManager.applyForCurrentLevel(entry, bot, true, true);
+        BotConfiguredProfileManager.ApplyResult result = BotConfiguredProfileManager.applyForCurrentLevel(entry, bot, true, true);
         if (result.noPlanForLevel()) {
-            return "maximize profile mode on, but no level plan for lv"
-                    + result.level() + " in " + BotMaximizeProfileManager.profilePath()
-                    + " | " + BotMaximizeProfileManager.debugLookup(bot);
+            return "configured profile mode on, but no level plan for lv"
+                    + result.level() + " in " + BotConfiguredProfileManager.profilePath()
+                    + " | " + BotConfiguredProfileManager.debugLookup(bot);
         }
         if (!result.applied()) {
-            return "maximize profile mode on, but no profile loaded ("
-                    + BotMaximizeProfileManager.profilePath() + ")";
+            return "configured profile mode on, but no profile loaded ("
+                    + BotConfiguredProfileManager.profilePath() + ")";
         }
-        return "maximize profile mode on (ap " + result.apSpent()
-                + ", sp " + result.spSpent()
-                + ", equips " + result.forcedEquips()
-                + (result.optimized() ? ", optimized" : "") + ")";
+        return "configured profile mode on";
     }
 
     private static List<Job> getSupportedBuildPath(Job job) {
@@ -374,8 +371,8 @@ class BotBuildManager {
             BotChatManager.checkBotStatus(entry, bot);
         }
 
-        if (entry.maximizeProfileEnabled) {
-            BotMaximizeProfileManager.applyForCurrentLevel(entry, bot, true);
+        if (entry.configuredProfileEnabled) {
+            BotConfiguredProfileManager.applyForCurrentLevel(entry, bot, true);
             return;
         }
 

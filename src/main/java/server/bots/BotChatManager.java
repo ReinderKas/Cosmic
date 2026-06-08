@@ -162,12 +162,19 @@ public class BotChatManager {
             + "|^\\s*skills\\s*\\??\\s*$",
             Pattern.CASE_INSENSITIVE);
 
-    private static final Pattern MAXIMIZE_EQUIP_PATTERN = Pattern.compile(
-            // "maximize gear/equipment/equips/build/profile"
-            "\\bmaximi[sz]e\\s+(?:gear|equip(?:ment)?|equips?|build|profile)\\b",
+    private static final Pattern CONFIGURED_PROFILE_ON_PATTERN = Pattern.compile(
+            // "follow/use/apply configured(preconfigured) gear/equipment/build/profile"
+            "\\b(?:"
+            + "(?:follow|use|apply|enable|turn\\s+on|set)\\s+(?:my\\s+)?(?:pre\\s*configured|configured)\\s+(?:gear|equip(?:ment)?|equips?|build|profile)"
+            + "|(?:follow|use|apply|enable|turn\\s+on|set)\\s+(?:my\\s+)?(?:gear|equip(?:ment)?|equips?|build|profile)\\s+(?:profile|plan|preset)"
+            + ")\\b",
             Pattern.CASE_INSENSITIVE);
-        private static final Pattern MAXIMIZE_PROFILE_OFF_PATTERN = Pattern.compile(
-            "\\b(?:maximi[sz]e\\s+(?:build|profile)\\s+(?:off|disable)|disable\\s+maximi[sz]e\\s+(?:build|profile))\\b",
+    private static final Pattern CONFIGURED_PROFILE_OFF_PATTERN = Pattern.compile(
+            "\\b(?:"
+            + "(?:configured|pre\\s*configured)\\s+(?:build|profile)\\s+(?:off|disable)"
+            + "|disable\\s+(?:configured|pre\\s*configured)\\s+(?:build|profile)"
+            + "|(?:stop|dont|do\\s+not)\\s+(?:follow|use|apply)\\s+(?:my\\s+)?(?:configured|pre\\s*configured)\\s+(?:build|profile)"
+            + ")\\b",
             Pattern.CASE_INSENSITIVE);
 
     private static final Pattern INVENTORY_PATTERN = Pattern.compile(
@@ -903,15 +910,16 @@ public class BotChatManager {
         if (AUTOEQUIP_PATTERN.matcher(message).find()) {
             BotManager.after(BotManager.randMs(400, 600), () -> {
                 BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem, true);
-                BotManager.getInstance().botReply(entry, "ok, gear optimized");
+                BotManager.getInstance().botReply(entry, "ok, auto-equipped from my current setup");
+                BotManager.after(BotManager.randMs(250, 750), () -> BotManager.getInstance().issueFollowOwner(entry));
             });
             return;
         }
 
-        if (MAXIMIZE_PROFILE_OFF_PATTERN.matcher(message).find()) {
+        if (CONFIGURED_PROFILE_OFF_PATTERN.matcher(message).find()) {
             BotManager.after(BotManager.randMs(500, 700), () ->
                     BotManager.getInstance().botReply(entry,
-                            BotBuildManager.setMaximizeProfileMode(entry, entry.bot, false)));
+                            BotBuildManager.setConfiguredProfileMode(entry, entry.bot, false)));
             return;
         }
 
@@ -998,8 +1006,8 @@ public class BotChatManager {
         // AP build selection — "change build" always triggers a re-prompt;
         // "dexless" / "X dex" only apply when bot is actively waiting for the answer (apPromptSent=true)
         if (AP_CHANGE_BUILD_PATTERN.matcher(message).find()) {
-            if (entry.maximizeProfileEnabled) {
-                BotManager.getInstance().botReply(entry, "maximize profile mode is on; disable it first");
+            if (entry.configuredProfileEnabled) {
+                BotManager.getInstance().botReply(entry, "configured profile mode is on; disable it first");
                 return;
             }
             entry.apBuild      = null;
@@ -1112,13 +1120,14 @@ public class BotChatManager {
             }
         }
 
-        if(matchesWholeCommand(MAXIMIZE_EQUIP_PATTERN, message)) {
+        if (matchesWholeCommand(CONFIGURED_PROFILE_ON_PATTERN, message)) {
             BotManager.after(BotManager.randMs(500, 700), () -> {
                 BotManager.getInstance().issueStop(entry);
-            String status = BotBuildManager.setMaximizeProfileMode(entry, entry.bot, true);
-            BotManager.getInstance().botReply(entry, status);
+                String status = BotBuildManager.setConfiguredProfileMode(entry, entry.bot, true);
+                BotManager.getInstance().botReply(entry, status);
                 BotManager.after(BotManager.randMs(1400, 1600), () ->
-                        BotManager.getInstance().botReply(entry, "ok, gear optimized"));
+                        BotManager.getInstance().botReply(entry, "ok, following configured build + gear profile"));
+                BotManager.after(BotManager.randMs(250, 750), () -> BotManager.getInstance().issueFollowOwner(entry));
             });
             return;
         }
@@ -1244,8 +1253,8 @@ public class BotChatManager {
     static void checkBotStatus(BotEntry entry, Character bot) {
         String jobPrompt = BotBuildManager.buildJobPrompt(entry, bot);
         if (jobPrompt != null) queueBotReply(entry, jobPrompt);
-        if (entry.maximizeProfileEnabled) {
-            BotMaximizeProfileManager.applyForCurrentLevel(entry, bot, false);
+        if (entry.configuredProfileEnabled) {
+            BotConfiguredProfileManager.applyForCurrentLevel(entry, bot, false);
         } else {
             String spPrompt = BotBuildManager.buildSpVariantPrompt(entry, bot);
             if (spPrompt != null) {
@@ -1392,8 +1401,8 @@ public class BotChatManager {
     }
 
     private static void reportBuild(BotEntry entry, Character bot) {
-        String mode = entry.maximizeProfileEnabled
-            ? "maximize profile on (" + BotMaximizeProfileManager.profilePath() + ")"
+        String mode = entry.configuredProfileEnabled
+            ? "configured profile on (" + BotConfiguredProfileManager.profilePath() + ")"
             : "bot build mode";
         queueBotReply(entry, String.format("build: str %d / dex %d / int %d / luk %d, %d ap left | %s",
             bot.getStr(), bot.getDex(), bot.getInt(), bot.getLuk(),
@@ -1640,7 +1649,7 @@ public class BotChatManager {
 
     private static void reportHelp(BotEntry entry) {
         queueBotReply(entry, "commands: follow, stop, move here, fidget, grind, stats, speed, skills, inventory, mesos, exp, slots, scrolls, pots, debug stats, crit, respec, respec ap");
-        queueBotReply(entry, "maximize profile: 'maximize build' to enable, 'maximize profile off' to disable");
+        queueBotReply(entry, "configured profile: 'follow configured build' to enable, 'configured profile off' to disable");
         queueBotReply(entry, "support: skill buffs on/off (= support on/off), heals on/off, buff on/off, buff cheap/max, proactive offers on/off, buff debug, skill buff debug");
         queueBotReply(entry, "gear: ask 'any upgrades?' or say 'trade recommended gear'");
         queueBotReply(entry, "supplies: need hp pot, need mp pot, need pot, need ammo");

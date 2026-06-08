@@ -90,7 +90,7 @@ class BotEquipManager {
     record WeaponScoreBreakdown(int rawMax, int preCycleDamage, int cycleMs, int normalizedDamage) {}
 
 
-    static void maximizeEquip(Character bot) {
+    static void applyConfiguredEquipPlan(Character bot) {
         BotEquipManager.autoEquip(bot, null, null, true);
     }
 

@@ -15,7 +15,7 @@ services:
       # Config changes can be reloaded without rebuilding the image.
       # Still requires a redeployment as they're sourced on startup.
       - ./config.yaml:/opt/server/config.yaml
-      - ./bot-maximize-profile.yaml:/opt/server/bot-maximize-profile.yaml
+      - ./bot-configured-profile.yaml:/opt/server/bot-configured-profile.yaml
       - ./scripts:/opt/server/scripts
       - ./wz:/opt/server/wz
     environment:
