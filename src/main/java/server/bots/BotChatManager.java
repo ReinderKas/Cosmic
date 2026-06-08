@@ -910,8 +910,7 @@ public class BotChatManager {
         if (AUTOEQUIP_PATTERN.matcher(message).find()) {
             BotManager.after(BotManager.randMs(400, 600), () -> {
                 BotEquipManager.autoEquip(entry.bot, entry.owner, entry.pendingLootOfferItem, true);
-                BotManager.getInstance().botReply(entry, "ok, auto-equipped from my current setup");
-                BotManager.after(BotManager.randMs(250, 750), () -> BotManager.getInstance().issueFollowOwner(entry));
+                BotManager.getInstance().botReply(entry, "ok, gear optimized");
             });
             return;
         }
