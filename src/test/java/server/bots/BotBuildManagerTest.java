@@ -19,7 +19,9 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyByte;
@@ -422,6 +424,70 @@ class BotBuildManagerTest {
         assertEquals(4, intStat.get());
         assertEquals(131, luk.get());
         assertEquals(0, remainingAp.get());
+    }
+
+    @Test
+    void setConfiguredProfileModeEnablesFlagResetsManualBuildStateAndAppliesProfile() {
+        Character bot = mock(Character.class);
+        BotEntry entry = new BotEntry(bot, mock(Character.class), mock(ScheduledFuture.class));
+        entry.apBuild = new BotBuildManager.ApBuild(BotBuildManager.StatType.INT, BotBuildManager.StatType.LUK, 25);
+        entry.apPromptSent = true;
+        entry.spVariant = "2h";
+        entry.spVariantPromptSent = true;
+
+        try (MockedStatic<BotConfiguredProfileManager> profileManager = mockStatic(BotConfiguredProfileManager.class)) {
+            profileManager.when(() -> BotConfiguredProfileManager.applyForCurrentLevel(entry, bot, true, true))
+                    .thenReturn(new BotConfiguredProfileManager.ApplyResult(true, 30, 0, 0, 0, false, false));
+
+            String status = BotBuildManager.setConfiguredProfileMode(entry, bot, true);
+
+            assertEquals("configured profile mode on", status);
+            assertTrue(entry.configuredProfileEnabled);
+            assertNull(entry.apBuild);
+            assertFalse(entry.apPromptSent);
+            assertNull(entry.spVariant);
+            assertFalse(entry.spVariantPromptSent);
+            profileManager.verify(() -> BotConfiguredProfileManager.applyForCurrentLevel(entry, bot, true, true));
+        }
+    }
+
+    @Test
+    void setConfiguredProfileModeOffClearsFlagWithoutApplyingProfile() {
+        Character bot = mock(Character.class);
+        BotEntry entry = new BotEntry(bot, mock(Character.class), mock(ScheduledFuture.class));
+        entry.configuredProfileEnabled = true;
+
+        try (MockedStatic<BotConfiguredProfileManager> profileManager = mockStatic(BotConfiguredProfileManager.class)) {
+            String status = BotBuildManager.setConfiguredProfileMode(entry, bot, false);
+
+            assertEquals("configured profile mode off", status);
+            assertFalse(entry.configuredProfileEnabled);
+            profileManager.verifyNoInteractions();
+        }
+    }
+
+    @Test
+    void configuredProfileModeRoutesApAndSpAssignmentThroughProfileManager() {
+        Character bot = mock(Character.class);
+        BotEntry entry = new BotEntry(bot, mock(Character.class), mock(ScheduledFuture.class));
+        entry.configuredProfileEnabled = true;
+
+        try (MockedStatic<BotConfiguredProfileManager> profileManager = mockStatic(BotConfiguredProfileManager.class)) {
+            BotBuildManager.autoAssignAp(entry, bot);
+            BotBuildManager.autoAssignSp(entry, bot);
+
+            profileManager.verify(() -> BotConfiguredProfileManager.applyForCurrentLevel(entry, bot, false), times(2));
+        }
+    }
+
+    @Test
+    void respecCommandsAreBlockedWhileConfiguredProfileModeIsEnabled() {
+        Character bot = mock(Character.class);
+        BotEntry entry = new BotEntry(bot, mock(Character.class), mock(ScheduledFuture.class));
+        entry.configuredProfileEnabled = true;
+
+        assertEquals("configured profile mode is on; turn it off to use ap respec", BotBuildManager.respecAp(entry, bot));
+        assertEquals("configured profile mode is on; turn it off to use sp respec", BotBuildManager.respecSp(entry, bot));
     }
 
     private static void stubSkillState(Character bot, int[] remainingSps, Map<Integer, Integer> skillLevels) {

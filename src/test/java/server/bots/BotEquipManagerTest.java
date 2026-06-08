@@ -962,14 +962,14 @@ class BotEquipManagerTest {
                     bot, f.hooks(), naked, weapon, dpSlots, currentBySlot, bySlot, mob);
             if (result == null) continue;
             anyCap |= result.paretoCapHit();
-            if (best == null || result.score().damage() > best.score().damage()) {
+                        if (best == null || result.score().attack() > best.score().attack()) {
                 best = result;
             }
         }
         long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
         System.out.println("clawer full equip optimizer benchmark: " + elapsedMs
                 + " ms, capHit=" + anyCap
-                + ", bestDamage=" + (best != null ? best.score().damage() : -1));
+                                + ", bestDamage=" + (best != null ? best.score().attack() : -1));
 
         assertFalse(anyCap, "full Clawer log should optimize without hitting the Pareto cap");
     }

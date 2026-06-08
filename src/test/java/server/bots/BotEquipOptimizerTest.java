@@ -87,7 +87,7 @@ class BotEquipOptimizerTest {
             assertEquals((short) 0, pick.getWatk(),
                     "slot " + slot + " under W1 must NOT pick the WATK trap");
         }
-        assertTrue(resultW1.score().damage() > 0, "W1 chain score should be positive");
+        assertTrue(resultW1.score().attack() > 0, "W1 chain score should be positive");
     }
 
     @Test
@@ -129,9 +129,9 @@ class BotEquipOptimizerTest {
 
         assertNotNull(resultW0);
         assertNotNull(resultW1);
-        assertTrue(resultW1.score().damage() > resultW0.score().damage(),
-                "W1+chain damage must beat W0 best — got W1=" + resultW1.score().damage()
-                        + " W0=" + resultW0.score().damage());
+        assertTrue(resultW1.score().attack() > resultW0.score().attack(),
+            "W1+chain damage must beat W0 best — got W1=" + resultW1.score().attack()
+                + " W0=" + resultW0.score().attack());
     }
 
     @Test
